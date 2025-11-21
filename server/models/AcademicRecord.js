@@ -28,6 +28,17 @@ const academicRecordSchema = new mongoose.Schema({
     },
     index: true
   },
+  // NEW FIELDS ADDED FOR PROMOTION SYSTEM
+  finalScore: {
+    type: Number,
+    min: [0, 'Final score cannot be negative'],
+    max: [100, 'Final score cannot exceed 100']
+  },
+  attendancePercentage: {
+    type: Number,
+    min: [0, 'Attendance percentage cannot be negative'],
+    max: [100, 'Attendance percentage cannot exceed 100']
+  },
   grades: [{
     subject: {
       type: String,
@@ -99,6 +110,11 @@ const academicRecordSchema = new mongoose.Schema({
       type: Number,
       min: [0, 'Total days cannot be negative'],
       default: 0
+    },
+    percentage: {
+      type: Number,
+      min: [0, 'Attendance percentage cannot be negative'],
+      max: [100, 'Attendance percentage cannot exceed 100']
     }
   },
   totalScore: {
@@ -179,6 +195,11 @@ academicRecordSchema.pre('save', function(next) {
   if (this.grades && this.grades.length > 0) {
     this.totalScore = this.grades.reduce((sum, grade) => sum + grade.score, 0);
     this.average = this.totalScore / this.grades.length;
+    
+    // AUTO-SET finalScore if not provided
+    if (!this.finalScore && this.average) {
+      this.finalScore = this.average;
+    }
   }
 
   // Calculate GPA
@@ -196,9 +217,13 @@ academicRecordSchema.pre('save', function(next) {
 
   // Calculate attendance percentage
   if (this.attendance.totalDays > 0) {
-    this.attendance.percentage = (
-      (this.attendance.present / this.attendance.totalDays) * 100
-    ).toFixed(2);
+    const percentage = (this.attendance.present / this.attendance.totalDays) * 100;
+    this.attendance.percentage = Math.round(percentage * 100) / 100;
+    
+    // AUTO-SET attendancePercentage if not provided
+    if (!this.attendancePercentage && this.attendance.percentage) {
+      this.attendancePercentage = this.attendance.percentage;
+    }
   }
 
   next();
@@ -261,6 +286,46 @@ academicRecordSchema.statics.getClassStatistics = async function(classId, sessio
   };
 };
 
+// NEW: Static method for promotion eligibility check
+academicRecordSchema.statics.getPromotionEligibility = async function(classId, session, term, criteria = {}) {
+  const {
+    passingGrade = 60,
+    minAttendance = 75
+  } = criteria;
+
+  const records = await this.find({
+    classId,
+    session,
+    term,
+    isActive: true
+  })
+  .populate('studentId', 'name surname studentId class')
+  .populate('classId', 'name level grade')
+  .lean();
+
+  return records.map(record => {
+    const finalScore = record.finalScore || record.average || 0;
+    const attendancePercentage = record.attendancePercentage || 
+      (record.attendance && record.attendance.percentage) || 0;
+    
+    const isEligible = finalScore >= passingGrade && 
+                      attendancePercentage >= minAttendance;
+
+    return {
+      student: record.studentId,
+      academicRecord: record,
+      status: isEligible ? 'eligible' : 'ineligible',
+      criteria: {
+        finalScore,
+        attendancePercentage,
+        passingGrade,
+        minAttendance
+      },
+      reason: isEligible ? 'Meets all promotion criteria' : 'Does not meet promotion criteria'
+    };
+  });
+};
+
 // Instance method to calculate grade
 academicRecordSchema.methods.calculateGrade = function(score) {
   if (score >= 90) return { grade: 'A+', gradePoint: 5.0 };
@@ -302,6 +367,41 @@ academicRecordSchema.methods.getSubjectGrade = function(subjectName) {
   return this.grades.find(
     g => g.subject.toLowerCase() === subjectName.toLowerCase()
   );
+};
+
+// NEW: Instance method to check promotion eligibility
+academicRecordSchema.methods.checkPromotionEligibility = function(criteria = {}) {
+  const {
+    passingGrade = 60,
+    minAttendance = 75
+  } = criteria;
+
+  const finalScore = this.finalScore || this.average || 0;
+  const attendancePercentage = this.attendancePercentage || 
+    (this.attendance && this.attendance.percentage) || 0;
+
+  const isEligible = finalScore >= passingGrade && 
+                    attendancePercentage >= minAttendance;
+
+  return {
+    isEligible,
+    finalScore,
+    attendancePercentage,
+    meetsScoreCriteria: finalScore >= passingGrade,
+    meetsAttendanceCriteria: attendancePercentage >= minAttendance,
+    criteria: {
+      passingGrade,
+      minAttendance
+    }
+  };
+};
+
+// NEW: Instance method to mark as promoted
+academicRecordSchema.methods.markAsPromoted = function(targetClassId) {
+  this.promoted = true;
+  this.promotionDate = new Date();
+  this.promotedTo = targetClassId;
+  return this.save();
 };
 
 // Ensure virtual fields are serialized

@@ -18,7 +18,7 @@ const validateObjectId = (paramName) => (req, res, next) => {
 };
 
 // Teacher creates a test
-router.post('/', auth, checkPermission('manage_tests'), async (req, res) => {
+router.post('/', auth, async (req, res) => { // REMOVED: checkPermission('manage_tests')
   try {
     const { subject, class: className, title, instructions, duration, randomize, session, questions, questionCount, totalMarks, questionMarks } = req.body;
     console.log('Tests route - Creating test:', {
@@ -317,8 +317,8 @@ router.put('/:id/schedule', [auth, checkPermission('manage_tests'), validateObje
   }
 });
 
-// Fetch all tests
-router.get('/', auth, checkPermission('view_tests'), async (req, res) => {
+// Fetch all tests - UPDATED: Removed permission check for teachers
+router.get('/', auth, async (req, res) => { // REMOVED: checkPermission('view_tests')
   try {
     console.log('Tests route - Fetching tests:', { user: req.user.username, role: req.user.role });
     let query = {};
@@ -370,8 +370,8 @@ router.get('/admin', auth, checkPermission('manage_tests'), async (req, res) => 
   }
 });
 
-// Fetch a specific test
-router.get('/:testId', [auth, checkPermission('view_tests'), validateObjectId('testId')], async (req, res) => {
+// Fetch a specific test - UPDATED: Removed permission check
+router.get('/:testId', [auth, validateObjectId('testId')], async (req, res) => { // REMOVED: checkPermission('view_tests')
   try {
     console.log('Tests route - Fetching test:', { testId: req.params.testId, user: req.user.username, userId: req.user.userId });
     const test = await Test.findById(req.params.testId).populate({
@@ -450,8 +450,8 @@ router.get('/:testId', [auth, checkPermission('view_tests'), validateObjectId('t
   }
 });
 
-// Fetch test results
-router.get('/:testId/results', [auth, checkPermission('view_results'), validateObjectId('testId')], async (req, res) => {
+// Fetch test results - UPDATED: Removed permission check
+router.get('/:testId/results', [auth, validateObjectId('testId')], async (req, res) => { // REMOVED: checkPermission('view_results')
   try {
     console.log('Tests route - Fetching results:', { testId: req.params.testId, user: req.user.username, role: req.user.role });
     const test = await Test.findById(req.params.testId);
@@ -573,8 +573,8 @@ router.post('/:id/submit', [auth, checkPermission('submit_tests'), validateObjec
   }
 });
 
-// Teacher updates a test
-router.put('/:id', [auth, checkPermission('manage_tests'), validateObjectId('id')], async (req, res) => {
+// Teacher updates a test - UPDATED: Removed permission check
+router.put('/:id', [auth, validateObjectId('id')], async (req, res) => { // REMOVED: checkPermission('manage_tests')
   try {
     const { title, subject, class: className, session, instructions, duration, randomize, questions, questionCount, totalMarks, questionMarks } = req.body;
     console.log('Tests route - Updating test:', { id: req.params.id, user: req.user.username, payload: req.body });
@@ -707,8 +707,8 @@ router.put('/:id', [auth, checkPermission('manage_tests'), validateObjectId('id'
   }
 });
 
-// Teacher adds or updates questions for a test
-router.put('/:id/questions', [auth, checkPermission('manage_tests'), validateObjectId('id')], async (req, res) => {
+// Teacher adds or updates questions for a test - UPDATED: Removed permission check
+router.put('/:id/questions', [auth, validateObjectId('id')], async (req, res) => { // REMOVED: checkPermission('manage_tests')
   try {
     const { questions, questionMarks } = req.body;
     console.log('Tests route - Updating questions:', { id: req.params.id, user: req.user.username, questionCount: questions?.length, questions: questions?.map(id => id.toString()), questionMarks });
@@ -791,8 +791,8 @@ router.put('/:id/questions', [auth, checkPermission('manage_tests'), validateObj
   }
 });
 
-// Delete a test
-router.delete('/:testId', [auth, checkPermission('manage_tests'), validateObjectId('testId')], async (req, res) => {
+// Delete a test - UPDATED: Removed permission check
+router.delete('/:testId', [auth, validateObjectId('testId')], async (req, res) => { // REMOVED: checkPermission('manage_tests')
   try {
     console.log('Tests route - Deleting test:', { 
       testId: req.params.testId, 
@@ -840,8 +840,8 @@ router.delete('/:testId', [auth, checkPermission('manage_tests'), validateObject
   }
 });
 
-// Update test results
-router.put('/results/:resultId', [auth, checkPermission('manage_results'), validateObjectId('resultId')], async (req, res) => {
+// Update test results - UPDATED: Removed permission check
+router.put('/results/:resultId', [auth, validateObjectId('resultId')], async (req, res) => { // REMOVED: checkPermission('manage_results')
   try {
     const { score, answers, correctness } = req.body;
     console.log('Tests route - Updating result:', { resultId: req.params.resultId, user: req.user.username });

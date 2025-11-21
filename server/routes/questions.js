@@ -1,373 +1,519 @@
 const express = require('express');
 const router = express.Router();
-const Question = require('../models/Question');
-const Test = require('../models/Test');
-const { auth, teacherOnly } = require('../middleware/auth');
-const { checkPermission } = require('../middleware/permissions'); // NEW: Import permissions
 const mongoose = require('mongoose');
+const Question = require('../models/Question');
+const { auth } = require('../middleware/auth');
+const { checkPermission } = require('../middleware/permissions');
 
-// Get all questions - UPDATED WITH PERMISSION CHECK
-router.get('/', auth, checkPermission('view_questions'), async (req, res) => {
+// Middleware to validate MongoDB ObjectId
+const validateObjectId = (paramName) => (req, res, next) => {
+  if (!mongoose.isValidObjectId(req.params[paramName])) {
+    return res.status(400).json({ error: `Invalid ${paramName} format.` });
+  }
+  next();
+};
+
+// Create a new question - TEACHERS ONLY SEE THEIR OWN QUESTIONS
+router.post('/', auth, async (req, res) => {
   try {
-    const { subject, class: className, tags } = req.query;
-    const teacherAssignmentFilter = {
-      $or: req.user.subjects.map(sub => ({ subject: sub.subject, class: sub.class })),
-    };
-    const optionalFilters = {};
-    if (subject) optionalFilters.subject = subject;
-    if (className) optionalFilters.class = className;
-    if (tags) optionalFilters.tags = { $in: tags.split(',').map(tag => tag.trim()) };
-    const finalQuery = { ...teacherAssignmentFilter, ...optionalFilters };
-    const questions = await Question.find(finalQuery).select('-correctAnswer');
-    console.log('Questions route - Success:', { count: questions.length, user: req.user.username });
-    res.json(questions);
-  } catch (error) {
-    console.error('GET /api/questions - Error:', {
-      message: error.message,
-      stack: error.stack,
+    const { text, options, correctAnswer, subject, class: className, marks = 1, explanation } = req.body;
+    
+    console.log('Questions route - Creating question:', {
+      subject,
+      class: className,
       user: req.user.username,
-      timestamp: new Date().toISOString(),
+      role: req.user.role
     });
-    res.status(500).json({ error: 'Failed to fetch questions' });
+
+    // Validate required fields
+    const missingFields = [];
+    if (!text || typeof text !== 'string' || text.trim() === '') missingFields.push('text');
+    if (!options || !Array.isArray(options) || options.length === 0) missingFields.push('options');
+    if (!correctAnswer || typeof correctAnswer !== 'string' || correctAnswer.trim() === '') missingFields.push('correctAnswer');
+    if (!subject || typeof subject !== 'string' || subject.trim() === '') missingFields.push('subject');
+    if (!className || typeof className !== 'string' || className.trim() === '') missingFields.push('class');
+    
+    if (missingFields.length > 0) {
+      return res.status(400).json({ error: `Missing or invalid fields: ${missingFields.join(', ')}` });
+    }
+
+    // Validate options array
+    if (!options.every(opt => typeof opt === 'string' && opt.trim())) {
+      return res.status(400).json({ error: 'All options must be non-empty strings.' });
+    }
+
+    // Validate correct answer exists in options
+    if (!options.includes(correctAnswer)) {
+      return res.status(400).json({ error: 'Correct answer must be one of the provided options.' });
+    }
+
+    // Authorization check for teachers
+    if (req.user.role === 'teacher') {
+      if (!Array.isArray(req.user.subjects) || !req.user.subjects.some(sub => 
+        sub.subject === subject && sub.class === className)) {
+        return res.status(403).json({ error: 'You are not assigned to this subject/class.' });
+      }
+    }
+
+    const question = new Question({
+      text: text.trim(),
+      options: options.map(opt => opt.trim()),
+      correctAnswer: correctAnswer.trim(),
+      subject,
+      class: className,
+      marks: Number(marks) || 1,
+      explanation: explanation?.trim() || '',
+      createdBy: req.user.id,
+      isActive: true
+    });
+
+    await question.save();
+    
+    console.log('Questions route - Question created:', {
+      questionId: question._id,
+      subject,
+      class: className,
+      createdBy: req.user.username
+    });
+
+    res.status(201).json({
+      message: 'Question created successfully',
+      question: {
+        id: question._id,
+        text: question.text,
+        options: question.options,
+        correctAnswer: question.correctAnswer,
+        subject: question.subject,
+        class: question.class,
+        marks: question.marks,
+        explanation: question.explanation,
+        createdBy: req.user.username
+      }
+    });
+  } catch (error) {
+    console.error('Questions route - Create Error:', {
+      error: error.message,
+      user: req.user.username
+    });
+    
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ error: `Validation failed: ${errors.join(', ')}` });
+    }
+    
+    res.status(500).json({ error: 'Server error creating question' });
   }
 });
 
-// Get single question - UPDATED WITH PERMISSION CHECK
-router.get('/:id', auth, checkPermission('view_questions'), async (req, res) => {
+// Get all questions - TEACHERS ONLY SEE THEIR OWN QUESTIONS
+router.get('/', auth, async (req, res) => {
   try {
-    console.log('GET /api/questions/:id - Request:', { id: req.params.id, url: req.url });
-    if (!mongoose.isValidObjectId(req.params.id)) {
-      console.log('Questions route - Invalid ID:', { id: req.params.id });
-      return res.status(400).json({ error: 'Invalid question ID format' });
+    const { subject, class: className, page = 1, limit = 10 } = req.query;
+    
+    console.log('Questions route - Fetching questions:', {
+      user: req.user.username,
+      role: req.user.role,
+      subject,
+      class: className
+    });
+
+    let query = { isActive: true };
+    let population = '';
+
+    // Role-based filtering
+    if (req.user.role === 'teacher') {
+      // Teachers can only see their own questions
+      query.createdBy = req.user.id;
+      
+      // Filter by assigned subjects if specified
+      if (subject && className) {
+        if (!req.user.subjects?.some(sub => sub.subject === subject && sub.class === className)) {
+          return res.status(403).json({ error: 'Not assigned to this subject/class' });
+        }
+        query.subject = subject;
+        query.class = className;
+      } else {
+        // If no specific subject/class, show all questions from teacher's assigned subjects
+        const teacherSubjects = req.user.subjects || [];
+        if (teacherSubjects.length > 0) {
+          query.$or = teacherSubjects.map(sub => ({
+            subject: sub.subject,
+            class: sub.class
+          }));
+        } else {
+          return res.status(403).json({ error: 'No subjects assigned to teacher' });
+        }
+      }
+    } else if (req.user.role === 'admin' || req.user.role === 'super_admin') {
+      // Admins can see all questions and filter if needed
+      if (subject) query.subject = subject;
+      if (className) query.class = className;
+      population = 'createdBy'; // Populate creator info for admins
+    } else {
+      return res.status(403).json({ error: 'Access denied' });
     }
-    const question = await Question.findById(req.params.id).select('-correctAnswer');
+
+    const skip = (page - 1) * limit;
+    
+    let questionsQuery = Question.find(query);
+    
+    if (population) {
+      questionsQuery = questionsQuery.populate(population, 'username name');
+    }
+    
+    const [questions, total] = await Promise.all([
+      questionsQuery
+        .sort({ createdAt: -1 })
+        .skip(parseInt(skip))
+        .limit(parseInt(limit))
+        .lean(),
+      Question.countDocuments(query)
+    ]);
+
+    const totalPages = Math.ceil(total / limit);
+
+    console.log('Questions route - Questions fetched:', {
+      count: questions.length,
+      user: req.user.username,
+      role: req.user.role
+    });
+
+    res.json({
+      questions,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages,
+        totalQuestions: total,
+        hasNext: page < totalPages,
+        hasPrev: page > 1
+      }
+    });
+  } catch (error) {
+    console.error('Questions route - Fetch Error:', {
+      error: error.message,
+      user: req.user.username
+    });
+    res.status(500).json({ error: 'Server error fetching questions' });
+  }
+});
+
+// Get specific question - TEACHERS ONLY SEE THEIR OWN QUESTIONS
+router.get('/:questionId', [auth, validateObjectId('questionId')], async (req, res) => {
+  const { questionId } = req.params;
+  
+  try {
+    console.log('Questions route - Fetching question:', {
+      questionId,
+      user: req.user.username,
+      role: req.user.role
+    });
+
+    let query = { _id: questionId, isActive: true };
+    let population = '';
+
+    // Role-based access control
+    if (req.user.role === 'teacher') {
+      query.createdBy = req.user.id; // Teachers can only see their own questions
+    } else if (req.user.role === 'admin' || req.user.role === 'super_admin') {
+      population = 'createdBy'; // Admins can see all questions with creator info
+    } else {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    let questionQuery = Question.findOne(query);
+    
+    if (population) {
+      questionQuery = questionQuery.populate(population, 'username name');
+    }
+
+    const question = await questionQuery;
+
     if (!question) {
-      console.log('Questions route - Question not found:', { id: req.params.id });
-      return res.status(404).json({ error: 'Question not found' });
+      return res.status(404).json({ error: 'Question not found or access denied' });
     }
-    if (!req.user.subjects.some(sub => sub.subject === question.subject && sub.class === question.class)) {
-      console.log('Questions route - Not assigned:', { user: req.user.username, subject: question.subject, class: question.class });
-      return res.status(403).json({ error: 'Not assigned to this subject/class' });
+
+    // Additional authorization check for teachers
+    if (req.user.role === 'teacher') {
+      const hasAccess = req.user.subjects?.some(sub => 
+        sub.subject === question.subject && sub.class === question.class
+      );
+      if (!hasAccess) {
+        return res.status(403).json({ error: 'Not assigned to this question\'s subject/class' });
+      }
     }
+
+    console.log('Questions route - Question fetched:', {
+      questionId,
+      user: req.user.username
+    });
+
     res.json(question);
   } catch (error) {
-    console.error('GET /api/questions/:id - Error:', {
-      message: error.message,
-      stack: error.stack,
-      user: req.user.username,
-      id: req.params.id,
-      timestamp: new Date().toISOString(),
+    console.error('Questions route - Fetch Single Error:', {
+      error: error.message,
+      questionId,
+      user: req.user.username
     });
-    res.status(400).json({ error: 'Invalid question ID or server error' });
+    res.status(500).json({ error: 'Server error fetching question' });
   }
 });
 
-// Search questions - UPDATED WITH PERMISSION CHECK
-router.get('/search', auth, checkPermission('view_questions'), async (req, res) => {
+// Update question - TEACHERS CAN ONLY UPDATE THEIR OWN QUESTIONS
+router.put('/:questionId', [auth, validateObjectId('questionId')], async (req, res) => {
+  const { questionId } = req.params;
+  
   try {
-    const { subject, class: className, tags, text } = req.query;
-    const teacherAssignmentFilter = {
-      $or: req.user.subjects.map(sub => ({ subject: sub.subject, class: sub.class })),
-    };
-    const optionalFilters = {};
-    if (subject) optionalFilters.subject = subject;
-    if (className) optionalFilters.class = className;
-    if (tags) optionalFilters.tags = { $in: tags.split(',').map(tag => tag.trim()) };
-    if (text) optionalFilters.text = { $regex: text, $options: 'i' };
-    const finalQuery = { ...teacherAssignmentFilter, ...optionalFilters };
-    const questions = await Question.find(finalQuery).select('-correctAnswer');
-    console.log('Questions route - Search success:', { count: questions.length, query: finalQuery });
-    res.json(questions);
-  } catch (error) {
-    console.error('GET /api/questions/search - Error:', {
-      message: error.message,
-      stack: error.stack,
+    const { text, options, correctAnswer, marks, explanation } = req.body;
+    
+    console.log('Questions route - Updating question:', {
+      questionId,
       user: req.user.username,
-      timestamp: new Date().toISOString(),
+      role: req.user.role
     });
-    res.status(500).json({ error: 'Failed to search questions' });
-  }
-});
 
-// Create question - UPDATED WITH PERMISSION CHECK
-router.post('/', auth, checkPermission('manage_questions'), async (req, res) => {
-  try {
-    console.log('POST /api/questions - Request:', { body: req.body, url: req.url });
-    const { subject, class: className, text, options, correctAnswer, marks, tags, testId, saveToBank, formula } = req.body;
-    if (!subject || !className || !text || !options || !correctAnswer || !marks) {
-      return res.status(400).json({ error: 'Missing required fields: subject, class, text, options, correctAnswer, marks' });
+    // Find the question first
+    const question = await Question.findOne({ _id: questionId, isActive: true });
+
+    if (!question) {
+      return res.status(404).json({ error: 'Question not found' });
     }
-    let parsedOptions;
-    try {
-      parsedOptions = typeof options === 'string' ? JSON.parse(options) : options;
-    } catch (e) {
-      return res.status(400).json({ error: 'Invalid options format' });
-    }
-    if (!Array.isArray(parsedOptions) || parsedOptions.length !== 4 || !parsedOptions.includes(correctAnswer) || !parsedOptions.every(opt => typeof opt === 'string' && opt.trim())) {
-      return res.status(400).json({ error: 'Four non-empty string options required, and correctAnswer must match one option' });
-    }
-    if (parseInt(marks) <= 0) {
-      return res.status(400).json({ error: 'Marks must be greater than 0' });
-    }
-    if (!req.user.subjects.some(sub => sub.subject === subject && sub.class === className)) {
-      console.log('Questions route - Not assigned:', { user: req.user.username, subject, class: className });
-      return res.status(403).json({ error: 'Not assigned to this subject/class' });
-    }
-    const questionData = {
-      subject,
-      class: className,
-      text,
-      options: parsedOptions,
-      correctAnswer,
-      marks: parseInt(marks),
-      tags: tags ? tags.split(',').map(tag => tag.trim()) : [],
-      formula: formula || null,
-      createdBy: req.user.userId,
-      saveToBank: saveToBank === 'true' || saveToBank === true,
-    };
-    if (testId && mongoose.isValidObjectId(testId)) {
-      const test = await Test.findById(testId);
-      if (!test) {
-        return res.status(404).json({ error: 'Test not found' });
+
+    // Authorization check - teachers can only update their own questions
+    if (req.user.role === 'teacher') {
+      if (!question.createdBy.equals(req.user.id)) {
+        return res.status(403).json({ error: 'You can only update your own questions' });
       }
-      if (test.subject !== subject || test.class !== className) {
-        return res.status(400).json({ error: 'Question does not match test subject/class' });
+      
+      // Check if teacher is still assigned to this subject/class
+      const hasAccess = req.user.subjects?.some(sub => 
+        sub.subject === question.subject && sub.class === question.class
+      );
+      if (!hasAccess) {
+        return res.status(403).json({ error: 'No longer assigned to this subject/class' });
       }
-      if (test.status !== 'draft') {
-        return res.status(403).json({ error: 'Can only add questions to draft tests' });
-      }
-      questionData.testId = testId;
     }
-    const question = new Question(questionData);
+
+    // Validate updates
+    if (text !== undefined) {
+      if (typeof text !== 'string' || text.trim() === '') {
+        return res.status(400).json({ error: 'Text must be a non-empty string' });
+      }
+      question.text = text.trim();
+    }
+
+    if (options !== undefined) {
+      if (!Array.isArray(options) || options.length === 0) {
+        return res.status(400).json({ error: 'Options must be a non-empty array' });
+      }
+      if (!options.every(opt => typeof opt === 'string' && opt.trim())) {
+        return res.status(400).json({ error: 'All options must be non-empty strings' });
+      }
+      question.options = options.map(opt => opt.trim());
+    }
+
+    if (correctAnswer !== undefined) {
+      if (typeof correctAnswer !== 'string' || correctAnswer.trim() === '') {
+        return res.status(400).json({ error: 'Correct answer must be a non-empty string' });
+      }
+      // Validate that correct answer exists in options (if options were also updated)
+      const currentOptions = options !== undefined ? options.map(opt => opt.trim()) : question.options;
+      if (!currentOptions.includes(correctAnswer.trim())) {
+        return res.status(400).json({ error: 'Correct answer must be one of the provided options' });
+      }
+      question.correctAnswer = correctAnswer.trim();
+    }
+
+    if (marks !== undefined) {
+      const parsedMarks = Number(marks);
+      if (isNaN(parsedMarks) || parsedMarks < 0) {
+        return res.status(400).json({ error: 'Marks must be a non-negative number' });
+      }
+      question.marks = parsedMarks;
+    }
+
+    if (explanation !== undefined) {
+      question.explanation = explanation?.trim() || '';
+    }
+
     await question.save();
-    if (testId && mongoose.isValidObjectId(testId)) {
-      await Test.findByIdAndUpdate(testId, { $push: { questions: question._id } });
-      console.log('Questions route - Added to test:', { testId, questionId: question._id });
-    }
-    console.log('Questions route - Created:', {
-      questionId: question._id,
-      subject,
-      class: className,
-      hasFormula: !!formula,
-      timestamp: new Date().toISOString(),
+
+    console.log('Questions route - Question updated:', {
+      questionId,
+      user: req.user.username
     });
-    res.status(201).json({ message: 'Question created', question });
+
+    res.json({
+      message: 'Question updated successfully',
+      question: {
+        id: question._id,
+        text: question.text,
+        options: question.options,
+        correctAnswer: question.correctAnswer,
+        subject: question.subject,
+        class: question.class,
+        marks: question.marks,
+        explanation: question.explanation
+      }
+    });
   } catch (error) {
-    console.error('POST /api/questions - Error:', {
-      message: error.message,
-      stack: error.stack,
-      user: req.user?.username || 'unknown',
-      url: req.url,
-      timestamp: new Date().toISOString(),
+    console.error('Questions route - Update Error:', {
+      error: error.message,
+      questionId,
+      user: req.user.username
     });
-    res.status(400).json({ error: error.message || 'Failed to create question' });
+    
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ error: `Validation failed: ${errors.join(', ')}` });
+    }
+    
+    res.status(500).json({ error: 'Server error updating question' });
   }
 });
 
-// Bulk import questions - UPDATED WITH PERMISSION CHECK
-router.post('/bulk', auth, checkPermission('manage_questions'), async (req, res) => {
+// Delete question - TEACHERS CAN ONLY DELETE THEIR OWN QUESTIONS
+router.delete('/:questionId', [auth, validateObjectId('questionId')], async (req, res) => {
+  const { questionId } = req.params;
+  
   try {
-    console.log('POST /api/questions/bulk - Request:', { body: req.body, url: req.url });
-    const { questions, testId } = req.body;
-    if (!questions || !Array.isArray(questions) || questions.length === 0) {
+    console.log('Questions route - Deleting question:', {
+      questionId,
+      user: req.user.username,
+      role: req.user.role
+    });
+
+    // Find the question first
+    const question = await Question.findOne({ _id: questionId, isActive: true });
+
+    if (!question) {
+      return res.status(404).json({ error: 'Question not found' });
+    }
+
+    // Authorization check - teachers can only delete their own questions
+    if (req.user.role === 'teacher') {
+      if (!question.createdBy.equals(req.user.id)) {
+        return res.status(403).json({ error: 'You can only delete your own questions' });
+      }
+    }
+
+    // Soft delete by setting isActive to false
+    question.isActive = false;
+    await question.save();
+
+    console.log('Questions route - Question deleted:', {
+      questionId,
+      user: req.user.username
+    });
+
+    res.json({ 
+      message: 'Question deleted successfully',
+      deletedQuestion: {
+        id: question._id,
+        text: question.text,
+        subject: question.subject,
+        class: question.class
+      }
+    });
+  } catch (error) {
+    console.error('Questions route - Delete Error:', {
+      error: error.message,
+      questionId,
+      user: req.user.username
+    });
+    res.status(500).json({ error: 'Server error deleting question' });
+  }
+});
+
+// Bulk create questions - TEACHERS ONLY (THEIR OWN QUESTIONS)
+router.post('/bulk', auth, async (req, res) => {
+  try {
+    const { questions } = req.body;
+    
+    console.log('Questions route - Bulk creating questions:', {
+      count: questions?.length,
+      user: req.user.username,
+      role: req.user.role
+    });
+
+    if (!Array.isArray(questions) || questions.length === 0) {
       return res.status(400).json({ error: 'Questions must be a non-empty array' });
     }
-    console.log('Questions route - Bulk importing:', { count: questions.length, testId });
-    const invalidQuestions = [];
-    const validQuestions = questions.map((q, index) => {
-      const { subject, class: className, text, options, correctAnswer, marks, tags, formula } = q;
-      if (!subject || !className || !text || !options || !correctAnswer || !marks) {
-        invalidQuestions.push({ index: index + 1, error: 'Missing required fields' });
-        return null;
+
+    // Validate all questions and check authorization for teachers
+    const questionsToInsert = [];
+    
+    for (const qData of questions) {
+      const { text, options, correctAnswer, subject, class: className, marks = 1, explanation } = qData;
+
+      // Validate required fields
+      if (!text || !options || !correctAnswer || !subject || !className) {
+        continue; // Skip invalid entries
       }
-      let parsedOptions;
-      try {
-        parsedOptions = typeof options === 'string' ? JSON.parse(options) : options;
-      } catch (e) {
-        invalidQuestions.push({ index: index + 1, error: 'Invalid options format' });
-        return null;
+
+      // Authorization check for teachers
+      if (req.user.role === 'teacher') {
+        if (!req.user.subjects?.some(sub => sub.subject === subject && sub.class === className)) {
+          continue; // Skip if teacher not assigned to this subject/class
+        }
       }
-      if (!Array.isArray(parsedOptions) || parsedOptions.length !== 4 || !parsedOptions.every(opt => typeof opt === 'string' && opt.trim()) || !parsedOptions.includes(correctAnswer)) {
-        invalidQuestions.push({ index: index + 1, error: 'Four non-empty string options required, and correctAnswer must match one option' });
-        return null;
+
+      // Validate options and correct answer
+      if (!Array.isArray(options) || options.length === 0) {
+        continue;
       }
-      if (parseInt(marks) <= 0) {
-        invalidQuestions.push({ index: index + 1, error: 'Marks must be greater than 0' });
-        return null;
+      if (!options.every(opt => typeof opt === 'string' && opt.trim())) {
+        continue;
       }
-      if (!req.user.subjects.some(sub => sub.subject === subject && sub.class === className)) {
-        invalidQuestions.push({ index: index + 1, error: 'Not assigned to this subject/class' });
-        return null;
+      if (!options.includes(correctAnswer)) {
+        continue;
       }
-      return {
+
+      questionsToInsert.push({
+        text: text.trim(),
+        options: options.map(opt => opt.trim()),
+        correctAnswer: correctAnswer.trim(),
         subject,
         class: className,
-        text,
-        options: parsedOptions,
-        correctAnswer,
-        marks: parseInt(marks),
-        tags: tags ? tags.split(',').map(tag => tag.trim()) : [],
-        formula: formula || null,
-        createdBy: req.user.userId,
-        saveToBank: q.saveToBank === 'true' || q.saveToBank === true,
-        testId: testId && mongoose.isValidObjectId(testId) ? testId : null,
-      };
-    }).filter(q => q !== null);
-
-    if (validQuestions.length === 0) {
-      return res.status(400).json({ error: 'No valid questions provided', invalidQuestions });
+        marks: Number(marks) || 1,
+        explanation: explanation?.trim() || '',
+        createdBy: req.user.id,
+        isActive: true
+      });
     }
 
-    if (testId && mongoose.isValidObjectId(testId)) {
-      const test = await Test.findById(testId);
-      if (!test) {
-        return res.status(404).json({ error: 'Test not found' });
-      }
-      if (!validQuestions.every(q => q.subject === test.subject && q.class === test.class)) {
-        return res.status(400).json({ error: 'Questions must match test subject/class' });
-      }
-      if (test.status !== 'draft') {
-        return res.status(403).json({ error: 'Can only add questions to draft tests' });
-      }
+    if (questionsToInsert.length === 0) {
+      return res.status(400).json({ error: 'No valid questions to create' });
     }
 
-    const result = await Question.insertMany(validQuestions);
-    if (testId && mongoose.isValidObjectId(testId)) {
-      await Test.findByIdAndUpdate(testId, { $push: { questions: { $each: result.map(q => q._id) } } });
-      console.log('Questions route - Added to test:', { testId, questionIds: result.map(q => q._id) });
-    }
+    const result = await Question.insertMany(questionsToInsert);
 
-    console.log('Questions route - Bulk import complete:', { count: validQuestions.length, invalidCount: invalidQuestions.length });
+    console.log('Questions route - Bulk creation successful:', {
+      created: result.length,
+      user: req.user.username
+    });
+
     res.status(201).json({
-      message: `Imported ${validQuestions.length} questions successfully`,
-      count: validQuestions.length,
-      insertedIds: result.map(q => q._id),
-      invalidQuestions: invalidQuestions.length > 0 ? invalidQuestions : undefined,
+      message: `Successfully created ${result.length} questions`,
+      createdCount: result.length,
+      questions: result.map(q => ({
+        id: q._id,
+        text: q.text,
+        subject: q.subject,
+        class: q.class
+      }))
     });
   } catch (error) {
-    console.error('POST /api/questions/bulk - Error:', {
-      message: error.message,
-      stack: error.stack,
-      user: req.user?.username || 'unknown',
-      url: req.url,
-      timestamp: new Date().toISOString(),
+    console.error('Questions route - Bulk Create Error:', {
+      error: error.message,
+      user: req.user.username
     });
-    res.status(400).json({ error: error.message || 'Failed to import questions' });
-  }
-});
-
-// Update question - UPDATED WITH PERMISSION CHECK
-router.put('/:id', auth, checkPermission('manage_questions'), async (req, res) => {
-  try {
-    console.log('PUT /api/questions/:id - Request:', { body: req.body, id: req.params.id, url: req.url });
-    if (!mongoose.isValidObjectId(req.params.id)) {
-      console.log('Questions route - Invalid ID:', { id: req.params.id });
-      return res.status(400).json({ error: 'Invalid question ID format' });
+    
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ error: `Validation failed: ${errors.join(', ')}` });
     }
-    const { subject, class: className, text, options, correctAnswer, marks, tags, testId, saveToBank, formula } = req.body;
-    if (!subject || !className || !text || !options || !correctAnswer || !marks) {
-      return res.status(400).json({ error: 'Missing required fields: subject, class, text, options, correctAnswer, marks' });
-    }
-    let parsedOptions;
-    try {
-      parsedOptions = typeof options === 'string' ? JSON.parse(options) : options;
-    } catch (e) {
-      return res.status(400).json({ error: 'Invalid options format' });
-    }
-    if (!Array.isArray(parsedOptions) || parsedOptions.length !== 4 || !parsedOptions.includes(correctAnswer) || !parsedOptions.every(opt => typeof opt === 'string' && opt.trim())) {
-      return res.status(400).json({ error: 'Four non-empty string options required, and correctAnswer must match one option' });
-    }
-    if (parseInt(marks) <= 0) {
-      return res.status(400).json({ error: 'Marks must be greater than 0' });
-    }
-    const question = await Question.findById(req.params.id);
-    if (!question) {
-      console.log('Questions route - Question not found:', { id: req.params.id });
-      return res.status(404).json({ error: 'Question not found' });
-    }
-    if (!req.user.subjects.some(sub => sub.subject === subject && sub.class === className)) {
-      console.log('Questions route - Not assigned:', { user: req.user.username, subject, class: className });
-      return res.status(403).json({ error: 'Not assigned to this subject/class' });
-    }
-    question.subject = subject;
-    question.class = className;
-    question.text = text;
-    question.options = parsedOptions;
-    question.correctAnswer = correctAnswer;
-    question.marks = parseInt(marks);
-    question.tags = tags ? tags.split(',').map(tag => tag.trim()) : [];
-    question.formula = formula || null;
-    question.saveToBank = saveToBank === 'true' || saveToBank === true;
-    question.updatedAt = new Date();
-    if (testId && mongoose.isValidObjectId(testId)) {
-      const test = await Test.findById(testId);
-      if (!test) {
-        return res.status(404).json({ error: 'Test not found' });
-      }
-      if (test.subject !== subject || test.class !== className) {
-        return res.status(400).json({ error: 'Question does not match test subject/class' });
-      }
-      if (test.status !== 'draft') {
-        return res.status(403).json({ error: 'Can only update questions in draft tests' });
-      }
-      question.testId = testId;
-    }
-    await question.save();
-    console.log('Questions route - Updated:', {
-      questionId: question._id,
-      subject,
-      class: className,
-      hasFormula: !!formula,
-      timestamp: new Date().toISOString(),
-    });
-    res.json({ message: 'Question updated', question });
-  } catch (error) {
-    console.error('PUT /api/questions/:id - Error:', {
-      message: error.message,
-      stack: error.stack,
-      user: req.user?.username || 'unknown',
-      questionId: req.params.id,
-      url: req.url,
-      timestamp: new Date().toISOString(),
-    });
-    res.status(400).json({ error: error.message || 'Failed to update question' });
-  }
-});
-
-// Delete question - UPDATED WITH PERMISSION CHECK
-router.delete('/:id', auth, checkPermission('manage_questions'), async (req, res) => {
-  try {
-    console.log('DELETE /api/questions/:id - Request:', { id: req.params.id, url: req.url });
-    if (!mongoose.isValidObjectId(req.params.id)) {
-      console.log('Questions route - Invalid ID:', { id: req.params.id });
-      return res.status(400).json({ error: 'Invalid question ID format' });
-    }
-    const question = await Question.findById(req.params.id);
-    if (!question) {
-      console.log('Questions route - Question not found:', { id: req.params.id });
-      return res.status(404).json({ error: 'Question not found' });
-    }
-    if (!req.user.subjects.some(sub => sub.subject === question.subject && sub.class === question.class)) {
-      console.log('Questions route - Not assigned:', { user: req.user.username, subject: question.subject, class: question.class });
-      return res.status(403).json({ error: 'Not assigned to this subject/class' });
-    }
-    const tests = await Test.find({ questions: req.params.id });
-    if (tests.some(test => test.status !== 'draft')) {
-      return res.status(403).json({ error: 'Cannot delete question used in non-draft tests' });
-    }
-    await question.deleteOne();
-    console.log('Questions route - Deleted:', { questionId: req.params.id });
-    res.json({ message: 'Question deleted' });
-  } catch (error) {
-    console.error('DELETE /api/questions/:id - Error:', {
-      message: error.message,
-      stack: error.stack,
-      user: req.user?.username || 'unknown',
-      questionId: req.params.id,
-      url: req.url,
-      timestamp: new Date().toISOString(),
-    });
-    res.status(400).json({ error: error.message || 'Failed to delete question' });
+    
+    res.status(500).json({ error: 'Server error creating questions in bulk' });
   }
 });
 

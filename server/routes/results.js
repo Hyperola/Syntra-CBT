@@ -33,10 +33,10 @@ const validateResultParams = (req, res, next) => {
   next();
 };
 
-// Get results with advanced filtering and pagination - STUDENTS BLOCKED
-router.get('/', auth, checkPermission('view_results'), async (req, res) => {
+// Get results with advanced filtering and pagination - TEACHERS ALLOWED WITHOUT PERMISSION
+router.get('/', auth, async (req, res) => {
   try {
-    // BLOCK STUDENT ACCESS
+    // BLOCK STUDENT ACCESS but allow teachers
     if (req.user.role === 'student') {
       return res.status(403).json({ 
         error: 'Access denied. Students cannot view results listing.' 
@@ -136,17 +136,18 @@ router.get('/', auth, checkPermission('view_results'), async (req, res) => {
   }
 });
 
-// Get results for specific test - STUDENTS BLOCKED
-router.get('/test/:testId', auth, checkPermission('view_results'), validateResultParams, async (req, res) => {
+// Get results for specific test - TEACHERS ALLOWED WITHOUT PERMISSION
+router.get('/test/:testId', auth, validateResultParams, async (req, res) => {
+  const { testId } = req.params; // ✅ Declared at function scope
+  
   try {
-    // BLOCK STUDENT ACCESS
+    // BLOCK STUDENT ACCESS but allow teachers
     if (req.user.role === 'student') {
       return res.status(403).json({ 
         error: 'Access denied. Students cannot view test results.' 
       });
     }
 
-    const { testId } = req.params;
     const { includeAnalysis = false } = req.query;
 
     console.log('GET /api/results/test/:testId - Request:', {
@@ -218,23 +219,24 @@ router.get('/test/:testId', auth, checkPermission('view_results'), validateResul
   } catch (error) {
     console.error('GET /api/results/test/:testId - Error:', {
       message: error.message,
-      testId
+      testId // ✅ Now properly in scope
     });
     res.status(500).json({ error: 'Server error fetching test results' });
   }
 });
 
-// Get detailed result analysis - STUDENTS BLOCKED
-router.get('/details/:resultId', auth, checkPermission('view_results'), async (req, res) => {
+// Get detailed result analysis - TEACHERS ALLOWED WITHOUT PERMISSION
+router.get('/details/:resultId', auth, async (req, res) => {
+  const { resultId } = req.params; // ✅ Declared at function scope
+  
   try {
-    // BLOCK STUDENT ACCESS
+    // BLOCK STUDENT ACCESS but allow teachers
     if (req.user.role === 'student') {
       return res.status(403).json({ 
         error: 'Access denied. Students cannot view detailed results.' 
       });
     }
 
-    const { resultId } = req.params;
     if (!mongoose.Types.ObjectId.isValid(resultId)) {
       return res.status(400).json({ error: 'Invalid result ID format' });
     }
@@ -319,15 +321,17 @@ router.get('/details/:resultId', auth, checkPermission('view_results'), async (r
   } catch (error) {
     console.error('GET /api/results/details/:resultId - Error:', {
       message: error.message,
-      resultId
+      resultId // ✅ Now properly in scope
     });
     res.status(500).json({ error: 'Server error fetching result details' });
   }
 });
 
-// Update result score - ADMIN ONLY (TEACHERS REMOVED)
+// Update result score - ADMIN ONLY
 router.put('/:resultId', auth, checkPermission('manage_results'), async (req, res) => {
+  const { resultId } = req.params; // ✅ Declared at function scope
   const session = await mongoose.startSession();
+  
   session.startTransaction();
   try {
     // ONLY ADMINS CAN UPDATE RESULTS
@@ -339,7 +343,6 @@ router.put('/:resultId', auth, checkPermission('manage_results'), async (req, re
       });
     }
 
-    const { resultId } = req.params;
     const { score, remarks } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(resultId)) {
@@ -363,8 +366,6 @@ router.put('/:resultId', auth, checkPermission('manage_results'), async (req, re
       session.endSession();
       return res.status(404).json({ error: 'Result not found' });
     }
-
-    // TEACHER ACCESS REMOVED - ONLY ADMINS
 
     // Validate score against test total marks
     if (score > result.testId.totalMarks) {
@@ -409,7 +410,7 @@ router.put('/:resultId', auth, checkPermission('manage_results'), async (req, re
    
     console.error('PUT /api/results/:resultId - Error:', {
       message: error.message,
-      resultId
+      resultId // ✅ Now properly in scope
     });
    
     if (error.name === 'ValidationError') {
@@ -423,12 +424,13 @@ router.put('/:resultId', auth, checkPermission('manage_results'), async (req, re
   }
 });
 
-// Delete result (admin only) - NO CHANGES NEEDED
+// Delete result (admin only)
 router.delete('/:resultId', auth, checkPermission('manage_results'), async (req, res) => {
+  const { resultId } = req.params; // ✅ Declared at function scope
   const session = await mongoose.startSession();
+  
   session.startTransaction();
   try {
-    const { resultId } = req.params;
     if (!mongoose.Types.ObjectId.isValid(resultId)) {
       await session.abortTransaction();
       session.endSession();
@@ -476,16 +478,17 @@ router.delete('/:resultId', auth, checkPermission('manage_results'), async (req,
    
     console.error('DELETE /api/results/:resultId - Error:', {
       message: error.message,
-      resultId
+      resultId // ✅ Now properly in scope
     });
     res.status(500).json({ error: 'Server error deleting result' });
   }
 });
 
-// Get student performance overview - STUDENTS CAN VIEW OWN PERFORMANCE ONLY
-router.get('/student/:studentId/performance', auth, checkPermission('view_results'), validateResultParams, async (req, res) => {
+// Get student performance overview - TEACHERS ALLOWED WITHOUT PERMISSION
+router.get('/student/:studentId/performance', auth, validateResultParams, async (req, res) => {
+  const { studentId } = req.params; // ✅ Declared at function scope
+  
   try {
-    const { studentId } = req.params;
     const { session: sessionName, term } = req.query;
 
     // Authorization check - STUDENTS CAN ONLY VIEW THEIR OWN PERFORMANCE
@@ -569,12 +572,12 @@ router.get('/student/:studentId/performance', auth, checkPermission('view_result
       }
     });
   } catch (error) {
-    console.error('GET /api/results/student/:studentId/performance - Error:', error);
+    console.error('GET /api/results/student/:studentId/performance - Error:', {
+      message: error.message,
+      studentId // ✅ Now properly in scope
+    });
     res.status(500).json({ error: 'Server error fetching student performance' });
   }
 });
-
-// Export routes would follow similar patterns with enhanced validation and error handling
-// ... (export routes would be similar to your existing ones but with the enhanced model)
 
 module.exports = router;

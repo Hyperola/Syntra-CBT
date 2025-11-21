@@ -29,7 +29,7 @@ const permissionSchema = new mongoose.Schema({
     required: [true, 'Permission module is required'],
     trim: true,
     enum: {
-      values: ['users', 'sessions', 'classes', 'subjects', 'tests', 'results', 'academic_records', 'analytics', 'permissions', 'system', 'admin'],
+      values: ['users', 'sessions', 'classes', 'subjects', 'tests', 'results', 'academic_records', 'analytics', 'permissions', 'system', 'admin', 'questions'],
       message: 'Invalid module specified'
     }
   },
@@ -44,12 +44,12 @@ const permissionSchema = new mongoose.Schema({
     default: 'admin'
   },
   createdBy: {
-    type: mongoose.Schema.Types.ObjectId,
+    type: mongoose.Types.ObjectId,
     ref: 'User',
     required: true
   },
   updatedBy: {
-    type: mongoose.Schema.Types.ObjectId,
+    type: mongoose.Types.ObjectId,
     ref: 'User'
   },
   isActive: {
@@ -104,6 +104,16 @@ permissionSchema.statics.seedDefaultPermissions = async function(createdBy) {
     { name: 'DELETE_SESSIONS', description: 'Delete academic sessions', category: 'academic_management', module: 'sessions', requiredRole: 'admin', isDangerous: true },
     { name: 'MANAGE_ACTIVE_SESSION', description: 'Set active academic session', category: 'academic_management', module: 'sessions', requiredRole: 'admin' },
    
+    // Questions Management (NEW - THIS WILL FIX YOUR 403 ERRORS)
+    { name: 'VIEW_QUESTIONS', description: 'View questions', category: 'academic_management', module: 'questions', requiredRole: 'teacher' },
+    { name: 'MANAGE_QUESTIONS', description: 'Create, edit, and delete questions', category: 'academic_management', module: 'questions', requiredRole: 'teacher' },
+   
+    // Tests Management (NEW)
+    { name: 'VIEW_TESTS', description: 'View tests', category: 'academic_management', module: 'tests', requiredRole: 'teacher' },
+    { name: 'MANAGE_TESTS', description: 'Create, edit, and delete tests', category: 'academic_management', module: 'tests', requiredRole: 'teacher' },
+    { name: 'SUBMIT_TESTS', description: 'Submit test answers', category: 'academic_management', module: 'tests', requiredRole: 'student' },
+    { name: 'APPROVE_TESTS', description: 'Approve tests for publication', category: 'academic_management', module: 'tests', requiredRole: 'admin' },
+   
     // Results Management
     { name: 'VIEW_RESULTS', description: 'View test results', category: 'academic_management', module: 'results', requiredRole: 'teacher' },
     { name: 'MANAGE_RESULTS', description: 'Manage and edit results', category: 'academic_management', module: 'results', requiredRole: 'admin' },
@@ -131,11 +141,15 @@ permissionSchema.statics.seedDefaultPermissions = async function(createdBy) {
     { name: 'VIEW_PERMISSIONS', description: 'View all permissions', category: 'system_management', module: 'permissions', requiredRole: 'super_admin' },
     { name: 'MANAGE_PERMISSIONS', description: 'Manage system permissions', category: 'system_management', module: 'permissions', requiredRole: 'super_admin', isDangerous: true },
 
-    // ADMIN-SPECIFIC PERMISSIONS (NEW)
+    // ADMIN-SPECIFIC PERMISSIONS
     { name: 'MANAGE_ADMINS', description: 'Create and manage administrators', category: 'admin_management', module: 'admin', requiredRole: 'super_admin', isDangerous: true },
-    { name: 'APPROVE_TESTS', description: 'Approve tests for publication', category: 'academic_management', module: 'tests', requiredRole: 'admin' },
     { name: 'SYSTEM_CONFIG', description: 'Configure system settings', category: 'system_management', module: 'system', requiredRole: 'admin' }
   ];
+
+  console.log('🔧 Starting to seed permissions...');
+  
+  let addedCount = 0;
+  let existingCount = 0;
 
   for (const permData of defaultPermissions) {
     const existingPerm = await this.findOne({ name: permData.name });
@@ -144,8 +158,57 @@ permissionSchema.statics.seedDefaultPermissions = async function(createdBy) {
         ...permData,
         createdBy: createdBy
       });
+      console.log(`✅ Created permission: ${permData.name}`);
+      addedCount++;
+    } else {
+      console.log(`⚠️ Permission already exists: ${permData.name}`);
+      existingCount++;
     }
   }
+  
+  console.log(`🎉 Permission seeding complete! Added: ${addedCount}, Existing: ${existingCount}`);
+  return { added: addedCount, existing: existingCount };
+};
+
+// NEW: Static method to check and fix missing permissions
+permissionSchema.statics.fixMissingPermissions = async function(createdBy) {
+  console.log('🔍 Checking for missing permissions...');
+  
+  const requiredPermissions = ['VIEW_QUESTIONS', 'VIEW_TESTS', 'VIEW_RESULTS'];
+  const missing = [];
+  
+  for (const permName of requiredPermissions) {
+    const exists = await this.findOne({ name: permName });
+    if (!exists) {
+      missing.push(permName);
+    }
+  }
+  
+  if (missing.length === 0) {
+    console.log('✅ All required permissions exist');
+    return { fixed: false, message: 'No missing permissions' };
+  }
+  
+  console.log(`❌ Missing permissions: ${missing.join(', ')}`);
+  
+  // Define the missing permissions
+  const permissionDefinitions = {
+    'VIEW_QUESTIONS': { name: 'VIEW_QUESTIONS', description: 'View questions', category: 'academic_management', module: 'questions', requiredRole: 'teacher' },
+    'VIEW_TESTS': { name: 'VIEW_TESTS', description: 'View tests', category: 'academic_management', module: 'tests', requiredRole: 'teacher' },
+    'VIEW_RESULTS': { name: 'VIEW_RESULTS', description: 'View test results', category: 'academic_management', module: 'results', requiredRole: 'teacher' }
+  };
+  
+  // Add missing permissions
+  for (const permName of missing) {
+    await this.create({
+      ...permissionDefinitions[permName],
+      createdBy: createdBy
+    });
+    console.log(`✅ Added missing permission: ${permName}`);
+  }
+  
+  console.log(`🎉 Fixed ${missing.length} missing permissions`);
+  return { fixed: true, added: missing };
 };
 
 // Ensure virtual fields are serialized

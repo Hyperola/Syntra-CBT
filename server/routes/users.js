@@ -173,8 +173,54 @@ router.post('/', auth, checkPermission('create_users'), validateUserInput, async
 
     await user.save({ session });
 
+    // For non-super_admin roles, assign permissions if provided
+    if (role !== 'super_admin' && permissions && permissions.length > 0) {
+      // Validate permissions exist
+      const validPermissions = await Permission.find({
+        _id: { $in: permissions }
+      }).session(session);
 
-   // Create admin with specific permissions (Super Admin only)
+      if (validPermissions.length !== permissions.length) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: 'One or more invalid permissions' });
+      }
+
+      const permissionAssignments = permissions.map(permissionId => ({
+        userId: user._id,
+        permissionId: permissionId
+      }));
+
+      await RolePermission.insertMany(permissionAssignments, { session });
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    // Return user without password
+    const userResponse = await User.findById(user._id)
+      .select('-password')
+      .populate('class', 'name level');
+
+    res.status(201).json({ 
+      message: 'User created successfully',
+      user: userResponse
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    
+    console.error('Create user error:', error);
+    
+    if (error.code === 11000) {
+      return res.status(400).json({ message: 'User with this email or student ID already exists' });
+    }
+    
+    res.status(500).json({ message: 'Server error creating user' });
+  }
+});
+
+// Create admin with specific permissions (Super Admin only)
 router.post('/admin', auth, async (req, res) => {
   const session = await User.startSession();
   session.startTransaction();
@@ -351,53 +397,6 @@ router.put('/admin/:id/permissions', auth, async (req, res) => {
    
     console.error('Update admin permissions error:', error);
     res.status(500).json({ message: 'Server error updating admin permissions' });
-  }
-});
- 
-    // For non-super_admin roles, assign permissions if provided
-    if (role !== 'super_admin' && permissions && permissions.length > 0) {
-      // Validate permissions exist
-      const validPermissions = await Permission.find({
-        _id: { $in: permissions }
-      }).session(session);
-
-      if (validPermissions.length !== permissions.length) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({ message: 'One or more invalid permissions' });
-      }
-
-      const permissionAssignments = permissions.map(permissionId => ({
-        userId: user._id,
-        permissionId: permissionId
-      }));
-
-      await RolePermission.insertMany(permissionAssignments, { session });
-    }
-
-    await session.commitTransaction();
-    session.endSession();
-
-    // Return user without password
-    const userResponse = await User.findById(user._id)
-      .select('-password')
-      .populate('class', 'name level');
-
-    res.status(201).json({ 
-      message: 'User created successfully',
-      user: userResponse
-    });
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    
-    console.error('Create user error:', error);
-    
-    if (error.code === 11000) {
-      return res.status(400).json({ message: 'User with this email or student ID already exists' });
-    }
-    
-    res.status(500).json({ message: 'Server error creating user' });
   }
 });
 

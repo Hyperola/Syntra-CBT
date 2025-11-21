@@ -4,8 +4,7 @@ const router = express.Router();
 const Session = require('../models/Session');
 const AcademicRecord = require('../models/AcademicRecord');
 const Test = require('../models/Test');
-const { auth, adminOnly } = require('../middleware/auth');
-const { checkPermission } = require('../middleware/permissions');
+const { auth } = require('../middleware/auth');
 
 // Input validation middleware
 const validateSessionInput = (req, res, next) => {
@@ -84,6 +83,44 @@ const checkDuplicateSession = async (req, res, next) => {
   }
 };
 
+// Admin authorization middleware
+const requireAdmin = (req, res, next) => {
+  console.log('Admin check - User:', {
+    id: req.user?.id,
+    username: req.user?.username,
+    role: req.user?.role
+  });
+
+  if (!req.user) {
+    return res.status(401).json({ 
+      error: 'Authentication required',
+      code: 'AUTH_REQUIRED'
+    });
+  }
+
+  // Allow both admin and super_admin
+  if (req.user.role !== 'admin' && req.user.role !== 'super_admin') {
+    console.warn('Admin access denied:', {
+      userId: req.user.id,
+      username: req.user.username,
+      role: req.user.role,
+      required: ['admin', 'super_admin']
+    });
+    return res.status(403).json({ 
+      error: 'Admin access required',
+      userRole: req.user.role,
+      requiredRoles: ['admin', 'super_admin']
+    });
+  }
+
+  console.log('Admin access granted:', {
+    userId: req.user.id,
+    username: req.user.username,
+    role: req.user.role
+  });
+  next();
+};
+
 // Get all sessions with pagination and filtering
 router.get('/', auth, async (req, res) => {
   try {
@@ -115,7 +152,7 @@ router.get('/', auth, async (req, res) => {
       filters: filter,
       pagination: { page, limit },
       sort,
-      user: req.user.username 
+      user: req.user 
     });
 
     const [sessions, total, activeCount, inactiveCount] = await Promise.all([
@@ -155,7 +192,7 @@ router.get('/', auth, async (req, res) => {
     console.error('GET /api/sessions - Error:', { 
       message: error.message, 
       stack: error.stack, 
-      user: req.user.username 
+      user: req.user 
     });
     res.status(500).json({ 
       error: 'Server error fetching sessions',
@@ -168,7 +205,7 @@ router.get('/', auth, async (req, res) => {
 router.get('/active', auth, async (req, res) => {
   try {
     console.log('GET /api/sessions/active - Request:', { 
-      user: req.user.username 
+      user: req.user 
     });
 
     const activeSession = await Session.findOne({ isActive: true });
@@ -205,7 +242,7 @@ router.get('/:id', auth, async (req, res) => {
 
     console.log('GET /api/sessions/:id - Request:', { 
       id, 
-      user: req.user.username 
+      user: req.user 
     });
 
     const session = await Session.findById(id);
@@ -246,8 +283,8 @@ router.get('/:id', auth, async (req, res) => {
   }
 });
 
-// Create new session
-router.post('/', auth, adminOnly, validateSessionInput, checkDuplicateSession, async (req, res) => {
+// Create new session - UPDATED: Use requireAdmin middleware
+router.post('/', auth, requireAdmin, validateSessionInput, checkDuplicateSession, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -256,7 +293,7 @@ router.post('/', auth, adminOnly, validateSessionInput, checkDuplicateSession, a
 
     console.log('POST /api/sessions - Request:', { 
       body: req.body, 
-      user: req.user.username 
+      user: req.user 
     });
 
     // If setting as active, deactivate all other sessions
@@ -317,8 +354,8 @@ router.post('/', auth, adminOnly, validateSessionInput, checkDuplicateSession, a
   }
 });
 
-// Update session
-router.put('/:id', auth, adminOnly, validateSessionInput, checkDuplicateSession, async (req, res) => {
+// Update session - UPDATED: Use requireAdmin middleware
+router.put('/:id', auth, requireAdmin, validateSessionInput, checkDuplicateSession, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -338,7 +375,7 @@ router.put('/:id', auth, adminOnly, validateSessionInput, checkDuplicateSession,
     console.log('PUT /api/sessions/:id - Request:', { 
       id, 
       body: req.body, 
-      user: req.user.username 
+      user: req.user 
     });
 
     const existingSession = await Session.findById(id).session(session);
@@ -409,8 +446,8 @@ router.put('/:id', auth, adminOnly, validateSessionInput, checkDuplicateSession,
   }
 });
 
-// Set session as active
-router.patch('/:id/activate', auth, adminOnly, async (req, res) => {
+// Set session as active - UPDATED: Use requireAdmin middleware
+router.patch('/:id/activate', auth, requireAdmin, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -425,7 +462,7 @@ router.patch('/:id/activate', auth, adminOnly, async (req, res) => {
 
     console.log('PATCH /api/sessions/:id/activate - Request:', { 
       id, 
-      user: req.user.username 
+      user: req.user 
     });
 
     const targetSession = await Session.findById(id).session(session);
@@ -478,8 +515,8 @@ router.patch('/:id/activate', auth, adminOnly, async (req, res) => {
   }
 });
 
-// Delete session (with dependency check)
-router.delete('/:id', auth, adminOnly, async (req, res) => {
+// Delete session - UPDATED: Use requireAdmin middleware
+router.delete('/:id', auth, requireAdmin, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -496,7 +533,7 @@ router.delete('/:id', auth, adminOnly, async (req, res) => {
     console.log('DELETE /api/sessions/:id - Request:', { 
       id, 
       force, 
-      user: req.user.username 
+      user: req.user 
     });
 
     const targetSession = await Session.findById(id).session(session);
@@ -537,8 +574,6 @@ router.delete('/:id', auth, adminOnly, async (req, res) => {
         academicRecords: academicRecordsCount,
         tests: testsCount
       });
-      // Here you could add logic to handle dependent data
-      // For example: archive, reassign, or delete dependent records
     }
 
     await Session.findByIdAndDelete(id).session(session);

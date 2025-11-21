@@ -18,8 +18,7 @@ const testSchema = new mongoose.Schema({
     index: true
   },
   class: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Class',
+    type: mongoose.Schema.Types.Mixed, // CHANGED: Allow both ObjectId and string
     required: [true, 'Class is required'],
     index: true
   },
@@ -285,7 +284,7 @@ testSchema.pre('validate', async function(next) {
       const questions = await Question.find({ _id: { $in: this.questions } });
       
       const invalidQuestions = questions.filter(q => 
-        q.subject !== this.subject || !q.class.equals(this.class)
+        q.subject !== this.subject || q.class.toString() !== this.class.toString()
       );
       
       if (invalidQuestions.length > 0) {

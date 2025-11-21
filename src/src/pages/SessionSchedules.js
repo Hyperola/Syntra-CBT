@@ -15,24 +15,46 @@ const SessionSchedules = () => {
   // Check if user has admin privileges (admin or super_admin)
   const hasAdminAccess = user && (user.role === 'admin' || user.role === 'super_admin');
 
+  console.log('SessionSchedules - User:', user, 'Has Admin Access:', hasAdminAccess);
+
   useEffect(() => {
     if (hasAdminAccess) {
       fetchSessions();
     }
   }, [hasAdminAccess]);
 
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('token');
+    console.log('Using token for request:', token ? 'Present' : 'Missing');
+    return {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    };
+  };
+
   const fetchSessions = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const token = localStorage.getItem('token');
+      console.log('Fetching sessions...');
       const res = await axios.get('https://waec-gfv0.onrender.com/api/sessions', {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
-      // Handle paginated response from backend
-      setSessions(res.data.sessions || res.data);
-      setError(null);
+      console.log('Sessions fetched successfully:', res.data);
+      // Handle both paginated and flat responses
+      const sessionsData = res.data.sessions || res.data;
+      setSessions(Array.isArray(sessionsData) ? sessionsData : []);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to load sessions.');
+      console.error('Error fetching sessions:', err);
+      const errorMessage = err.response?.data?.error || 
+                          err.response?.statusText || 
+                          'Failed to load sessions';
+      setError(`Error ${err.response?.status}: ${errorMessage}`);
+      
+      // If token might be invalid, try to refresh
+      if (err.response?.status === 403 || err.response?.status === 401) {
+        setError('Authentication failed. Please try logging in again.');
+      }
     }
     setLoading(false);
   };
@@ -60,26 +82,42 @@ const SessionSchedules = () => {
 
     setActionLoading(true);
     try {
-      const token = localStorage.getItem('token');
+      console.log('Submitting session:', formData);
+      
       if (editSession) {
-        await axios.put(`https://waec-gfv0.onrender.com/api/sessions/${editSession._id}`, formData, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const response = await axios.put(
+          `https://waec-gfv0.onrender.com/api/sessions/${editSession._id}`, 
+          formData, 
+          { headers: getAuthHeaders() }
+        );
+        console.log('Update response:', response.data);
         setSuccess('Session updated successfully.');
         setEditSession(null);
       } else {
-        await axios.post('https://waec-gfv0.onrender.com/api/sessions', formData, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const response = await axios.post(
+          'https://waec-gfv0.onrender.com/api/sessions', 
+          formData, 
+          { headers: getAuthHeaders() }
+        );
+        console.log('Create response:', response.data);
         setSuccess('Session created successfully.');
       }
       setFormData({ sessionName: '', isActive: false });
       fetchSessions();
     } catch (err) {
-      const errorMessage = err.response?.data?.error || 
-                          err.response?.data?.details?.[0] || 
-                          'Failed to process session.';
-      setError(errorMessage);
+      console.error('Error processing session:', err);
+      const errorData = err.response?.data;
+      
+      let errorMessage = 'Failed to process session';
+      if (errorData?.error) {
+        errorMessage = errorData.error;
+      } else if (errorData?.details?.[0]) {
+        errorMessage = errorData.details[0];
+      } else if (err.response?.statusText) {
+        errorMessage = err.response.statusText;
+      }
+      
+      setError(`Error ${err.response?.status || 'Unknown'}: ${errorMessage}`);
     }
     setActionLoading(false);
   };
@@ -91,18 +129,20 @@ const SessionSchedules = () => {
     clearMessages();
     
     try {
-      const token = localStorage.getItem('token');
-      await axios.delete(`https://waec-gfv0.onrender.com/api/sessions/${sessionId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      console.log('Deleting session:', sessionId);
+      await axios.delete(
+        `https://waec-gfv0.onrender.com/api/sessions/${sessionId}`, 
+        { headers: getAuthHeaders() }
+      );
       setSuccess('Session deleted successfully.');
       fetchSessions();
     } catch (err) {
+      console.error('Error deleting session:', err);
       const errorData = err.response?.data;
       if (errorData?.dependencies) {
         setError(`Cannot delete session. It has ${errorData.dependencies.academicRecords} academic records and ${errorData.dependencies.tests} tests.`);
       } else {
-        setError(errorData?.error || 'Failed to delete session.');
+        setError(errorData?.error || err.response?.statusText || 'Failed to delete session.');
       }
     }
     setActionLoading(false);
@@ -123,7 +163,32 @@ const SessionSchedules = () => {
     setFormData({ sessionName: '', isActive: false });
   };
 
-  if (loading) return <p style={{ padding: '20px', color: '#FFFFFF', backgroundColor: '#4B5320', textAlign: 'center', fontFamily: 'sans-serif', fontSize: '16px' }}>Loading sessions...</p>;
+  // Debug panel (remove in production)
+  const DebugPanel = () => (
+    <div style={{ 
+      backgroundColor: '#f8f9fa', 
+      border: '1px solid #dee2e6', 
+      borderRadius: '4px', 
+      padding: '10px', 
+      marginBottom: '20px',
+      fontSize: '12px',
+      fontFamily: 'monospace'
+    }}>
+      <strong>Debug Info:</strong>
+      <div>User Role: {user?.role}</div>
+      <div>Has Admin Access: {hasAdminAccess ? 'Yes' : 'No'}</div>
+      <div>Token: {localStorage.getItem('token') ? 'Present' : 'Missing'}</div>
+      <div>Sessions Count: {sessions.length}</div>
+    </div>
+  );
+
+  if (loading) return (
+    <div style={{ padding: '20px', textAlign: 'center' }}>
+      <p style={{ color: '#FFFFFF', backgroundColor: '#4B5320', padding: '20px', fontFamily: 'sans-serif', fontSize: '16px' }}>
+        Loading sessions...
+      </p>
+    </div>
+  );
 
   if (!hasAdminAccess) {
     return (
@@ -132,13 +197,12 @@ const SessionSchedules = () => {
           padding: '20px', 
           color: '#B22222', 
           backgroundColor: '#FFF3F3', 
-          textAlign: 'center', 
           fontFamily: 'sans-serif', 
           fontSize: '16px',
           border: '1px solid #B22222',
           borderRadius: '4px'
         }}>
-          Admin access required. Your role: {user?.role || 'unknown'}
+          ❌ Admin access required. Your role: <strong>{user?.role || 'unknown'}</strong>
         </p>
       </div>
     );
@@ -146,27 +210,94 @@ const SessionSchedules = () => {
 
   return (
     <div style={{ padding: '20px' }}>
+      {/* Remove DebugPanel in production */}
+      <DebugPanel />
+
       {error && (
-        <div style={{ backgroundColor: '#FFF3F3', color: '#B22222', borderLeft: '4px solid #B22222', padding: '15px', marginBottom: '20px', fontFamily: 'sans-serif', borderRadius: '4px', fontSize: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>Error: {error}</span>
-          <button onClick={clearMessages} style={{ background: 'none', border: 'none', color: '#B22222', cursor: 'pointer', fontSize: '16px' }}>×</button>
+        <div style={{ 
+          backgroundColor: '#FFF3F3', 
+          color: '#B22222', 
+          borderLeft: '4px solid #B22222', 
+          padding: '15px', 
+          marginBottom: '20px', 
+          fontFamily: 'sans-serif', 
+          borderRadius: '4px', 
+          fontSize: '14px',
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center' 
+        }}>
+          <span>❌ {error}</span>
+          <button 
+            onClick={clearMessages} 
+            style={{ 
+              background: 'none', 
+              border: 'none', 
+              color: '#B22222', 
+              cursor: 'pointer', 
+              fontSize: '16px',
+              padding: '0 5px'
+            }}
+          >
+            ×
+          </button>
         </div>
       )}
+      
       {success && (
-        <div style={{ backgroundColor: '#E6FFE6', color: '#228B22', borderLeft: '4px solid #228B22', padding: '15px', marginBottom: '20px', fontFamily: 'sans-serif', borderRadius: '4px', fontSize: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>Success: {success}</span>
-          <button onClick={clearMessages} style={{ background: 'none', border: 'none', color: '#228B22', cursor: 'pointer', fontSize: '16px' }}>×</button>
+        <div style={{ 
+          backgroundColor: '#E6FFE6', 
+          color: '#228B22', 
+          borderLeft: '4px solid #228B22', 
+          padding: '15px', 
+          marginBottom: '20px', 
+          fontFamily: 'sans-serif', 
+          borderRadius: '4px', 
+          fontSize: '14px',
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center' 
+        }}>
+          <span>✅ {success}</span>
+          <button 
+            onClick={clearMessages} 
+            style={{ 
+              background: 'none', 
+              border: 'none', 
+              color: '#228B22', 
+              cursor: 'pointer', 
+              fontSize: '16px',
+              padding: '0 5px'
+            }}
+          >
+            ×
+          </button>
         </div>
       )}
 
-      <div style={{ marginBottom: '20px', padding: '10px', backgroundColor: '#f8f9fa', border: '1px solid #dee2e6', borderRadius: '4px' }}>
-        <p style={{ margin: 0, fontFamily: 'sans-serif', fontSize: '14px', color: '#495057' }}>
-          Logged in as: <strong>{user?.name}</strong> ({user?.role})
+      <div style={{ 
+        marginBottom: '20px', 
+        padding: '10px', 
+        backgroundColor: '#e7f3ff', 
+        border: '1px solid #b3d9ff', 
+        borderRadius: '4px' 
+      }}>
+        <p style={{ margin: 0, fontFamily: 'sans-serif', fontSize: '14px', color: '#0066cc' }}>
+          👋 Welcome, <strong>{user?.name}</strong>! Role: <strong>{user?.role}</strong>
         </p>
       </div>
 
-      <h3 style={{ fontSize: '20px', fontWeight: 'bold', color: '#FFFFFF', fontFamily: 'sans-serif', backgroundColor: '#4B5320', padding: '10px', borderRadius: '4px', marginBottom: '20px' }}>
-        {editSession ? 'Edit Session' : 'Create Session'}
+      <h3 style={{ 
+        fontSize: '20px', 
+        fontWeight: 'bold', 
+        color: '#FFFFFF', 
+        fontFamily: 'sans-serif', 
+        backgroundColor: '#4B5320', 
+        padding: '10px', 
+        borderRadius: '4px', 
+        marginBottom: '20px' 
+      }}>
+        {editSession ? 'Edit Session' : 'Create New Session'}
       </h3>
       
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px', maxWidth: '400px', marginBottom: '20px' }}>
@@ -242,11 +373,20 @@ const SessionSchedules = () => {
         </div>
       </form>
 
-      <h3 style={{ fontSize: '20px', fontWeight: 'bold', color: '#FFFFFF', fontFamily: 'sans-serif', backgroundColor: '#4B5320', padding: '10px', borderRadius: '4px', marginBottom: '20px' }}>
+      <h3 style={{ 
+        fontSize: '20px', 
+        fontWeight: 'bold', 
+        color: '#FFFFFF', 
+        fontFamily: 'sans-serif', 
+        backgroundColor: '#4B5320', 
+        padding: '10px', 
+        borderRadius: '4px', 
+        marginBottom: '20px' 
+      }}>
         All Sessions ({sessions.length})
       </h3>
       
-      {sessions.length === 0 ? (
+      {sessions.length === 0 && !loading ? (
         <p style={{ textAlign: 'center', color: '#666', fontFamily: 'sans-serif', padding: '20px' }}>
           No sessions found. Create your first session above.
         </p>

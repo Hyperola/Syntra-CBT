@@ -19,7 +19,8 @@ const AddTestQuestions = () => {
         const token = localStorage.getItem('token');
         if (!token) throw new Error('No authentication token found.');
         console.log('AddTestQuestions - Fetching test:', { testId });
-        const res = await axios.get(`https://waec-gfv0.onrender.com/api/tests/${testId}`, {
+        // CHANGED: Use relative path instead of full URL
+        const res = await axios.get(`/api/tests/${testId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         setTest(res.data);
@@ -94,8 +95,9 @@ const AddTestQuestions = () => {
         questionMarks: selectedQuestions.map(qId => questionMarks[qId] || 1),
       };
       console.log('AddTestQuestions - Sending payload:', payload);
+      // CHANGED: Use relative path instead of full URL
       const res = await axios.put(
-        `https://waec-gfv0.onrender.com/api/tests/${testId}/questions`,
+        `/api/tests/${testId}/questions`,
         payload,
         { headers: { Authorization: `Bearer ${token}` } }
       );

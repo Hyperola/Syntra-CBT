@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import Login from './pages/Login';
 import TeacherHome from './pages/TeacherHome';
 import StudentHome from './pages/StudentHome';
-import AdminHome from './pages/AdminHome';
+import AdminDashboard from './components/AdminDashboard';
 import Register from './pages/Register';
 import TestTaking from './pages/TestTaking';
 import TestResults from './pages/TestResults';
@@ -24,6 +24,15 @@ import Tests from './pages/Tests';
 import Profile from './pages/Profile';
 import Submitted from './pages/Submitted';
 import SetBatch from './pages/SetBatch';
+import PromotionPanel from './components/PromotionPanel/PromotionPanel';
+
+// Import teacher components
+import AddQuestion from './components/teacher/AddQuestion';
+import BulkImport from './components/teacher/BulkImport';
+import ManageQuestions from './components/teacher/ManageQuestions';
+import TestCreation from './pages/TestCreation';
+import TestPreview from './pages/TestPreview';
+import AddTestQuestions from './components/teacher/AddTestQuestions';
 
 // Simple components that don't use AuthContext
 const RootRedirect = () => {
@@ -93,16 +102,30 @@ const AppContent = () => {
           element={<ProtectedRoute requiredRole="student"><TestTaking /></ProtectedRoute>}
         />
         
-        {/* Teacher routes */}
+        {/* Teacher routes - Updated to match TeacherHome nested routes */}
         <Route
           path="/teacher/*"
           element={<ProtectedRoute requiredRole="teacher"><TeacherHome /></ProtectedRoute>}
         />
         
-        {/* Admin routes - updated to include both admin and super_admin */}
+        {/* Individual teacher routes for direct navigation */}
+        <Route
+          path="/teacher-dashboard"
+          element={<ProtectedRoute requiredRole="teacher"><Navigate to="/teacher/dashboard" replace /></ProtectedRoute>}
+        />
+        <Route
+          path="/teacher-tests"
+          element={<ProtectedRoute requiredRole="teacher"><Navigate to="/teacher/tests" replace /></ProtectedRoute>}
+        />
+        <Route
+          path="/teacher-analytics"
+          element={<ProtectedRoute requiredRole="teacher"><Navigate to="/teacher/analytics" replace /></ProtectedRoute>}
+        />
+        
+        {/* Admin routes */}
         <Route
           path="/admin"
-          element={<ProtectedRoute requiredRoles={['admin', 'super_admin']}><AdminLayout><AdminHome /></AdminLayout></ProtectedRoute>}
+          element={<ProtectedRoute requiredRoles={['admin', 'super_admin']}><AdminLayout><AdminDashboard /></AdminLayout></ProtectedRoute>}
         />
         <Route
           path="/admin/classes"
@@ -143,6 +166,12 @@ const AppContent = () => {
         <Route
           path="/admin/analytics"
           element={<ProtectedRoute requiredRoles={['admin', 'super_admin']}><AdminLayout><Analytics /></AdminLayout></ProtectedRoute>}
+        />
+        
+        {/* Promotion Panel route */}
+        <Route
+          path="/admin/promotion"
+          element={<ProtectedRoute requiredRoles={['admin', 'super_admin']}><AdminLayout><PromotionPanel /></AdminLayout></ProtectedRoute>}
         />
         
         {/* Other routes */}

@@ -10,6 +10,7 @@ const { auth } = require('./middleware/auth');
 
 // Import all routes
 const authRoutes = require('./routes/auth');
+const usersRoutes = require('./routes/users');
 const questionRoutes = require('./routes/questions');
 const testRoutes = require('./routes/tests');
 const analyticsRoutes = require('./routes/analytics');
@@ -38,38 +39,6 @@ const ensureUploadDir = () => {
     console.log('✅ Created uploads directory');
   }
   return uploadsDir;
-};
-
-// Find the correct build path - SIMPLIFIED AND FIXED
-const findBuildPath = () => {
-  // For Render.com, build is in ../../build (root directory)
-  const buildPath = path.join(__dirname, '../../build');
-  
-  if (fs.existsSync(buildPath) && fs.existsSync(path.join(buildPath, 'index.html'))) {
-    console.log(`✅ Found build directory at: ${buildPath}`);
-    console.log(`📄 index.html exists: ${fs.existsSync(path.join(buildPath, 'index.html'))}`);
-    return buildPath;
-  }
-  
-  // Fallback: check other possible locations
-  const fallbackPaths = [
-    path.join(__dirname, '../build'),
-    path.join(__dirname, 'build'),
-    path.join(__dirname, '../src/build'),
-  ];
-  
-  for (const fallbackPath of fallbackPaths) {
-    if (fs.existsSync(fallbackPath) && fs.existsSync(path.join(fallbackPath, 'index.html'))) {
-      console.log(`✅ Found build directory at fallback: ${fallbackPath}`);
-      return fallbackPath;
-    }
-  }
-  
-  console.warn('❌ No build directory found with index.html');
-  console.warn('📁 Checked paths:');
-  console.warn(`   - ${path.join(__dirname, '../../build')}`);
-  fallbackPaths.forEach(p => console.warn(`   - ${p}`));
-  return null;
 };
 
 // ================================
@@ -130,10 +99,9 @@ app.use((req, res, next) => {
   next();
 });
 
-// CORS configuration
+// CORS configuration - SIMPLIFIED FOR LOCAL DEVELOPMENT
 app.use(cors({
   origin: [
-    'https://waec-gfv0.onrender.com',
     'http://localhost:3000',
     'http://127.0.0.1:3000'
   ],
@@ -161,6 +129,7 @@ console.log('🚀 Mounting application routes...');
 
 // Mount all routes
 app.use('/api/auth', authRoutes);
+app.use('/api/users', usersRoutes);
 app.use('/api/questions', formDataUpload.any(), questionRoutes);
 app.use('/api/tests', testRoutes);
 app.use('/api/analytics', analyticsRoutes);
@@ -180,14 +149,12 @@ console.log('✅ All routes mounted successfully');
 
 // Simple test route
 app.get('/api/test', (req, res) => {
-  const buildPath = findBuildPath();
   res.json({
-    message: 'Server is working!',
-    buildExists: !!buildPath,
-    buildPath: buildPath,
-    buildHasIndex: buildPath ? fs.existsSync(path.join(buildPath, 'index.html')) : false,
+    message: 'Local Server is working!',
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    server: 'Local Development Server',
+    database: 'MongoDB Atlas'
   });
 });
 
@@ -195,18 +162,16 @@ app.get('/api/test', (req, res) => {
 app.get('/api/health', (req, res) => {
   try {
     const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
-    const buildPath = findBuildPath();
     
     const healthData = {
       status: 'OK',
-      message: 'Server is running',
+      message: 'Local Server is running',
       timestamp: new Date().toISOString(),
       environment: process.env.NODE_ENV || 'development',
       database: dbStatus,
-      buildDirectory: buildPath ? 'available' : 'missing',
-      buildHasIndex: buildPath ? fs.existsSync(path.join(buildPath, 'index.html')) : false,
+      server: 'Local Development',
       port: process.env.PORT || 5000,
-      frontendUrl: 'https://waec-gfv0.onrender.com'
+      frontendUrl: 'http://localhost:3000'
     };
 
     res.status(200).json(healthData);
@@ -226,7 +191,6 @@ app.get('/api/debug-uploads', (req, res) => {
   res.json({
     uploadDirExists: fs.existsSync(uploadDir),
     files: fs.existsSync(uploadDir) ? fs.readdirSync(uploadDir) : [],
-    sanniExists: fs.existsSync(path.join(uploadDir, 'sanni.png')),
     uploadDir: uploadDir
   });
 });
@@ -335,7 +299,7 @@ app.use('/api/*', (req, res) => {
 });
 
 // ================================
-// STATIC FILE SERVING (MUST COME BEFORE REACT HANDLER)
+// STATIC FILE SERVING
 // ================================
 
 // Serve uploads directory with proper MIME types
@@ -354,72 +318,6 @@ app.use('/uploads', express.static(uploadDir, {
 }));
 
 console.log(`✅ Serving uploads from: ${uploadDir}`);
-
-// Serve React public files (for development)
-const reactPublicPath = path.join(__dirname, '../../public');
-if (fs.existsSync(reactPublicPath)) {
-  app.use(express.static(reactPublicPath, {
-    maxAge: '1d',
-    setHeaders: (res, filePath) => {
-      if (filePath.endsWith('.png')) res.setHeader('Content-Type', 'image/png');
-      if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) res.setHeader('Content-Type', 'image/jpeg');
-      if (filePath.endsWith('.svg')) res.setHeader('Content-Type', 'image/svg+xml');
-    }
-  }));
-  console.log(`✅ Serving React public files from: ${reactPublicPath}`);
-}
-
-// ================================
-// PRODUCTION STATIC FILE SERVING
-// ================================
-
-if (process.env.NODE_ENV === 'production') {
-  console.log('🏗️  Setting up production static file serving...');
-  
-  const buildPath = findBuildPath();
-  
-  if (buildPath) {
-    // Serve build static files (CSS, JS, images from build)
-    app.use(express.static(buildPath, {
-      maxAge: '1d',
-      etag: false,
-      index: false,
-      setHeaders: (res, filePath) => {
-        if (filePath.endsWith('.css')) res.setHeader('Content-Type', 'text/css');
-        if (filePath.endsWith('.js')) res.setHeader('Content-Type', 'application/javascript');
-        if (filePath.endsWith('.png')) res.setHeader('Content-Type', 'image/png');
-        if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) res.setHeader('Content-Type', 'image/jpeg');
-      }
-    }));
-    
-    console.log(`📁 Serving build files from: ${buildPath}`);
-    
-    // React Router catch-all handler (MUST BE LAST)
-    app.get('*', (req, res) => {
-      // Skip API routes and static files
-      if (req.path.startsWith('/api/') || req.path.startsWith('/uploads/') || req.path.startsWith('/static/')) {
-        return res.status(404).json({ error: 'Not found' });
-      }
-      
-      console.log(`📄 Serving React app for path: ${req.path}`);
-      const indexPath = path.join(buildPath, 'index.html');
-      
-      if (fs.existsSync(indexPath)) {
-        res.sendFile(indexPath);
-      } else {
-        console.error('❌ index.html not found at:', indexPath);
-        res.status(404).send('Frontend application not available');
-      }
-    });
-    
-    console.log('✅ React Router configured successfully');
-    
-  } else {
-    console.error('❌ No build directory found - React app will not be served');
-  }
-} else {
-  console.log('🔧 Development mode - React static file serving disabled');
-}
 
 // ================================
 // ERROR HANDLING
@@ -477,7 +375,7 @@ const connectDB = async (retryCount = 0) => {
       throw new Error('MONGODB_URI environment variable is required');
     }
     
-    console.log('🔌 Connecting to MongoDB...');
+    console.log('🔌 Connecting to MongoDB Atlas...');
     
     await mongoose.connect(mongoUri, {
       maxPoolSize: 10,
@@ -485,7 +383,7 @@ const connectDB = async (retryCount = 0) => {
       socketTimeoutMS: 45000,
     });
     
-    console.log('✅ MongoDB connected successfully');
+    console.log('✅ MongoDB Atlas connected successfully');
     
     mongoose.connection.on('error', (err) => {
       console.error('🔥 MongoDB connection error:', err.message);
@@ -540,19 +438,19 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('🎉 ================================');
-  console.log('🎉 SERVER STARTED SUCCESSFULLY!');
+  console.log('🎉 LOCAL SERVER STARTED SUCCESSFULLY!');
   console.log('🎉 ================================');
-  console.log(`🚀 Port: ${PORT}`);
+  console.log(`🚀 Server: http://localhost:${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`⏰ Timezone: ${process.env.TZ}`);
-  console.log(`🔗 CORS Origin: https://waec-gfv0.onrender.com`);
-  
-  const buildPath = findBuildPath();
-  console.log(`📁 Build Path: ${buildPath || 'Not found'}`);
-  console.log(`📄 Index.html: ${buildPath ? fs.existsSync(path.join(buildPath, 'index.html')) : 'No build'}`);
-  
+  console.log(`🗄️  Database: MongoDB Atlas`);
   console.log(`📅 Started: ${new Date().toISOString()}`);
   console.log('🎉 ================================');
+  console.log('');
+  console.log('📋 Available Endpoints:');
+  console.log(`   🔗 Health Check: http://localhost:${PORT}/api/health`);
+  console.log(`   🔗 Test Route: http://localhost:${PORT}/api/test`);
+  console.log(`   🔗 Uploads: http://localhost:${PORT}/uploads/`);
   console.log('');
 });
 
