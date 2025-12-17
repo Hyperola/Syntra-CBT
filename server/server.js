@@ -21,6 +21,15 @@ const subjectsRoutes = require('./routes/subjects');
 const sessionsRoutes = require('./routes/sessions');
 const promotionRoutes = require('./routes/promotion');
 const transcriptRoutes = require('./routes/transcripts');
+const classSetupRoutes = require('./routes/class-setup');
+const classSubjectsRoutes = require('./routes/class-subjects');
+
+// TEACHER ROUTES
+const teacherRoutes = require('./routes/teacherRoutes');
+const scheduleRoutes = require('./routes/scheduleRoutes');
+
+// TEACHER QUESTION ROUTES - CRITICAL: This must be mounted BEFORE other routes
+const teacherQuestionsRoutes = require('./routes/teacherQuestionsRoutes');
 
 const app = express();
 
@@ -99,37 +108,374 @@ app.use((req, res, next) => {
   next();
 });
 
-// CORS configuration - SIMPLIFIED FOR LOCAL DEVELOPMENT
+// CORS configuration - EXPANDED FOR DEVELOPMENT
 app.use(cors({
   origin: [
     'http://localhost:3000',
-    'http://127.0.0.1:3000'
+    'http://127.0.0.1:3000',
+    'http://localhost:3001',
+    'http://127.0.0.1:3001',
+    'http://localhost:3002',
+    'http://127.0.0.1:3002'
   ],
   credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS']
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token', 'Accept', 'Origin'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  exposedHeaders: ['Authorization', 'x-auth-token']
 }));
 
-// Body parsing middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Handle pre-flight requests
+app.options('*', cors());
 
-// Request logging
+// Body parsing middleware - INCREASED LIMITS
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Request logging with more details
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] ${req.method} ${req.url} | IP: ${req.ip || req.connection.remoteAddress}`);
+  console.log(`[${timestamp}] ${req.method} ${req.url} | IP: ${req.ip || req.connection.remoteAddress} | Auth: ${req.headers.authorization ? 'Yes' : 'No'}`);
   next();
 });
 
 // ================================
-// ROUTES MOUNTING
+// EMERGENCY DEBUG ROUTES
+// ================================
+
+// Test if server is running at all
+app.get('/', (req, res) => {
+  res.json({
+    message: 'WAEC Server is running on LOCALHOST!',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    server: 'Local Development Server',
+    status: 'OK',
+    teacherEndpoints: {
+      questions: '/api/teacher/questions',
+      bulkQuestions: '/api/teacher/questions/bulk',
+      test: '/api/teacher/questions-test'
+    }
+  });
+});
+
+// Test database connection specifically
+app.get('/api/debug-db', async (req, res) => {
+  try {
+    const dbState = mongoose.connection.readyState;
+    const states = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+    
+    // Try to query users collection to verify data exists
+    const User = require('./models/User');
+    const userCount = await User.countDocuments();
+    
+    res.json({
+      database: {
+        state: states[dbState],
+        mongooseState: dbState,
+        connection: mongoose.connection.host,
+        databaseName: mongoose.connection.name
+      },
+      data: {
+        userCount: userCount,
+        hasData: userCount > 0,
+        message: userCount > 0 ? 'Data found!' : 'No data found in database'
+      },
+      environment: {
+        nodeEnv: process.env.NODE_ENV,
+        usingMongoDBAtlas: mongoose.connection.host ? mongoose.connection.host.includes('mongodb.net') : false
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: error.message,
+      connection: mongoose.connection.host,
+      state: mongoose.connection.readyState
+    });
+  }
+});
+
+// Test if API routes are working
+app.get('/api/debug-routes', (req, res) => {
+  const routes = [];
+  
+  function printRoutes(stack, prefix = '') {
+    stack.forEach((middleware) => {
+      if (middleware.route) {
+        // Direct route
+        const path = prefix + middleware.route.path;
+        routes.push({
+          path: path,
+          methods: Object.keys(middleware.route.methods).map(m => m.toUpperCase()),
+          type: 'direct'
+        });
+      } else if (middleware.name === 'router' && middleware.handle.stack) {
+        // Router middleware
+        printRoutes(middleware.handle.stack, prefix);
+      }
+    });
+  }
+  
+  if (app._router && app._router.stack) {
+    printRoutes(app._router.stack);
+  }
+  
+  res.json({
+    message: 'Route debugging',
+    totalRoutes: routes.length,
+    routes: routes.filter(r => r.path.includes('/api/')),
+    teacherRoutes: routes.filter(r => r.path.includes('/api/teacher')),
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Debug subjects route specifically
+app.get('/api/debug-subjects-route', (req, res) => {
+  let subjectsRouteFound = false;
+  let routesList = [];
+
+  function checkRoutes(layer, basePath = '') {
+    if (layer.route) {
+      const fullPath = basePath + layer.route.path;
+      routesList.push({
+        path: fullPath,
+        methods: Object.keys(layer.route.methods)
+      });
+      if (fullPath === '/api/subjects' || fullPath.includes('subjects')) {
+        subjectsRouteFound = true;
+      }
+    } else if (layer.name === 'router' && layer.handle.stack) {
+      // This is a router middleware, check its base path
+      let routerPath = basePath;
+      if (layer.regexp) {
+        const match = layer.regexp.toString().match(/\/\\\/([^\\]+)/);
+        if (match) {
+          routerPath = '/api/' + match[1];
+        }
+      }
+      
+      layer.handle.stack.forEach(sublayer => {
+        checkRoutes(sublayer, routerPath);
+      });
+    }
+  }
+
+  app._router.stack.forEach(layer => {
+    checkRoutes(layer);
+  });
+
+  res.json({
+    subjectsRouteMounted: subjectsRouteFound,
+    allMountedRoutes: routesList.filter(route => route.path.includes('/api/')),
+    message: subjectsRouteFound 
+      ? '✅ Subjects route is properly mounted' 
+      : '❌ Subjects route NOT found in mounted routes'
+  });
+});
+
+// Debug user info endpoint
+app.get('/api/debug/user-info', auth, (req, res) => {
+  res.json({
+    success: true,
+    user: {
+      id: req.user.id,
+      username: req.user.username,
+      role: req.user.role,
+      teacherAssignments: req.user.teacherAssignments || [],
+      subjects: req.user.subjects || [], // For backward compatibility
+      permissions: req.user.permissions || [],
+      adminPermissions: req.user.adminPermissions || 'N/A'
+    },
+    endpoints: {
+      teacher: {
+        assignments: `/api/users/teachers/${req.user.id}/assignments`,
+        classes: `/api/users/teachers/${req.user.id}/classes`,
+        dashboard: `/api/users/teachers/${req.user.id}/dashboard`,
+        schedule: '/api/teacher/schedule',
+        questions: '/api/teacher/questions',
+        bulkQuestions: '/api/teacher/questions/bulk'
+      }
+    }
+  });
+});
+
+// ================================
+// TEMPORARY TEACHER TEST ROUTES
+// ================================
+
+// Add a simple teacher classes endpoint directly in server.js to test
+app.get('/api/users/teachers/classes', auth, async (req, res) => {
+  try {
+    console.log('📚 GET /api/users/teachers/classes - Direct endpoint');
+    
+    if (req.user.role !== 'teacher') {
+      return res.status(403).json({
+        success: false,
+        error: 'Only teachers can access this endpoint'
+      });
+    }
+    
+    // Try to get teacher data
+    const teacher = await mongoose.model('User').findById(req.user.id)
+      .select('teacherAssignments name surname username')
+      .populate('teacherAssignments.class', 'name level shortName');
+    
+    if (!teacher) {
+      return res.status(404).json({
+        success: false,
+        error: 'Teacher not found'
+      });
+    }
+    
+    const teacherAssignments = teacher.teacherAssignments || [];
+    
+    if (teacherAssignments.length === 0) {
+      return res.json({
+        success: true,
+        teacher: {
+          id: teacher._id,
+          name: teacher.name,
+          surname: teacher.surname,
+          username: teacher.username
+        },
+        classes: [],
+        message: 'No classes assigned to this teacher'
+      });
+    }
+    
+    // Simple response
+    const classes = teacherAssignments.map((assignment, index) => ({
+      id: assignment.class?._id || `class-${index}`,
+      name: assignment.className || assignment.class?.name || `Class ${index + 1}`,
+      level: assignment.class?.level || 'Unknown',
+      subjectCount: assignment.subjects?.length || 0,
+      subjects: assignment.subjects?.map(sub => ({
+        name: sub.subjectName || 'Unknown Subject'
+      })) || []
+    }));
+    
+    res.json({
+      success: true,
+      teacher: {
+        id: teacher._id,
+        name: teacher.name,
+        surname: teacher.surname,
+        username: teacher.username
+      },
+      classes: classes,
+      summary: {
+        totalClasses: classes.length,
+        totalSubjects: classes.reduce((sum, cls) => sum + cls.subjectCount, 0)
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Direct teacher classes error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error',
+      message: error.message
+    });
+  }
+});
+
+// Simple test endpoint for teacher routes
+app.get('/api/users/teachers/test', auth, (req, res) => {
+  console.log('✅ Teacher test endpoint hit');
+  res.json({
+    success: true,
+    message: 'Teacher routes are working!',
+    user: req.user,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// ✅ CRITICAL FIX: Direct test endpoint for teacher questions
+app.post('/api/teacher/questions/simple-test', auth, async (req, res) => {
+  try {
+    console.log('🧪 /api/teacher/questions/simple-test - Simple test endpoint hit');
+    console.log('👤 User:', {
+      id: req.user.id,
+      username: req.user.username,
+      role: req.user.role
+    });
+    console.log('📦 Request body:', req.body);
+    
+    if (req.user.role !== 'teacher') {
+      return res.status(403).json({
+        success: false,
+        error: 'Only teachers can create questions',
+        userRole: req.user.role
+      });
+    }
+    
+    // Just return success for testing
+    res.json({
+      success: true,
+      message: 'Test endpoint works! Teacher question creation is available.',
+      user: {
+        id: req.user.id,
+        role: req.user.role,
+        username: req.user.username,
+        subjects: req.user.subjects || []
+      },
+      requestData: {
+        body: req.body,
+        headers: req.headers
+      },
+      endpoints: {
+        createSingle: '/api/teacher/questions',
+        createBulk: '/api/teacher/questions/bulk',
+        getQuestions: '/api/teacher/questions',
+        test: '/api/teacher/questions-test'
+      }
+    });
+  } catch (error) {
+    console.error('❌ Test endpoint error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
+// ================================
+// ✅ CRITICAL FIX: ROUTES MOUNTING ORDER
 // ================================
 
 console.log('🚀 Mounting application routes...');
 
-// Mount all routes
+// Debug: Check if all routes exist
+try {
+  console.log('📋 Checking routes availability:');
+  console.log('   ✅ authRoutes:', !!authRoutes);
+  console.log('   ✅ usersRoutes:', !!usersRoutes);
+  console.log('   ✅ classRoutes:', !!classRoutes);
+  console.log('   ✅ subjectsRoutes:', !!subjectsRoutes);
+  console.log('   ✅ classSetupRoutes:', !!classSetupRoutes);
+  console.log('   ✅ teacherRoutes:', !!teacherRoutes);
+  console.log('   ✅ scheduleRoutes:', !!scheduleRoutes);
+  console.log('   ✅ resultsRoutes:', !!resultsRoutes);
+  console.log('   ✅ analyticsRoutes:', !!analyticsRoutes);
+  console.log('   ✅ testRoutes:', !!testRoutes);
+  console.log('   ✅ teacherQuestionsRoutes:', !!teacherQuestionsRoutes);
+} catch (error) {
+  console.log('❌ Error checking routes:', error.message);
+}
+
+// ✅ CRITICAL: MOUNT TEACHER QUESTION ROUTES FIRST
+// This is the MOST IMPORTANT FIX - teacherQuestionsRoutes must be mounted BEFORE other routes
+// to avoid route conflicts with /api/users/teachers/*
+console.log('🔧 Mounting teacher question routes FIRST...');
+app.use('/api', teacherQuestionsRoutes);
+console.log('✅ Teacher question routes mounted at /api/teacher/*');
+
+// Now mount all other routes
+console.log('🔧 Mounting other routes...');
 app.use('/api/auth', authRoutes);
-app.use('/api/users', usersRoutes);
+app.use('/api/users', usersRoutes); // This handles /api/users/* (except teachers)
+app.use('/api/users', teacherRoutes); // This handles /api/users/teachers/* routes
+app.use('/api', scheduleRoutes);
 app.use('/api/questions', formDataUpload.any(), questionRoutes);
 app.use('/api/tests', testRoutes);
 app.use('/api/analytics', analyticsRoutes);
@@ -140,8 +486,76 @@ app.use('/api/subjects', subjectsRoutes);
 app.use('/api/sessions', sessionsRoutes);
 app.use('/api/promotion', promotionRoutes);
 app.use('/api/transcript', transcriptRoutes);
+app.use('/api/class-setup', classSetupRoutes);
+app.use('/api/class-subjects', classSubjectsRoutes);
 
 console.log('✅ All routes mounted successfully');
+console.log('🎯 IMPORTANT: Teacher routes are now accessible at:');
+console.log('   📍 /api/teacher/questions-test');
+console.log('   📍 /api/teacher/questions');
+console.log('   📍 /api/teacher/questions/bulk');
+
+// ================================
+// TEMPORARY SUBJECTS ROUTE FOR TESTING
+// ================================
+
+// Add this temporary route to test if subjects is working
+app.get('/api/subjects-test', auth, (req, res) => {
+  console.log('🎯 TEMPORARY SUBJECTS TEST ROUTE HIT');
+  res.json([
+    { id: '1', name: 'Mathematics', code: 'MATH', category: 'Core' },
+    { id: '2', name: 'English Language', code: 'ENG', category: 'Core' },
+    { id: '3', name: 'Basic Science', code: 'SCI', category: 'Core' }
+  ]);
+});
+
+// ================================
+// DEBUG TEACHER ROUTES
+// ================================
+
+// Debug all teacher routes
+app.get('/api/debug-teacher-routes', (req, res) => {
+  const routes = [];
+  
+  function processLayer(layer, path = '') {
+    if (layer.route) {
+      const routePath = path + (layer.route.path === '/' ? '' : layer.route.path);
+      const methods = Object.keys(layer.route.methods).map(m => m.toUpperCase());
+      
+      routes.push({
+        path: routePath,
+        methods: methods,
+        type: 'direct'
+      });
+    } else if (layer.name === 'router' && layer.handle.stack) {
+      // This is a router middleware
+      layer.handle.stack.forEach(sublayer => {
+        processLayer(sublayer, path);
+      });
+    }
+  }
+  
+  if (app._router && app._router.stack) {
+    app._router.stack.forEach(layer => {
+      processLayer(layer, '/');
+    });
+  }
+  
+  // Filter for teacher and question routes
+  const teacherRoutes = routes.filter(r => 
+    r.path.includes('teacher') || r.path.includes('question')
+  );
+  
+  res.json({
+    success: true,
+    totalRoutes: routes.length,
+    teacherRoutesCount: teacherRoutes.length,
+    teacherRoutes: teacherRoutes.sort((a, b) => a.path.localeCompare(b.path)),
+    message: teacherRoutes.length > 0 
+      ? 'Teacher routes found!' 
+      : 'No teacher routes found! Check route mounting.'
+  });
+});
 
 // ================================
 // TEST ROUTES
@@ -154,7 +568,13 @@ app.get('/api/test', (req, res) => {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
     server: 'Local Development Server',
-    database: 'MongoDB Atlas'
+    database: 'MongoDB Connection',
+    teacherEndpoints: {
+      test: '/api/teacher/questions-test',
+      simpleTest: '/api/teacher/questions/simple-test (POST)',
+      questions: '/api/teacher/questions',
+      bulkQuestions: '/api/teacher/questions/bulk'
+    }
   });
 });
 
@@ -171,7 +591,16 @@ app.get('/api/health', (req, res) => {
       database: dbStatus,
       server: 'Local Development',
       port: process.env.PORT || 5000,
-      frontendUrl: 'http://localhost:3000'
+      frontendUrl: 'http://localhost:3000',
+      teacherRoutes: {
+        working: true,
+        endpoints: [
+          '/api/teacher/questions-test',
+          '/api/teacher/questions',
+          '/api/teacher/questions/bulk',
+          '/api/teacher/questions/simple-test'
+        ]
+      }
     };
 
     res.status(200).json(healthData);
@@ -286,19 +715,6 @@ app.post('/api/signatures/upload',
 );
 
 // ================================
-// API 404 HANDLER
-// ================================
-
-app.use('/api/*', (req, res) => {
-  res.status(404).json({ 
-    error: 'API endpoint not found', 
-    path: req.path, 
-    method: req.method,
-    timestamp: new Date().toISOString()
-  });
-});
-
-// ================================
 // STATIC FILE SERVING
 // ================================
 
@@ -306,7 +722,6 @@ app.use('/api/*', (req, res) => {
 app.use('/uploads', express.static(uploadDir, {
   maxAge: '1d',
   setHeaders: (res, filePath) => {
-    // Set correct MIME types for images
     if (filePath.endsWith('.png')) {
       res.setHeader('Content-Type', 'image/png');
     } else if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) {
@@ -320,6 +735,31 @@ app.use('/uploads', express.static(uploadDir, {
 console.log(`✅ Serving uploads from: ${uploadDir}`);
 
 // ================================
+// API 404 HANDLER
+// ================================
+
+app.use('/api/*', (req, res) => {
+  console.log(`❌ API endpoint not found: ${req.method} ${req.path}`);
+  res.status(404).json({ 
+    error: 'API endpoint not found', 
+    path: req.path, 
+    method: req.method,
+    timestamp: new Date().toISOString(),
+    availableEndpoints: {
+      teacher: [
+        '/api/teacher/questions-test',
+        '/api/teacher/questions',
+        '/api/teacher/questions/bulk',
+        '/api/teacher/questions/simple-test (POST)'
+      ],
+      auth: '/api/auth/*',
+      users: '/api/users/*',
+      debug: '/api/debug-*'
+    }
+  });
+});
+
+// ================================
 // ERROR HANDLING
 // ================================
 
@@ -330,7 +770,10 @@ app.use((err, req, res, next) => {
     message: err.message,
     url: req.url,
     method: req.method,
-    timestamp: new Date().toISOString()
+    body: req.body,
+    headers: req.headers,
+    timestamp: new Date().toISOString(),
+    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
   });
 
   if (err.name === 'ValidationError') {
@@ -344,6 +787,7 @@ app.use((err, req, res, next) => {
   if (err.name === 'CastError') {
     return res.status(400).json({
       error: 'Invalid data format',
+      details: `Invalid value for ${err.path}: ${err.value}`,
       errorId
     });
   }
@@ -359,7 +803,9 @@ app.use((err, req, res, next) => {
     error: process.env.NODE_ENV === 'production' 
       ? 'An unexpected error occurred. Please try again later.' 
       : err.message,
-    errorId
+    errorId: errorId,
+    endpoint: req.url,
+    method: req.method
   });
 });
 
@@ -375,15 +821,25 @@ const connectDB = async (retryCount = 0) => {
       throw new Error('MONGODB_URI environment variable is required');
     }
     
-    console.log('🔌 Connecting to MongoDB Atlas...');
+    console.log('🔌 Connecting to MongoDB...');
+    console.log(`📡 Connection string: ${mongoUri.replace(/mongodb\+srv:\/\/([^:]+):([^@]+)@/, 'mongodb+srv://username:password@')}`);
     
     await mongoose.connect(mongoUri, {
       maxPoolSize: 10,
-      serverSelectionTimeoutMS: 5000,
+      serverSelectionTimeoutMS: 10000,
       socketTimeoutMS: 45000,
+      connectTimeoutMS: 10000,
     });
     
-    console.log('✅ MongoDB Atlas connected successfully');
+    console.log('✅ MongoDB connected successfully');
+    console.log(`🏠 Database: ${mongoose.connection.name}`);
+    console.log(`📍 Host: ${mongoose.connection.host}`);
+    console.log(`📊 Ready State: ${mongoose.connection.readyState} (1 = connected)`);
+    
+    // Test the connection with a simple query
+    const User = require('./models/User');
+    const userCount = await User.countDocuments();
+    console.log(`👥 Users in database: ${userCount}`);
     
     mongoose.connection.on('error', (err) => {
       console.error('🔥 MongoDB connection error:', err.message);
@@ -402,6 +858,11 @@ const connectDB = async (retryCount = 0) => {
       setTimeout(() => connectDB(retryCount + 1), delay);
     } else {
       console.error('💀 Max retry attempts reached. Exiting...');
+      console.error('💡 TROUBLESHOOTING TIPS:');
+      console.error('   1. Check your MONGODB_URI in .env file');
+      console.error('   2. Make sure MongoDB Atlas has your IP whitelisted');
+      console.error('   3. Verify your MongoDB username/password');
+      console.error('   4. Check if MongoDB service is running');
       process.exit(1);
     }
   }
@@ -435,7 +896,7 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 connectDB();
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('🎉 ================================');
   console.log('🎉 LOCAL SERVER STARTED SUCCESSFULLY!');
@@ -443,15 +904,49 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server: http://localhost:${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`⏰ Timezone: ${process.env.TZ}`);
-  console.log(`🗄️  Database: MongoDB Atlas`);
+  console.log(`🔗 CORS Enabled for: http://localhost:3000`);
   console.log(`📅 Started: ${new Date().toISOString()}`);
   console.log('🎉 ================================');
   console.log('');
-  console.log('📋 Available Endpoints:');
-  console.log(`   🔗 Health Check: http://localhost:${PORT}/api/health`);
-  console.log(`   🔗 Test Route: http://localhost:${PORT}/api/test`);
-  console.log(`   🔗 Uploads: http://localhost:${PORT}/uploads/`);
+  console.log('🔍 QUICK TEST ENDPOINTS:');
+  console.log(`   📍 Server: http://localhost:${PORT}/`);
+  console.log(`   📍 Health: http://localhost:${PORT}/api/health`);
+  console.log(`   📍 DB Test: http://localhost:${PORT}/api/debug-db`);
+  console.log(`   📍 Routes: http://localhost:${PORT}/api/debug-routes`);
+  console.log(`   📍 User Info: http://localhost:${PORT}/api/debug/user-info`);
+  console.log(`   📍 Teacher Classes: http://localhost:${PORT}/api/users/teachers/classes`);
+  console.log(`   📍 Teacher Test: http://localhost:${PORT}/api/users/teachers/test`);
+  console.log(`   📍 Teacher Routes Debug: http://localhost:${PORT}/api/debug-teacher-routes`);
   console.log('');
+  console.log('📚 TEACHER QUESTION ENDPOINTS (CRITICAL):');
+  console.log(`   📍 Teacher Questions Test: http://localhost:${PORT}/api/teacher/questions-test`);
+  console.log(`   📍 Teacher Questions: http://localhost:${PORT}/api/teacher/questions (GET)`);
+  console.log(`   📍 Create Single Question: http://localhost:${PORT}/api/teacher/questions (POST)`);
+  console.log(`   📍 Bulk Create Questions: http://localhost:${PORT}/api/teacher/questions/bulk (POST)`);
+  console.log(`   📍 Teacher Questions Debug: http://localhost:${PORT}/api/teacher/questions-debug`);
+  console.log(`   📍 Teacher Simple Test (POST): http://localhost:${PORT}/api/teacher/questions/simple-test`);
+  console.log(`   📍 Teacher Classes: http://localhost:${PORT}/api/users/teachers/6931b8ec77ceafcb4e65b2f9/classes`);
+  console.log(`   📍 Teacher Assignments: http://localhost:${PORT}/api/users/teachers/6931b8ec77ceafcb4e65b2f9/assignments`);
+  console.log('🎉 ================================');
+  console.log('');
+  console.log('⚠️  IMPORTANT: Test endpoints in this order:');
+  console.log(`   1. 📍 http://localhost:${PORT}/api/teacher/questions-test`);
+  console.log(`   2. 📍 http://localhost:${PORT}/api/debug-teacher-routes`);
+  console.log(`   3. Use POST to: http://localhost:${PORT}/api/teacher/questions/simple-test`);
+  console.log('🎉 ================================');
+});
+
+// Handle server errors
+server.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    console.error(`❌ Port ${PORT} is already in use.`);
+    console.error('💡 Try:');
+    console.error(`   - Killing process on port ${PORT}: lsof -ti:${PORT} | xargs kill -9`);
+    console.error(`   - Using a different port: PORT=5001 node server.js`);
+  } else {
+    console.error('❌ Server error:', error);
+  }
+  process.exit(1);
 });
 
 module.exports = app;

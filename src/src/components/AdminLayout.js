@@ -8,10 +8,11 @@ const AdminLayout = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
   
-  // Updated tabs array with Promotion Panel
+  // Updated tabs array with separate Manage Subjects
   const tabs = [
     { path: '/admin', label: 'Home' },
-    { path: '/admin/classes', label: 'Manage Classes & Subjects' },
+    { path: '/admin/classes', label: 'Manage Classes' },
+    { path: '/admin/subjects', label: 'Manage Subjects' },
     { path: '/admin/users', label: 'Manage Users' },
     { path: '/admin/tests', label: 'Tests & Exams' },
     { path: '/admin/results', label: 'Results' },
@@ -76,27 +77,30 @@ const AdminLayout = ({ children }) => {
         </div>
       </header>
 
-      <nav style={styles.nav}>
-        {tabs.map(tab => (
-          <button
-            key={tab.path}
-            onClick={() => navigate(tab.path)}
-            style={{
-              ...styles.navButton,
-              backgroundColor: location.pathname === tab.path ? '#D4A017' : '#4B5320',
-              color: location.pathname === tab.path ? '#000000' : '#FFFFFF',
-            }}
-            onMouseOver={e =>
-              (e.target.style.backgroundColor = location.pathname === tab.path ? '#FFFFFF' : '#5A6B2A')
-            }
-            onMouseOut={e =>
-              (e.target.style.backgroundColor = location.pathname === tab.path ? '#D4A017' : '#4B5320')
-            }
-          >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
+      {/* Sticky Navigation */}
+      <div style={styles.stickyNav}>
+        <nav style={styles.nav}>
+          {tabs.map(tab => (
+            <button
+              key={tab.path}
+              onClick={() => navigate(tab.path)}
+              style={{
+                ...styles.navButton,
+                backgroundColor: location.pathname === tab.path ? '#D4A017' : '#4B5320',
+                color: location.pathname === tab.path ? '#000000' : '#FFFFFF',
+              }}
+              onMouseOver={e =>
+                (e.target.style.backgroundColor = location.pathname === tab.path ? '#FFFFFF' : '#5A6B2A')
+              }
+              onMouseOut={e =>
+                (e.target.style.backgroundColor = location.pathname === tab.path ? '#D4A017' : '#4B5320')
+              }
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+      </div>
 
       <main style={styles.main}>{children}</main>
 
@@ -109,7 +113,6 @@ const AdminLayout = ({ children }) => {
   );
 };
 
-// Your styles remain the same...
 const styles = {
   container: {
     minHeight: '100vh',
@@ -123,7 +126,7 @@ const styles = {
     boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
     position: 'sticky',
     top: 0,
-    zIndex: 10,
+    zIndex: 100,
   },
   headerContent: {
     maxWidth: '1400px',
@@ -181,17 +184,21 @@ const styles = {
   buttonIcon: {
     fontSize: '16px',
   },
+  stickyNav: {
+    position: 'sticky',
+    top: '86px', // Height of header
+    zIndex: 99,
+    backgroundColor: '#FFFFFF',
+    borderBottom: '1px solid #ecf0f1',
+  },
   nav: {
     maxWidth: '1400px',
-    margin: '20px auto',
+    margin: '0 auto',
     display: 'flex',
     flexWrap: 'wrap',
     gap: '10px',
     padding: '12px 15px',
     backgroundColor: '#FFFFFF',
-    borderRadius: '6px',
-    boxShadow: '0 2px 6px rgba(0,0,0,0.08)',
-    border: '1px solid #ecf0f1',
   },
   navButton: {
     padding: '8px 16px',
@@ -201,6 +208,7 @@ const styles = {
     cursor: 'pointer',
     transition: 'all 0.3s ease',
     fontWeight: '500',
+    whiteSpace: 'nowrap',
   },
   main: {
     maxWidth: '1400px',

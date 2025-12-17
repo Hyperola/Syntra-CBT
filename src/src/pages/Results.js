@@ -41,17 +41,24 @@ const Results = () => {
 
       try {
         const [testRes, resultsRes] = await Promise.all([
-          axios.get(`https://waec-gfv0.onrender.com/api/tests/${testId}`, {
+          axios.get(`http://localhost:5000/api/tests/${testId}`, {
             headers: { Authorization: `Bearer ${token}` },
           }),
-          axios.get(`https://waec-gfv0.onrender.com/api/tests/${testId}/results`, {
+          // FIX: Use the correct endpoint and handle response structure
+          axios.get(`http://localhost:5000/api/results/test/${testId}`, {
             headers: { Authorization: `Bearer ${token}` },
           }),
         ]);
+        
         console.log('Results - Fetched test:', testRes.data);
         console.log('Results - Fetched results:', resultsRes.data);
+        
         setTest(testRes.data);
-        setResults(resultsRes.data);
+        
+        // FIX: Handle the response structure properly
+        const resultsData = resultsRes.data.results || [];
+        setResults(resultsData);
+        
         setLoading(false);
       } catch (error) {
         console.error('Results - Error:', error.response?.data || error.message);
@@ -129,7 +136,7 @@ const Results = () => {
         <p style={{ color: '#333', fontFamily: 'sans-serif', marginBottom: '20px' }}>
           Total Questions: {test.questions?.length || 'N/A'}
         </p>
-        {results.length === 0 ? (
+        {!Array.isArray(results) || results.length === 0 ? (
           <p style={{ color: '#4B5320', fontFamily: 'sans-serif' }}>No students have taken this test yet.</p>
         ) : (
           <div style={{ backgroundColor: '#FFFFFF', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', border: '1px solid #D3D3D3' }}>
@@ -195,7 +202,7 @@ const Results = () => {
               <h3 style={{ fontSize: '20px', color: '#4B5320', fontFamily: 'sans-serif', marginBottom: '15px' }}>
                 Answers for {selectedResult.userId?.name ? `${selectedResult.userId.name} ${selectedResult.userId.surname}` : 'Unknown'}
               </h3>
-              {Object.entries(selectedResult.answers).map(([questionId, selectedAnswer], index) => {
+              {selectedResult.answers && typeof selectedResult.answers === 'object' && Object.entries(selectedResult.answers).map(([questionId, selectedAnswer], index) => {
                 const question = selectedResult.test?.questions.find(q => q._id.toString() === questionId);
                 return (
                   <div key={index} style={{ marginBottom: '15px', padding: '10px', border: '1px solid #D3D3D3', borderRadius: '4px', backgroundColor: selectedAnswer === question?.correctAnswer ? '#E6FFE6' : '#FFE6E6' }}>

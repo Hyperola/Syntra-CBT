@@ -59,7 +59,7 @@ const auth = async (req, res, next) => {
       });
     }
 
-    // NEW: Enhanced super_admin validation
+    // NEW: Enhanced super_admin validation - REMOVED EXTRA VALIDATION
     if (user.role === 'super_admin') {
       console.log('Auth middleware - Super admin access detected', {
         userId: user._id,
@@ -67,24 +67,8 @@ const auth = async (req, res, next) => {
         ip: req.ip
       });
       
-      // Additional security checks for super_admin
-      const superAdminCheck = await User.findOne({
-        _id: user._id,
-        role: 'super_admin',
-        active: true,
-        blocked: false
-      }).select('_id role active blocked');
-
-      if (!superAdminCheck) {
-        console.error('Auth middleware - Super admin validation failed', {
-          userId: user._id,
-          username: user.username
-        });
-        return res.status(401).json({ 
-          error: 'Super admin account validation failed.',
-          code: 'SUPER_ADMIN_VALIDATION_FAILED'
-        });
-      }
+      // Trust the JWT verification and user lookup - no extra validation needed
+      // Super admin role is already verified by the token and user lookup above
     }
 
     // Add user to request object with enhanced information

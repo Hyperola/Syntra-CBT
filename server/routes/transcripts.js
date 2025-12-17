@@ -76,7 +76,7 @@ router.get('/:studentId', auth, async (req, res) => {
 
     res.json(transcript);
   } catch (error) {
-    console.error('Error generating transcript for student:', studentId, error);
+    console.error('Error generating transcript for student:', req.params.studentId, error);
     res.status(500).json({ message: 'Server error generating transcript' });
   }
 });

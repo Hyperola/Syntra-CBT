@@ -31,7 +31,7 @@ export const useResultEditing = () => {
     try {
       const token = localStorage.getItem('token');
       const response = await axios.put(
-        `https://waec-gfv0.onrender.com/api/results/${resultId}`, // FIXED API URL
+        `http://localhost:5000/api/results/${resultId}`, // FIXED API URL
         { score: Number(editScore) },
         { headers: { Authorization: `Bearer ${token}` } }
       );

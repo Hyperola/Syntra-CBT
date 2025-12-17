@@ -5,27 +5,27 @@ import { useAuth } from '../context/AuthContext';
 const SessionSchedules = () => {
   const { user } = useAuth();
   const [sessions, setSessions] = useState([]);
+  const [activeSessionTerm, setActiveSessionTerm] = useState(null);
   const [formData, setFormData] = useState({ sessionName: '', isActive: false });
   const [editSession, setEditSession] = useState(null);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  const [showForceDelete, setShowForceDelete] = useState(null);
 
-  // Check if user has admin privileges (admin or super_admin)
+  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
   const hasAdminAccess = user && (user.role === 'admin' || user.role === 'super_admin');
 
-  console.log('SessionSchedules - User:', user, 'Has Admin Access:', hasAdminAccess);
-
   useEffect(() => {
-    if (hasAdminAccess) {
+    if (user) {
       fetchSessions();
+      fetchActiveSessionTerm();
     }
-  }, [hasAdminAccess]);
+  }, [user]);
 
   const getAuthHeaders = () => {
     const token = localStorage.getItem('token');
-    console.log('Using token for request:', token ? 'Present' : 'Missing');
     return {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
@@ -36,12 +36,10 @@ const SessionSchedules = () => {
     setLoading(true);
     setError(null);
     try {
-      console.log('Fetching sessions...');
-      const res = await axios.get('https://waec-gfv0.onrender.com/api/sessions', {
+      const res = await axios.get(`${API_BASE_URL}/api/sessions`, {
         headers: getAuthHeaders(),
       });
       console.log('Sessions fetched successfully:', res.data);
-      // Handle both paginated and flat responses
       const sessionsData = res.data.sessions || res.data;
       setSessions(Array.isArray(sessionsData) ? sessionsData : []);
     } catch (err) {
@@ -49,14 +47,23 @@ const SessionSchedules = () => {
       const errorMessage = err.response?.data?.error || 
                           err.response?.statusText || 
                           'Failed to load sessions';
-      setError(`Error ${err.response?.status}: ${errorMessage}`);
-      
-      // If token might be invalid, try to refresh
-      if (err.response?.status === 403 || err.response?.status === 401) {
-        setError('Authentication failed. Please try logging in again.');
-      }
+      setError(`Error ${err.response?.status || 'Unknown'}: ${errorMessage}`);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
+  };
+
+  const fetchActiveSessionTerm = async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/api/sessions/active`, {
+        headers: getAuthHeaders(),
+      });
+      console.log('Active session fetched:', res.data);
+      setActiveSessionTerm(res.data);
+    } catch (err) {
+      console.error('Error fetching active session:', err);
+      setActiveSessionTerm(null);
+    }
   };
 
   const clearMessages = () => {
@@ -74,85 +81,264 @@ const SessionSchedules = () => {
     }
 
     // Validate session name format
-    const sessionNameRegex = /^\d{4}\/\d{4} (First|Second|Third) Term$/;
+    const sessionNameRegex = /^\d{4}\/\d{4}$/;
     if (!sessionNameRegex.test(formData.sessionName)) {
-      setError('Session must be in format: YYYY/YYYY First|Second|Third Term (e.g., 2024/2025 First Term)');
+      setError('Session must be in format: YYYY/YYYY (e.g., 2024/2025)');
       return;
     }
 
     setActionLoading(true);
     try {
-      console.log('Submitting session:', formData);
+      let response;
       
       if (editSession) {
-        const response = await axios.put(
-          `https://waec-gfv0.onrender.com/api/sessions/${editSession._id}`, 
+        response = await axios.put(
+          `${API_BASE_URL}/api/sessions/${editSession._id}`, 
           formData, 
           { headers: getAuthHeaders() }
         );
-        console.log('Update response:', response.data);
         setSuccess('Session updated successfully.');
         setEditSession(null);
       } else {
-        const response = await axios.post(
-          'https://waec-gfv0.onrender.com/api/sessions', 
+        response = await axios.post(
+          `${API_BASE_URL}/api/sessions`, 
           formData, 
           { headers: getAuthHeaders() }
         );
-        console.log('Create response:', response.data);
-        setSuccess('Session created successfully.');
+        setSuccess('Session created successfully with all three terms.');
       }
+      
+      console.log('Session operation successful:', response.data);
       setFormData({ sessionName: '', isActive: false });
-      fetchSessions();
+      await fetchSessions();
+      await fetchActiveSessionTerm();
     } catch (err) {
       console.error('Error processing session:', err);
       const errorData = err.response?.data;
-      
       let errorMessage = 'Failed to process session';
+      
       if (errorData?.error) {
         errorMessage = errorData.error;
-      } else if (errorData?.details?.[0]) {
-        errorMessage = errorData.details[0];
-      } else if (err.response?.statusText) {
-        errorMessage = err.response.statusText;
+      }
+      if (errorData?.details && Array.isArray(errorData.details)) {
+        errorMessage += `: ${errorData.details.join(', ')}`;
+      } else if (errorData?.message) {
+        errorMessage = errorData.message;
       }
       
       setError(`Error ${err.response?.status || 'Unknown'}: ${errorMessage}`);
+    } finally {
+      setActionLoading(false);
     }
-    setActionLoading(false);
   };
 
-  const handleDelete = async (sessionId) => {
-    if (!window.confirm('Are you sure you want to delete this session?')) return;
+  const handleActivateSession = async (sessionId, sessionName) => {
+    if (!sessionId) {
+      setError('Invalid session ID');
+      return;
+    }
+
+    setActionLoading(true);
+    clearMessages();
+    
+    try {
+      console.log('🔄 Activating session:', { sessionId, sessionName });
+      
+      const response = await axios.patch(
+        `${API_BASE_URL}/api/sessions/${sessionId}/activate`,
+        {},
+        { headers: getAuthHeaders() }
+      );
+      
+      console.log('✅ Session activated:', response.data);
+      setSuccess(`Session "${sessionName}" activated successfully.`);
+      await fetchSessions();
+      await fetchActiveSessionTerm();
+      
+    } catch (err) {
+      console.error('❌ Error activating session:', {
+        status: err.response?.status,
+        statusText: err.response?.statusText,
+        data: err.response?.data,
+        message: err.message
+      });
+      
+      const errorData = err.response?.data;
+      let errorMessage = 'Failed to activate session';
+      
+      if (errorData?.error) {
+        errorMessage = errorData.error;
+      }
+      
+      if (errorData?.details) {
+        if (Array.isArray(errorData.details)) {
+          errorMessage += `: ${errorData.details.join(', ')}`;
+        } else {
+          errorMessage += `: ${errorData.details}`;
+        }
+      }
+      
+      if (errorData?.suggestion) {
+        errorMessage += `\n\nSuggestion: ${errorData.suggestion}`;
+      }
+      
+      // Try to fix terms if there's a term error
+      if (errorMessage.includes('terms') || errorMessage.includes('term')) {
+        setError(`Error: ${errorMessage}\n\nTrying to fix terms automatically...`);
+        
+        try {
+          // Attempt to fix terms
+          await axios.patch(
+            `${API_BASE_URL}/api/sessions/${sessionId}/fix-terms`,
+            {},
+            { headers: getAuthHeaders() }
+          );
+          
+          // Try activation again after fixing terms
+          const retryResponse = await axios.patch(
+            `${API_BASE_URL}/api/sessions/${sessionId}/activate`,
+            {},
+            { headers: getAuthHeaders() }
+          );
+          
+          console.log('✅ Session activated after fixing terms:', retryResponse.data);
+          setSuccess(`Session "${sessionName}" activated successfully after fixing terms.`);
+          await fetchSessions();
+          await fetchActiveSessionTerm();
+          return;
+          
+        } catch (fixError) {
+          console.error('Failed to fix terms:', fixError);
+          errorMessage += '\n\nAutomatic term fix failed. Please contact administrator.';
+        }
+      }
+      
+      setError(`Error activating "${sessionName}": ${errorMessage}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleActivateTerm = async (sessionId, termName, sessionName) => {
+    if (!sessionId || !termName) {
+      setError('Invalid session ID or term name');
+      return;
+    }
+
+    setActionLoading(true);
+    clearMessages();
+    
+    try {
+      const response = await axios.patch(
+        `${API_BASE_URL}/api/sessions/${sessionId}/terms/${encodeURIComponent(termName)}/activate`,
+        {},
+        { headers: getAuthHeaders() }
+      );
+      console.log('Term activated:', response.data);
+      setSuccess(`Term ${termName} activated for session "${sessionName}".`);
+      await fetchSessions();
+      await fetchActiveSessionTerm();
+    } catch (err) {
+      console.error('Error activating term:', err);
+      const errorData = err.response?.data;
+      let errorMessage = 'Failed to activate term';
+      if (errorData?.error) errorMessage = errorData.error;
+      if (errorData?.suggestion) errorMessage += `. ${errorData.suggestion}`;
+      setError(`Error ${err.response?.status || 'Unknown'}: ${errorMessage}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Force delete session (bypass dependency checks)
+  const handleForceDelete = async (sessionId, sessionName) => {
+    setActionLoading(true);
+    clearMessages();
+    
+    try {
+      const response = await axios.delete(
+        `${API_BASE_URL}/api/sessions/${sessionId}?force=true`, 
+        { headers: getAuthHeaders() }
+      );
+      console.log('Session force deleted:', response.data);
+      setSuccess(`Session "${sessionName}" has been force deleted successfully.`);
+      await fetchSessions();
+      await fetchActiveSessionTerm();
+    } catch (err) {
+      console.error('Force delete failed:', err);
+      const errorMessage = err.response?.data?.error || 'Force delete failed.';
+      setError(`Error: ${errorMessage}`);
+    } finally {
+      setActionLoading(false);
+      setShowForceDelete(null);
+    }
+  };
+
+  const handleDelete = async (sessionId, sessionName) => {
+    if (!sessionId) {
+      setError('Invalid session ID');
+      return;
+    }
+
+    // Regular delete attempt first
+    if (!window.confirm(`Are you sure you want to delete session "${sessionName}"?`)) return;
     
     setActionLoading(true);
     clearMessages();
     
     try {
-      console.log('Deleting session:', sessionId);
-      await axios.delete(
-        `https://waec-gfv0.onrender.com/api/sessions/${sessionId}`, 
+      const response = await axios.delete(
+        `${API_BASE_URL}/api/sessions/${sessionId}`, 
         { headers: getAuthHeaders() }
       );
-      setSuccess('Session deleted successfully.');
-      fetchSessions();
+      console.log('Session deleted:', response.data);
+      setSuccess(`Session "${sessionName}" deleted successfully.`);
+      await fetchSessions();
+      await fetchActiveSessionTerm();
     } catch (err) {
       console.error('Error deleting session:', err);
       const errorData = err.response?.data;
+      
       if (errorData?.dependencies) {
-        setError(`Cannot delete session. It has ${errorData.dependencies.academicRecords} academic records and ${errorData.dependencies.tests} tests.`);
+        // Show force delete option
+        setShowForceDelete({
+          sessionId,
+          sessionName,
+          dependencies: errorData.dependencies
+        });
+        
+        setError(
+          `Cannot delete session "${sessionName}". It has:\n` +
+          `• ${errorData.dependencies.academicRecords || 0} academic records\n` +
+          `• ${errorData.dependencies.tests || 0} tests\n\n` +
+          `Use "Force Delete" to remove anyway.`
+        );
       } else {
-        setError(errorData?.error || err.response?.statusText || 'Failed to delete session.');
+        const errorMessage = errorData?.error || 'Failed to delete session.';
+        setError(`Error ${err.response?.status || 'Unknown'}: ${errorMessage}`);
       }
+    } finally {
+      setActionLoading(false);
     }
-    setActionLoading(false);
   };
 
   const handleEdit = (session) => {
+    if (!session || !session._id) {
+      setError('Invalid session data');
+      return;
+    }
+
     clearMessages();
     setEditSession(session);
+    
+    // Extract just the YYYY/YYYY part for editing if session name contains term
+    let sessionName = session.sessionName;
+    if (sessionName && sessionName.includes(' ')) {
+      sessionName = sessionName.split(' ')[0];
+    }
+    
     setFormData({ 
-      sessionName: session.sessionName, 
+      sessionName: sessionName, 
       isActive: session.isActive 
     });
   };
@@ -163,305 +349,881 @@ const SessionSchedules = () => {
     setFormData({ sessionName: '', isActive: false });
   };
 
-  // Debug panel (remove in production)
-  const DebugPanel = () => (
-    <div style={{ 
-      backgroundColor: '#f8f9fa', 
-      border: '1px solid #dee2e6', 
-      borderRadius: '4px', 
-      padding: '10px', 
-      marginBottom: '20px',
-      fontSize: '12px',
-      fontFamily: 'monospace'
-    }}>
-      <strong>Debug Info:</strong>
-      <div>User Role: {user?.role}</div>
-      <div>Has Admin Access: {hasAdminAccess ? 'Yes' : 'No'}</div>
-      <div>Token: {localStorage.getItem('token') ? 'Present' : 'Missing'}</div>
-      <div>Sessions Count: {sessions.length}</div>
-    </div>
-  );
+  const formatDate = (dateString) => {
+    if (!dateString) return 'Not set';
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    } catch (error) {
+      return 'Invalid date';
+    }
+  };
 
-  if (loading) return (
-    <div style={{ padding: '20px', textAlign: 'center' }}>
-      <p style={{ color: '#FFFFFF', backgroundColor: '#4B5320', padding: '20px', fontFamily: 'sans-serif', fontSize: '16px' }}>
-        Loading sessions...
-      </p>
-    </div>
-  );
+  const formatSessionName = (sessionName) => {
+    if (!sessionName) return '';
+    if (sessionName.includes(' ')) {
+      return sessionName.split(' ')[0];
+    }
+    return sessionName;
+  };
 
-  if (!hasAdminAccess) {
+  if (loading && sessions.length === 0) {
     return (
-      <div style={{ padding: '20px', textAlign: 'center' }}>
-        <p style={{ 
-          padding: '20px', 
-          color: '#B22222', 
-          backgroundColor: '#FFF3F3', 
-          fontFamily: 'sans-serif', 
-          fontSize: '16px',
-          border: '1px solid #B22222',
-          borderRadius: '4px'
-        }}>
-          ❌ Admin access required. Your role: <strong>{user?.role || 'unknown'}</strong>
-        </p>
+      <div style={{ 
+        padding: '40px', 
+        textAlign: 'center',
+        backgroundColor: '#F8F9FA',
+        minHeight: '100vh'
+      }}>
+        <div style={styles.loadingSpinner}></div>
+        <p style={{ color: '#4B5320', marginTop: '16px' }}>Loading sessions...</p>
       </div>
     );
   }
 
   return (
-    <div style={{ padding: '20px' }}>
-      {/* Remove DebugPanel in production */}
-      <DebugPanel />
+    <div style={{ padding: '20px', backgroundColor: '#F8F9FA', minHeight: '100vh' }}>
+      {/* Active Session Display */}
+      {activeSessionTerm && activeSessionTerm.session && (
+        <div style={styles.activeSessionBanner}>
+          <div style={styles.activeSessionContent}>
+            <h3 style={styles.activeSessionTitle}>Currently Active</h3>
+            <p style={styles.activeSessionText}>
+              Session: <strong>{formatSessionName(activeSessionTerm.session.sessionName)}</strong> | 
+              Term: <strong>{activeSessionTerm.activeTerm?.term || 'No active term'}</strong>
+            </p>
+          </div>
+        </div>
+      )}
 
+      {/* Error and Success Messages */}
       {error && (
-        <div style={{ 
-          backgroundColor: '#FFF3F3', 
-          color: '#B22222', 
-          borderLeft: '4px solid #B22222', 
-          padding: '15px', 
-          marginBottom: '20px', 
-          fontFamily: 'sans-serif', 
-          borderRadius: '4px', 
-          fontSize: '14px',
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center' 
-        }}>
-          <span>❌ {error}</span>
-          <button 
-            onClick={clearMessages} 
-            style={{ 
-              background: 'none', 
-              border: 'none', 
-              color: '#B22222', 
-              cursor: 'pointer', 
-              fontSize: '16px',
-              padding: '0 5px'
-            }}
-          >
-            ×
-          </button>
+        <div style={styles.errorMessage}>
+          <span style={{ whiteSpace: 'pre-line' }}>❌ {error}</span>
+          <button onClick={clearMessages} style={styles.closeButton}>×</button>
         </div>
       )}
       
       {success && (
-        <div style={{ 
-          backgroundColor: '#E6FFE6', 
-          color: '#228B22', 
-          borderLeft: '4px solid #228B22', 
-          padding: '15px', 
-          marginBottom: '20px', 
-          fontFamily: 'sans-serif', 
-          borderRadius: '4px', 
-          fontSize: '14px',
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center' 
-        }}>
+        <div style={styles.successMessage}>
           <span>✅ {success}</span>
-          <button 
-            onClick={clearMessages} 
-            style={{ 
-              background: 'none', 
-              border: 'none', 
-              color: '#228B22', 
-              cursor: 'pointer', 
-              fontSize: '16px',
-              padding: '0 5px'
-            }}
-          >
-            ×
-          </button>
+          <button onClick={clearMessages} style={styles.closeButton}>×</button>
         </div>
       )}
 
-      <div style={{ 
-        marginBottom: '20px', 
-        padding: '10px', 
-        backgroundColor: '#e7f3ff', 
-        border: '1px solid #b3d9ff', 
-        borderRadius: '4px' 
-      }}>
-        <p style={{ margin: 0, fontFamily: 'sans-serif', fontSize: '14px', color: '#0066cc' }}>
-          👋 Welcome, <strong>{user?.name}</strong>! Role: <strong>{user?.role}</strong>
-        </p>
-      </div>
+      {/* Force Delete Confirmation */}
+      {showForceDelete && (
+        <div style={styles.forceDeleteModal}>
+          <div style={styles.forceDeleteContent}>
+            <h3 style={styles.forceDeleteTitle}>🚨 Force Delete Session</h3>
+            <p style={styles.forceDeleteText}>
+              Session "<strong>{showForceDelete.sessionName}</strong>" has:
+            </p>
+            <ul style={styles.forceDeleteList}>
+              <li>📚 {showForceDelete.dependencies.academicRecords || 0} academic records</li>
+              <li>📝 {showForceDelete.dependencies.tests || 0} tests</li>
+            </ul>
+            <p style={styles.forceDeleteWarning}>
+              ⚠️ Force deleting will remove the session and ALL associated data permanently!
+            </p>
+            <div style={styles.forceDeleteActions}>
+              <button
+                onClick={() => handleForceDelete(showForceDelete.sessionId, showForceDelete.sessionName)}
+                disabled={actionLoading}
+                style={styles.forceDeleteButton}
+              >
+                🗑️ Force Delete
+              </button>
+              <button
+                onClick={() => setShowForceDelete(null)}
+                disabled={actionLoading}
+                style={styles.cancelButton}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
-      <h3 style={{ 
-        fontSize: '20px', 
-        fontWeight: 'bold', 
-        color: '#FFFFFF', 
-        fontFamily: 'sans-serif', 
-        backgroundColor: '#4B5320', 
-        padding: '10px', 
-        borderRadius: '4px', 
-        marginBottom: '20px' 
-      }}>
-        {editSession ? 'Edit Session' : 'Create New Session'}
-      </h3>
-      
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px', maxWidth: '400px', marginBottom: '20px' }}>
-        <div>
-          <label style={{ display: 'block', color: '#4B5320', fontFamily: 'sans-serif', fontSize: '14px', marginBottom: '5px' }}>
-            Session Name *
-          </label>
-          <input
-            type="text"
-            value={formData.sessionName}
-            onChange={(e) => setFormData({ ...formData, sessionName: e.target.value })}
-            required
-            placeholder="e.g., 2024/2025 First Term"
-            pattern="^\d{4}\/\d{4} (First|Second|Third) Term$"
-            title="Format: YYYY/YYYY First|Second|Third Term"
-            style={{ padding: '8px', border: '1px solid #000000', borderRadius: '4px', width: '100%', fontFamily: 'sans-serif', fontSize: '14px', backgroundColor: '#F5F5F5', color: '#000000' }}
-          />
-          <small style={{ color: '#666', fontSize: '12px', fontFamily: 'sans-serif' }}>
-            Format: YYYY/YYYY First|Second|Third Term (e.g., 2024/2025 First Term)
-          </small>
+      {/* Session Form */}
+      {hasAdminAccess && (
+        <div style={styles.formSection}>
+          <h3 style={styles.sectionTitle}>
+            {editSession ? 'Edit Session' : 'Create New Session'}
+          </h3>
+          
+          <form onSubmit={handleSubmit} style={styles.form}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Session Name *</label>
+              <input
+                type="text"
+                value={formData.sessionName}
+                onChange={(e) => setFormData({ ...formData, sessionName: e.target.value })}
+                required
+                placeholder="e.g., 2024/2025"
+                pattern="^\d{4}\/\d{4}$"
+                title="Format: YYYY/YYYY"
+                style={styles.input}
+                disabled={actionLoading}
+              />
+              <small style={styles.helperText}>
+                Format: YYYY/YYYY (e.g., 2024/2025) - Three terms will be created automatically
+              </small>
+            </div>
+            
+            <div style={styles.checkboxGroup}>
+              <input
+                type="checkbox"
+                checked={formData.isActive}
+                onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
+                style={styles.checkbox}
+                disabled={actionLoading}
+              />
+              <label style={styles.label}>Set as Active Session</label>
+            </div>
+            
+            <div style={styles.formActions}>
+              <button
+                type="submit"
+                disabled={actionLoading}
+                style={{
+                  ...styles.primaryButton,
+                  ...(actionLoading ? styles.disabledButton : {})
+                }}
+              >
+                {actionLoading ? 'Processing...' : (editSession ? 'Update Session' : 'Create Session')}
+              </button>
+              {editSession && (
+                <button
+                  type="button"
+                  onClick={handleCancelEdit}
+                  disabled={actionLoading}
+                  style={styles.secondaryButton}
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+          </form>
         </div>
-        
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <input
-            type="checkbox"
-            checked={formData.isActive}
-            onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
-            style={{ width: '18px', height: '18px' }}
-          />
-          <label style={{ color: '#4B5320', fontFamily: 'sans-serif', fontSize: '14px' }}>
-            Set as Active Session
-          </label>
-        </div>
-        
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button
-            type="submit"
-            disabled={actionLoading}
-            style={{
-              padding: '8px 16px',
-              backgroundColor: '#D4A017',
-              color: '#000000',
-              border: '1px solid #000000',
-              borderRadius: '6px',
-              fontFamily: 'sans-serif',
-              fontSize: '14px',
-              cursor: actionLoading ? 'not-allowed' : 'pointer',
-              opacity: actionLoading ? 0.5 : 1,
-            }}
-          >
-            {actionLoading ? 'Processing...' : (editSession ? 'Update Session' : 'Create Session')}
-          </button>
-          {editSession && (
-            <button
-              type="button"
-              onClick={handleCancelEdit}
-              disabled={actionLoading}
-              style={{
-                padding: '8px 16px',
-                backgroundColor: '#FFFFFF',
-                color: '#000000',
-                border: '1px solid #000000',
-                borderRadius: '6px',
-                fontFamily: 'sans-serif',
-                fontSize: '14px',
-                cursor: actionLoading ? 'not-allowed' : 'pointer',
-                opacity: actionLoading ? 0.5 : 1,
-              }}
+      )}
+
+      {/* Sessions List */}
+      <div style={styles.sessionsSection}>
+        <div style={styles.sectionHeader}>
+          <h3 style={styles.sectionTitle}>
+            All Sessions ({sessions.length})
+            {!hasAdminAccess && <span style={styles.viewOnlyBadge}>View Only</span>}
+          </h3>
+          {sessions.length > 0 && (
+            <button 
+              onClick={fetchSessions} 
+              disabled={loading}
+              style={styles.refreshButton}
             >
-              Cancel
+              ↻ Refresh
             </button>
           )}
         </div>
-      </form>
+        
+        {loading ? (
+          <div style={styles.loadingState}>
+            <div style={styles.loadingSpinner}></div>
+            <p>Loading sessions...</p>
+          </div>
+        ) : sessions.length === 0 ? (
+          <div style={styles.emptyState}>
+            <div style={styles.emptyStateIcon}>📚</div>
+            <h4 style={styles.emptyStateTitle}>No Sessions Found</h4>
+            <p style={styles.emptyStateText}>
+              {hasAdminAccess 
+                ? 'Create your first session to get started.' 
+                : 'No sessions have been created yet.'}
+            </p>
+          </div>
+        ) : (
+          <div style={styles.sessionsGrid}>
+            {sessions.map((session) => (
+              <div key={session._id} style={{
+                ...styles.sessionCard,
+                ...(session.isActive ? styles.activeSessionCard : {})
+              }}>
+                <div style={styles.sessionHeader}>
+                  <div style={styles.sessionTitle}>
+                    <h4 style={styles.sessionName}>
+                      {formatSessionName(session.sessionName)}
+                      {session.isActive && <span style={styles.activeBadge}>Active</span>}
+                    </h4>
+                  </div>
+                  {hasAdminAccess && (
+                    <div style={styles.sessionActions}>
+                      <button
+                        onClick={() => handleEdit(session)}
+                        disabled={actionLoading}
+                        style={styles.editButton}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDelete(session._id, formatSessionName(session.sessionName))}
+                        disabled={actionLoading || session.isActive}
+                        style={{
+                          ...styles.deleteButton,
+                          ...((actionLoading || session.isActive) ? styles.disabledButton : {})
+                        }}
+                        title={session.isActive ? 'Cannot delete active session' : 'Delete session'}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </div>
 
-      <h3 style={{ 
-        fontSize: '20px', 
-        fontWeight: 'bold', 
-        color: '#FFFFFF', 
-        fontFamily: 'sans-serif', 
-        backgroundColor: '#4B5320', 
-        padding: '10px', 
-        borderRadius: '4px', 
-        marginBottom: '20px' 
-      }}>
-        All Sessions ({sessions.length})
-      </h3>
-      
-      {sessions.length === 0 && !loading ? (
-        <p style={{ textAlign: 'center', color: '#666', fontFamily: 'sans-serif', padding: '20px' }}>
-          No sessions found. Create your first session above.
-        </p>
-      ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', border: '1px solid #E0E0E0' }}>
-            <thead>
-              <tr style={{ backgroundColor: '#4B5320', color: '#FFFFFF', fontFamily: 'sans-serif', fontSize: '12px' }}>
-                <th style={{ border: '1px solid #E0E0E0', padding: '8px' }}>Session Name</th>
-                <th style={{ border: '1px solid #E0E0E0', padding: '8px' }}>Status</th>
-                <th style={{ border: '1px solid #E0E0E0', padding: '8px' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.map((session) => (
-                <tr key={session._id} style={{ 
-                  color: '#000000', 
-                  fontFamily: 'sans-serif', 
-                  fontSize: '12px',
-                  backgroundColor: session.isActive ? '#F0FFF0' : 'transparent'
-                }}>
-                  <td style={{ border: '1px solid #E0E0E0', padding: '8px', fontWeight: session.isActive ? 'bold' : 'normal' }}>
-                    {session.sessionName}
-                    {session.isActive && (
-                      <span style={{ color: '#228B22', fontSize: '10px', marginLeft: '8px' }}>(Active)</span>
+                {/* Session Activation */}
+                {hasAdminAccess && (
+                  <div style={styles.activationSection}>
+                    {!session.isActive ? (
+                      <button
+                        onClick={() => handleActivateSession(session._id, formatSessionName(session.sessionName))}
+                        disabled={actionLoading}
+                        style={styles.activateButton}
+                      >
+                        Activate Session
+                      </button>
+                    ) : (
+                      <span style={styles.activeText}>✓ Session Active</span>
                     )}
-                  </td>
-                  <td style={{ border: '1px solid #E0E0E0', padding: '8px' }}>
-                    {session.isActive ? '🟢 Active' : '⚪ Inactive'}
-                  </td>
-                  <td style={{ border: '1px solid #E0E0E0', padding: '8px', display: 'flex', gap: '5px' }}>
-                    <button
-                      onClick={() => handleEdit(session)}
-                      disabled={actionLoading}
-                      style={{ 
-                        color: '#000000', 
-                        backgroundColor: '#D4A017', 
-                        fontFamily: 'sans-serif', 
-                        fontSize: '12px', 
-                        padding: '5px 10px', 
-                        border: '1px solid #000000', 
-                        borderRadius: '4px', 
-                        cursor: actionLoading ? 'not-allowed' : 'pointer',
-                        opacity: actionLoading ? 0.5 : 1
-                      }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDelete(session._id)}
-                      disabled={actionLoading || session.isActive}
-                      style={{ 
-                        color: '#FFFFFF', 
-                        backgroundColor: session.isActive ? '#666' : '#B22222', 
-                        fontFamily: 'sans-serif', 
-                        fontSize: '12px', 
-                        padding: '5px 10px', 
-                        border: '1px solid #000000', 
-                        borderRadius: '4px', 
-                        cursor: (actionLoading || session.isActive) ? 'not-allowed' : 'pointer',
-                        opacity: (actionLoading || session.isActive) ? 0.5 : 1
-                      }}
-                      title={session.isActive ? 'Cannot delete active session' : 'Delete session'}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+                  </div>
+                )}
+
+                {/* Terms List */}
+                <div style={styles.termsSection}>
+                  <h5 style={styles.termsTitle}>Terms:</h5>
+                  <div style={styles.termsList}>
+                    {session.terms && session.terms.map((term) => (
+                      <div key={term.name} style={{
+                        ...styles.termItem,
+                        ...(term.isActive ? styles.activeTermItem : {})
+                      }}>
+                        <span style={styles.termName}>{term.name}</span>
+                        <div style={styles.termActions}>
+                          {term.isActive ? (
+                            <span style={styles.activeTermBadge}>Active</span>
+                          ) : hasAdminAccess && session.isActive ? (
+                            <button
+                              onClick={() => handleActivateTerm(session._id, term.name, formatSessionName(session.sessionName))}
+                              disabled={actionLoading}
+                              style={styles.activateTermButton}
+                            >
+                              Activate
+                            </button>
+                          ) : session.isActive ? (
+                            <span style={styles.inactiveText}>Admin required</span>
+                          ) : (
+                            <span style={styles.inactiveText}>Activate session first</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Session Statistics */}
+                {session.statistics && (
+                  <div style={styles.statisticsSection}>
+                    <h5 style={styles.statisticsTitle}>Statistics:</h5>
+                    <div style={styles.statisticsGrid}>
+                      <div style={styles.statItem}>
+                        <span style={styles.statLabel}>Academic Records:</span>
+                        <span style={styles.statValue}>{session.statistics.academicRecords || 0}</span>
+                      </div>
+                      <div style={styles.statItem}>
+                        <span style={styles.statLabel}>Tests:</span>
+                        <span style={styles.statValue}>{session.statistics.tests || 0}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
+
+const styles = {
+  activeSessionBanner: {
+    backgroundColor: '#E6FFE6',
+    border: '1px solid #228B22',
+    borderRadius: '8px',
+    padding: '16px',
+    marginBottom: '20px',
+    boxShadow: '0 2px 4px rgba(34, 139, 34, 0.1)'
+  },
+  activeSessionContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px'
+  },
+  activeSessionTitle: {
+    fontSize: '16px',
+    fontWeight: '600',
+    color: '#228B22',
+    margin: 0
+  },
+  activeSessionText: {
+    fontSize: '14px',
+    color: '#4B5320',
+    margin: 0,
+    fontWeight: '500'
+  },
+  errorMessage: {
+    backgroundColor: '#FFF3F3',
+    color: '#B22222',
+    borderLeft: '4px solid #B22222',
+    padding: '15px',
+    marginBottom: '20px',
+    borderRadius: '4px',
+    fontSize: '14px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    boxShadow: '0 2px 4px rgba(178, 34, 34, 0.1)'
+  },
+  successMessage: {
+    backgroundColor: '#E6FFE6',
+    color: '#228B22',
+    borderLeft: '4px solid #228B22',
+    padding: '15px',
+    marginBottom: '20px',
+    borderRadius: '4px',
+    fontSize: '14px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    boxShadow: '0 2px 4px rgba(34, 139, 34, 0.1)'
+  },
+  closeButton: {
+    background: 'none',
+    border: 'none',
+    color: 'inherit',
+    cursor: 'pointer',
+    fontSize: '16px',
+    padding: '0 5px',
+    borderRadius: '50%',
+    width: '24px',
+    height: '24px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  formSection: {
+    backgroundColor: '#FFFFFF',
+    padding: '24px',
+    borderRadius: '8px',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+    marginBottom: '24px',
+    border: '1px solid #E5E7EB'
+  },
+  sectionHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '16px'
+  },
+  sectionTitle: {
+    fontSize: '20px',
+    fontWeight: 'bold',
+    color: '#4B5320',
+    margin: 0,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px'
+  },
+  viewOnlyBadge: {
+    fontSize: '12px',
+    backgroundColor: '#6B7280',
+    color: '#FFFFFF',
+    padding: '4px 8px',
+    borderRadius: '12px',
+    fontWeight: '500'
+  },
+  refreshButton: {
+    padding: '8px 16px',
+    backgroundColor: '#F8F9FA',
+    color: '#4B5320',
+    border: '1px solid #D1D5DB',
+    borderRadius: '6px',
+    fontSize: '14px',
+    cursor: 'pointer',
+    transition: 'all 0.2s'
+  },
+  form: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px'
+  },
+  formGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px'
+  },
+  label: {
+    color: '#4B5320',
+    fontSize: '14px',
+    fontWeight: '500'
+  },
+  input: {
+    padding: '12px',
+    border: '1px solid #D3D3D3',
+    borderRadius: '6px',
+    fontSize: '14px',
+    backgroundColor: '#F8F9FA',
+    transition: 'border-color 0.2s'
+  },
+  helperText: {
+    color: '#6B7280',
+    fontSize: '12px',
+    lineHeight: '1.4'
+  },
+  checkboxGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px'
+  },
+  checkbox: {
+    width: '18px',
+    height: '18px',
+    marginRight: '8px'
+  },
+  formActions: {
+    display: 'flex',
+    gap: '12px',
+    alignItems: 'center'
+  },
+  primaryButton: {
+    padding: '12px 24px',
+    backgroundColor: '#D4A017',
+    color: '#4B5320',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '14px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    minWidth: '140px'
+  },
+  secondaryButton: {
+    padding: '12px 24px',
+    backgroundColor: '#6B7280',
+    color: '#FFFFFF',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '14px',
+    cursor: 'pointer',
+    transition: 'all 0.2s'
+  },
+  disabledButton: {
+    backgroundColor: '#E5E7EB',
+    color: '#9CA3AF',
+    cursor: 'not-allowed',
+    opacity: 0.6
+  },
+  sessionsSection: {
+    backgroundColor: '#FFFFFF',
+    padding: '24px',
+    borderRadius: '8px',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+    border: '1px solid #E5E7EB'
+  },
+  loadingState: {
+    textAlign: 'center',
+    color: '#6B7280',
+    padding: '40px',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '16px'
+  },
+  loadingSpinner: {
+    width: '40px',
+    height: '40px',
+    border: '4px solid #f3f3f3',
+    borderTop: '4px solid #D4A017',
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite'
+  },
+  emptyState: {
+    textAlign: 'center',
+    color: '#6B7280',
+    padding: '60px 40px',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '12px'
+  },
+  emptyStateIcon: {
+    fontSize: '48px',
+    marginBottom: '16px'
+  },
+  emptyStateTitle: {
+    fontSize: '18px',
+    fontWeight: '600',
+    color: '#4B5320',
+    margin: 0
+  },
+  emptyStateText: {
+    fontSize: '14px',
+    lineHeight: '1.5',
+    maxWidth: '400px',
+    margin: 0
+  },
+  sessionsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))',
+    gap: '20px'
+  },
+  sessionCard: {
+    border: '1px solid #E5E7EB',
+    borderRadius: '8px',
+    padding: '20px',
+    backgroundColor: '#F8F9FA',
+    transition: 'all 0.2s',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px'
+  },
+  activeSessionCard: {
+    borderColor: '#D4A017',
+    backgroundColor: '#FFFBF0',
+    boxShadow: '0 4px 12px rgba(212, 160, 23, 0.15)'
+  },
+  sessionHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: '12px'
+  },
+  sessionTitle: {
+    flex: 1
+  },
+  sessionName: {
+    fontSize: '18px',
+    fontWeight: '600',
+    color: '#4B5320',
+    margin: '0 0 8px 0',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
+  },
+  activeBadge: {
+    fontSize: '12px',
+    backgroundColor: '#228B22',
+    color: '#FFFFFF',
+    padding: '4px 8px',
+    borderRadius: '12px',
+    fontWeight: '500'
+  },
+  sessionActions: {
+    display: 'flex',
+    gap: '8px',
+    flexShrink: 0
+  },
+  editButton: {
+    padding: '6px 12px',
+    backgroundColor: '#D4A017',
+    color: '#4B5320',
+    border: 'none',
+    borderRadius: '4px',
+    fontSize: '12px',
+    cursor: 'pointer',
+    transition: 'all 0.2s'
+  },
+  deleteButton: {
+    padding: '6px 12px',
+    backgroundColor: '#B22222',
+    color: '#FFFFFF',
+    border: 'none',
+    borderRadius: '4px',
+    fontSize: '12px',
+    cursor: 'pointer',
+    transition: 'all 0.2s'
+  },
+  activationSection: {
+    padding: '12px',
+    backgroundColor: '#FFFFFF',
+    borderRadius: '6px',
+    border: '1px solid #E5E7EB',
+    textAlign: 'center'
+  },
+  activateButton: {
+    padding: '8px 16px',
+    backgroundColor: '#228B22',
+    color: '#FFFFFF',
+    border: 'none',
+    borderRadius: '4px',
+    fontSize: '12px',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '4px',
+    width: '100%'
+  },
+  activeText: {
+    color: '#228B22',
+    fontSize: '14px',
+    fontWeight: '500'
+  },
+  termsSection: {
+    borderTop: '1px solid #E5E7EB',
+    paddingTop: '16px'
+  },
+  termsTitle: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#4B5320',
+    margin: '0 0 12px 0'
+  },
+  termsList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px'
+  },
+  termItem: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '12px',
+    backgroundColor: '#FFFFFF',
+    borderRadius: '6px',
+    border: '1px solid #E5E7EB',
+    transition: 'all 0.2s'
+  },
+  activeTermItem: {
+    borderColor: '#228B22',
+    backgroundColor: '#E6FFE6'
+  },
+  termName: {
+    fontSize: '14px',
+    color: '#4B5320',
+    fontWeight: '500'
+  },
+  termActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexShrink: 0
+  },
+  activeTermBadge: {
+    fontSize: '12px',
+    backgroundColor: '#228B22',
+    color: '#FFFFFF',
+    padding: '4px 8px',
+    borderRadius: '12px',
+    fontWeight: '500'
+  },
+  activateTermButton: {
+    padding: '6px 12px',
+    backgroundColor: '#D4A017',
+    color: '#4B5320',
+    border: 'none',
+    borderRadius: '4px',
+    fontSize: '12px',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    whiteSpace: 'nowrap'
+  },
+  inactiveText: {
+    fontSize: '12px',
+    color: '#6B7280',
+    fontStyle: 'italic',
+    whiteSpace: 'nowrap'
+  },
+  statisticsSection: {
+    borderTop: '1px solid #E5E7EB',
+    paddingTop: '16px'
+  },
+  statisticsTitle: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#4B5320',
+    margin: '0 0 8px 0'
+  },
+  statisticsGrid: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: '8px',
+    marginBottom: '8px'
+  },
+  statItem: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '4px 0'
+  },
+  statLabel: {
+    fontSize: '12px',
+    color: '#6B7280'
+  },
+  statValue: {
+    fontSize: '12px',
+    color: '#4B5320',
+    fontWeight: '600'
+  },
+  // Force Delete Modal Styles
+  forceDeleteModal: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000
+  },
+  forceDeleteContent: {
+    backgroundColor: 'white',
+    padding: '24px',
+    borderRadius: '8px',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+    maxWidth: '500px',
+    width: '90%'
+  },
+  forceDeleteTitle: {
+    color: '#B22222',
+    margin: '0 0 16px 0',
+    fontSize: '18px'
+  },
+  forceDeleteText: {
+    margin: '0 0 12px 0',
+    fontSize: '14px'
+  },
+  forceDeleteList: {
+    margin: '0 0 16px 20px',
+    fontSize: '14px'
+  },
+  forceDeleteWarning: {
+    color: '#B22222',
+    fontWeight: 'bold',
+    fontSize: '14px',
+    margin: '0 0 20px 0'
+  },
+  forceDeleteActions: {
+    display: 'flex',
+    gap: '12px',
+    flexWrap: 'wrap'
+  },
+  forceDeleteButton: {
+    padding: '10px 16px',
+    backgroundColor: '#B22222',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: 'bold'
+  },
+  cancelButton: {
+    padding: '10px 16px',
+    backgroundColor: '#6B7280',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px'
+  }
+};
+
+// Add CSS animations
+const styleSheet = document.styleSheets[0];
+if (styleSheet) {
+  styleSheet.insertRule(`
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  `, styleSheet.cssRules.length);
+}
+
+// Add hover effects
+Object.assign(styles.primaryButton, {
+  ':hover': {
+    backgroundColor: '#C19115',
+    transform: 'translateY(-1px)'
+  }
+});
+
+Object.assign(styles.secondaryButton, {
+  ':hover': {
+    backgroundColor: '#4B5563',
+    transform: 'translateY(-1px)'
+  }
+});
+
+Object.assign(styles.refreshButton, {
+  ':hover': {
+    backgroundColor: '#E5E7EB',
+    transform: 'translateY(-1px)'
+  }
+});
+
+Object.assign(styles.editButton, {
+  ':hover': {
+    backgroundColor: '#C19115',
+    transform: 'translateY(-1px)'
+  }
+});
+
+Object.assign(styles.deleteButton, {
+  ':hover': {
+    backgroundColor: '#9B1C1C',
+    transform: 'translateY(-1px)'
+  }
+});
+
+Object.assign(styles.activateButton, {
+  ':hover': {
+    backgroundColor: '#1E7B1E',
+    transform: 'translateY(-1px)'
+  }
+});
+
+Object.assign(styles.activateTermButton, {
+  ':hover': {
+    backgroundColor: '#C19115',
+    transform: 'translateY(-1px)'
+  }
+});
+
+Object.assign(styles.forceDeleteButton, {
+  ':hover': {
+    backgroundColor: '#9B1C1C',
+    transform: 'translateY(-1px)'
+  }
+});
+
+Object.assign(styles.cancelButton, {
+  ':hover': {
+    backgroundColor: '#4B5563',
+    transform: 'translateY(-1px)'
+  }
+});
+
+Object.assign(styles.sessionCard, {
+  ':hover': {
+    transform: 'translateY(-2px)',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+  }
+});
 
 export default SessionSchedules;

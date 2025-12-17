@@ -1,5 +1,4 @@
 const Permission = require('../models/Permission');
-const RolePermission = require('../models/RolePermission');
 
 // Cache for permissions to reduce database queries
 const permissionCache = new Map();
@@ -34,399 +33,427 @@ const getPermission = async (permissionName) => {
   return permission;
 };
 
-// UPDATED: Middleware to check if user has specific permission with admin permissions support
+// SIMPLIFIED: Middleware to check if user has specific permission
 const checkPermission = (permissionName) => {
   return async (req, res, next) => {
     try {
-      // Super admin bypasses all permission checks
-      if (req.user.role === 'super_admin') {
-        console.log('Permission check - Super admin bypass', {
-          userId: req.user.id,
-          username: req.user.username,
-          permission: permissionName,
-          path: req.path
+      console.log('🔐 Permission check starting:', {
+        permission: permissionName,
+        userId: req.user?.id,
+        username: req.user?.username,
+        userRole: req.user?.role,
+        path: req.path,
+        method: req.method
+      });
+
+      // 1. Check if user exists
+      if (!req.user) {
+        console.warn('❌ No user in request');
+        return res.status(401).json({
+          success: false,
+          message: 'Authentication required.'
         });
+      }
+
+      // 2. Super admin bypasses all checks
+      if (req.user.role === 'super_admin') {
+        console.log('✅ Super admin - permission granted');
         return next();
       }
 
-      if (!req.user) {
-        console.error('Permission check - No user in request', {
-          permission: permissionName,
-          path: req.path
-        });
-        return res.status(401).json({
-          error: 'Authentication required for permission check.',
-          code: 'AUTH_REQUIRED'
-        });
-      }
-
-      console.log('Permission check - Processing', {
-        userId: req.user.id,
-        username: req.user.username,
-        role: req.user.role,
-        permission: permissionName,
-        path: req.path
-      });
-
-      // Find the permission
-      const permission = await getPermission(permissionName);
-     
-      if (!permission) {
-        console.error('Permission check - Permission not found', {
-          permission: permissionName,
-          userId: req.user.id
-        });
-        return res.status(500).json({
-          error: 'Permission configuration error.',
-          code: 'PERMISSION_NOT_FOUND',
-          details: `Permission '${permissionName}' is not configured in the system.`
-        });
-      }
-
-      // Check if user's role meets the required role for this permission
-      const roleHierarchy = {
-        'super_admin': 4,
-        'admin': 3,
-        'teacher': 2,
-        'student': 1
-      };
-
-      const userRoleLevel = roleHierarchy[req.user.role] || 0;
-      const requiredRoleLevel = roleHierarchy[permission.requiredRole] || 0;
-
-      if (userRoleLevel < requiredRoleLevel) {
-        console.warn('Permission check - Role level insufficient', {
-          userId: req.user.id,
-          username: req.user.username,
-          userRole: req.user.role,
-          userRoleLevel: userRoleLevel,
-          requiredRole: permission.requiredRole,
-          requiredRoleLevel: requiredRoleLevel,
-          permission: permissionName
-        });
-        return res.status(403).json({
-          error: `Insufficient role level. Required role: ${permission.requiredRole}.`,
-          code: 'ROLE_LEVEL_INSUFFICIENT',
-          requiredRole: permission.requiredRole,
-          userRole: req.user.role
-        });
-      }
-
-      // NEW: Check admin-specific permissions for admin users
-      if (req.user.role === 'admin') {
-        // Check if admin has this specific admin permission
-        if (req.user.adminPermissions && req.user.adminPermissions.includes(permissionName)) {
-          console.log('Permission check - Admin permission granted', {
-            userId: req.user.id,
-            username: req.user.username,
-            permission: permissionName,
-            adminPermissions: req.user.adminPermissions
+      // 3. For teachers creating tests, use special handling
+      if (req.user.role === 'teacher' && permissionName === 'create_test') {
+        console.log('👨‍🏫 Teacher creating test - checking assignments');
+        
+        // Teachers can create tests if they have subjects assigned
+        if (req.user.subjects && req.user.subjects.length > 0) {
+          console.log('✅ Teacher has subjects assigned - allowing test creation');
+          return next();
+        } else {
+          console.warn('❌ Teacher has no subjects assigned');
+          return res.status(403).json({
+            success: false,
+            message: 'Access denied. You need to be assigned to subjects to create tests.'
           });
+        }
+      }
+
+      // 4. Get user permissions based on role
+      let userPermissions = [];
+      
+      if (req.user.role === 'admin') {
+        // Admins have both permissions and adminPermissions
+        const regularPerms = req.user.permissions || [];
+        const adminPerms = req.user.adminPermissions || [];
+        
+        // Convert all to permission names
+        userPermissions = [
+          ...regularPerms.map(p => typeof p === 'object' ? p.name : p),
+          ...adminPerms.map(p => typeof p === 'object' ? p.name : p)
+        ];
+        
+        // Admins with 'all' permission can do anything
+        if (adminPerms.includes('all')) {
+          console.log('✅ Admin with "all" permission - access granted');
           return next();
         }
+        
+      } else if (req.user.role === 'teacher') {
+        // Teacher permissions - including create_test
+        const teacherPermissions = [
+          'view_tests',
+          'create_test',  // Teachers can create tests
+          'update_test',  // Teachers can update their tests
+          'view_results',
+          'view_students',
+          'view_assignments',
+          'manage_questions'
+        ];
+        
+        const regularPerms = req.user.permissions || [];
+        userPermissions = [
+          ...regularPerms.map(p => typeof p === 'object' ? p.name : p),
+          ...teacherPermissions
+        ];
+        
+        console.log('📋 Teacher permissions:', userPermissions);
+        
+      } else if (req.user.role === 'student') {
+        // Students only have permissions (NOT adminPermissions)
+        const regularPerms = req.user.permissions || [];
+        userPermissions = regularPerms.map(p => typeof p === 'object' ? p.name : p);
       }
 
-      // Check if user has explicit permission (for non-super_admin roles)
-      if (req.user.role !== 'super_admin') {
-        const hasExplicitPermission = req.user.permissions?.some(
-          userPerm => userPerm.name === permissionName || userPerm._id.toString() === permission._id.toString()
-        );
-
-        if (!hasExplicitPermission) {
-          console.warn('Permission check - Explicit permission denied', {
-            userId: req.user.id,
-            username: req.user.username,
-            role: req.user.role,
-            permission: permissionName,
-            userPermissions: req.user.permissions?.map(p => p.name) || [],
-            adminPermissions: req.user.adminPermissions || []
-          });
-          return res.status(403).json({
-            error: 'Access denied. Insufficient permissions.',
-            code: 'PERMISSION_DENIED',
-            requiredPermission: permissionName,
-            userPermissions: req.user.permissions?.map(p => p.name) || [],
-            adminPermissions: req.user.adminPermissions || []
-          });
-        }
-      }
-
-      console.log('Permission check - Access granted', {
-        userId: req.user.id,
-        username: req.user.username,
-        role: req.user.role,
+      console.log('📋 User permissions check:', {
         permission: permissionName,
-        path: req.path
+        userRole: req.user.role,
+        userPermissions: userPermissions
       });
 
-      // Add permission context to request for logging
-      req.permissionContext = {
-        name: permissionName,
-        description: permission.description,
-        category: permission.category,
-        module: permission.module
-      };
+      // 5. Check if user has the permission
+      if (!userPermissions.includes(permissionName)) {
+        console.warn('❌ Permission denied:', permissionName);
+        return res.status(403).json({
+          success: false,
+          message: `Access denied. Required permission: ${permissionName}`,
+          requiredPermission: permissionName,
+          userRole: req.user.role,
+          userPermissions: userPermissions
+        });
+      }
 
+      console.log('✅ Permission granted:', permissionName);
       next();
+
     } catch (error) {
-      console.error('Permission check - Server error', {
+      console.error('💥 Permission check error:', {
         error: error.message,
         permission: permissionName,
         userId: req.user?.id,
         stack: error.stack
       });
       res.status(500).json({
-        error: 'Server error during permission verification.',
-        code: 'PERMISSION_SERVER_ERROR'
+        success: false,
+        message: 'Server error during permission check.'
       });
     }
   };
 };
 
-// UPDATED: Middleware to check if user has any of the provided permissions with admin support
-const checkAnyPermission = (permissionNames) => {
-  return async (req, res, next) => {
-    try {
-      // Super admin bypasses all permission checks
-      if (req.user.role === 'super_admin') {
-        console.log('AnyPermission check - Super admin bypass', {
-          userId: req.user.id,
-          username: req.user.username,
-          permissions: permissionNames,
-          path: req.path
-        });
-        return next();
-      }
-
-      if (!req.user) {
-        return res.status(401).json({
-          error: 'Authentication required.',
-          code: 'AUTH_REQUIRED'
-        });
-      }
-
-      console.log('AnyPermission check - Processing', {
-        userId: req.user.id,
-        username: req.user.username,
-        role: req.user.role,
-        permissions: permissionNames,
-        path: req.path
-      });
-
-      const permissions = await Promise.all(
-        permissionNames.map(name => getPermission(name))
-      );
-
-      const validPermissions = permissions.filter(p => p !== null);
-     
-      if (validPermissions.length === 0) {
-        console.error('AnyPermission check - No valid permissions found', {
-          requestedPermissions: permissionNames,
-          userId: req.user.id
-        });
-        return res.status(500).json({
-          error: 'Permission configuration error.',
-          code: 'NO_VALID_PERMISSIONS'
-        });
-      }
-
-      // Check role level against the most permissive permission
-      const roleHierarchy = {
-        'super_admin': 4,
-        'admin': 3,
-        'teacher': 2,
-        'student': 1
-      };
-
-      const userRoleLevel = roleHierarchy[req.user.role] || 0;
-      const highestRequiredLevel = Math.min(
-        ...validPermissions.map(p => roleHierarchy[p.requiredRole] || 0)
-      );
-
-      if (userRoleLevel < highestRequiredLevel) {
-        console.warn('AnyPermission check - Role level insufficient', {
-          userId: req.user.id,
-          userRole: req.user.role,
-          userRoleLevel: userRoleLevel,
-          highestRequiredLevel: highestRequiredLevel,
-          permissions: permissionNames
-        });
-        return res.status(403).json({
-          error: 'Insufficient role level for any of the required permissions.',
-          code: 'ROLE_LEVEL_INSUFFICIENT'
-        });
-      }
-
-      // NEW: Check admin-specific permissions for admin users
-      if (req.user.role === 'admin') {
-        const hasAnyAdminPermission = permissionNames.some(permissionName =>
-          req.user.adminPermissions?.includes(permissionName)
-        );
-
-        if (hasAnyAdminPermission) {
-          console.log('AnyPermission check - Admin permission granted', {
-            userId: req.user.id,
-            username: req.user.username,
-            grantedPermissions: permissionNames.filter(p => 
-              req.user.adminPermissions?.includes(p)
-            ),
-            adminPermissions: req.user.adminPermissions
-          });
-          return next();
-        }
-      }
-
-      // Check if user has any of the explicit permissions
-      if (req.user.role !== 'super_admin') {
-        const hasAnyPermission = validPermissions.some(permission =>
-          req.user.permissions?.some(
-            userPerm => userPerm.name === permission.name || userPerm._id.toString() === permission._id.toString()
-          )
-        );
-
-        if (!hasAnyPermission) {
-          console.warn('AnyPermission check - No explicit permissions granted', {
-            userId: req.user.id,
-            username: req.user.username,
-            requestedPermissions: permissionNames,
-            userPermissions: req.user.permissions?.map(p => p.name) || [],
-            adminPermissions: req.user.adminPermissions || []
-          });
-          return res.status(403).json({
-            error: 'Access denied. Insufficient permissions.',
-            code: 'NO_PERMISSIONS_GRANTED',
-            requiredPermissions: permissionNames,
-            userPermissions: req.user.permissions?.map(p => p.name) || [],
-            adminPermissions: req.user.adminPermissions || []
-          });
-        }
-      }
-
-      console.log('AnyPermission check - Access granted', {
-        userId: req.user.id,
-        username: req.user.username,
-        role: req.user.role,
-        grantedPermissions: permissionNames,
-        path: req.path
-      });
-
-      next();
-    } catch (error) {
-      console.error('AnyPermission check - Server error', {
-        error: error.message,
-        permissions: permissionNames,
-        userId: req.user?.id
-      });
-      res.status(500).json({
-        error: 'Server error during permission verification.',
-        code: 'PERMISSION_SERVER_ERROR'
-      });
-    }
-  };
-};
-
-// Middleware to check if user has all of the provided permissions
-const checkAllPermissions = (permissionNames) => {
-  return async (req, res, next) => {
-    try {
-      // Super admin bypasses all permission checks
-      if (req.user.role === 'super_admin') {
-        return next();
-      }
-
-      if (!req.user) {
-        return res.status(401).json({ error: 'Authentication required.' });
-      }
-
-      const permissions = await Promise.all(
-        permissionNames.map(name => getPermission(name))
-      );
-
-      const validPermissions = permissions.filter(p => p !== null);
-     
-      if (validPermissions.length !== permissionNames.length) {
-        return res.status(500).json({
-          error: 'Some permissions are not configured in the system.'
-        });
-      }
-
-      // Check role level against the most restrictive permission
-      const roleHierarchy = {
-        'super_admin': 4,
-        'admin': 3,
-        'teacher': 2,
-        'student': 1
-      };
-
-      const userRoleLevel = roleHierarchy[req.user.role] || 0;
-      const highestRequiredLevel = Math.max(
-        ...validPermissions.map(p => roleHierarchy[p.requiredRole] || 0)
-      );
-
-      if (userRoleLevel < highestRequiredLevel) {
-        return res.status(403).json({
-          error: 'Insufficient role level for all required permissions.'
-        });
-      }
-
-      // NEW: Check admin-specific permissions for admin users
-      if (req.user.role === 'admin') {
-        const hasAllAdminPermissions = permissionNames.every(permissionName =>
-          req.user.adminPermissions?.includes(permissionName)
-        );
-
-        if (hasAllAdminPermissions) {
-          return next();
-        }
-      }
-
-      // Check if user has all the explicit permissions
-      if (req.user.role !== 'super_admin') {
-        const hasAllPermissions = validPermissions.every(permission =>
-          req.user.permissions?.some(
-            userPerm => userPerm.name === permission.name || userPerm._id.toString() === permission._id.toString()
-          )
-        );
-
-        if (!hasAllPermissions) {
-          return res.status(403).json({
-            error: 'Access denied. Missing some required permissions.',
-            missingPermissions: permissionNames.filter(name =>
-              !req.user.permissions?.some(userPerm => userPerm.name === name)
-            )
-          });
-        }
-      }
-
-      next();
-    } catch (error) {
-      console.error('AllPermissions check error:', error);
-      res.status(500).json({ error: 'Server error during permission verification.' });
-    }
-  };
-};
-
-// Permission validation for dangerous operations
-const validateDangerousPermission = (req, res, next) => {
-  const dangerousPermissions = req.user.permissions?.filter(p => p.isDangerous) || [];
- 
-  if (dangerousPermissions.length > 0 && !req.headers['x-dangerous-operation-confirmed']) {
-    return res.status(403).json({
-      error: 'Dangerous operation requires explicit confirmation.',
-      code: 'DANGEROUS_OPERATION',
-      dangerousPermissions: dangerousPermissions.map(p => p.name),
-      confirmationHeader: 'x-dangerous-operation-confirmed'
+// Middleware for teacher-only access (without specific permission)
+const teacherOnly = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      message: 'Authentication required.'
     });
   }
 
+  if (req.user.role !== 'teacher') {
+    console.warn('❌ Teacher access denied:', {
+      userId: req.user.id,
+      userRole: req.user.role
+    });
+    return res.status(403).json({
+      success: false,
+      message: 'Teacher access required.'
+    });
+  }
+
+  console.log('✅ Teacher access granted:', {
+    userId: req.user.id,
+    username: req.user.username
+  });
   next();
+};
+
+// SIMPLIFIED: Middleware to check if user has any of the provided permissions
+const checkAnyPermission = (permissionNames) => {
+  return async (req, res, next) => {
+    try {
+      console.log('🔐 AnyPermission check starting:', {
+        permissions: permissionNames,
+        userId: req.user?.id,
+        userRole: req.user?.role,
+        path: req.path
+      });
+
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          message: 'Authentication required.'
+        });
+      }
+
+      // Super admin bypass
+      if (req.user.role === 'super_admin') {
+        console.log('✅ Super admin - any permission granted');
+        return next();
+      }
+
+      // Special handling for teachers creating tests
+      if (req.user.role === 'teacher' && permissionNames.includes('create_test')) {
+        if (req.user.subjects && req.user.subjects.length > 0) {
+          console.log('✅ Teacher has subjects - allowing action');
+          return next();
+        }
+      }
+
+      // Get user permissions based on role
+      let userPermissions = [];
+      
+      if (req.user.role === 'admin') {
+        const regularPerms = req.user.permissions || [];
+        const adminPerms = req.user.adminPermissions || [];
+        userPermissions = [
+          ...regularPerms.map(p => typeof p === 'object' ? p.name : p),
+          ...adminPerms.map(p => typeof p === 'object' ? p.name : p)
+        ];
+        
+        if (adminPerms.includes('all')) {
+          return next();
+        }
+        
+      } else if (req.user.role === 'teacher') {
+        const teacherPermissions = [
+          'view_tests',
+          'create_test',
+          'update_test',
+          'view_results',
+          'view_students',
+          'view_assignments',
+          'manage_questions'
+        ];
+        
+        const regularPerms = req.user.permissions || [];
+        userPermissions = [
+          ...regularPerms.map(p => typeof p === 'object' ? p.name : p),
+          ...teacherPermissions
+        ];
+        
+      } else if (req.user.role === 'student') {
+        const regularPerms = req.user.permissions || [];
+        userPermissions = regularPerms.map(p => typeof p === 'object' ? p.name : p);
+      }
+
+      // Check if user has any of the required permissions
+      const hasAnyPermission = permissionNames.some(permissionName => 
+        userPermissions.includes(permissionName)
+      );
+
+      if (!hasAnyPermission) {
+        console.warn('❌ No required permissions found');
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied. Insufficient permissions.',
+          requiredPermissions: permissionNames,
+          userPermissions: userPermissions,
+          userRole: req.user.role
+        });
+      }
+
+      console.log('✅ AnyPermission granted for one of:', permissionNames);
+      next();
+
+    } catch (error) {
+      console.error('💥 AnyPermission check error:', error.message);
+      res.status(500).json({
+        success: false,
+        message: 'Server error during permission check.'
+      });
+    }
+  };
+};
+
+// SIMPLIFIED: Middleware to check if user has all of the provided permissions
+const checkAllPermissions = (permissionNames) => {
+  return async (req, res, next) => {
+    try {
+      console.log('🔐 AllPermissions check starting:', {
+        permissions: permissionNames,
+        userId: req.user?.id,
+        userRole: req.user?.role
+      });
+
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          message: 'Authentication required.'
+        });
+      }
+
+      // Super admin bypass
+      if (req.user.role === 'super_admin') {
+        console.log('✅ Super admin - all permissions granted');
+        return next();
+      }
+
+      // Get user permissions based on role
+      let userPermissions = [];
+      
+      if (req.user.role === 'admin') {
+        const regularPerms = req.user.permissions || [];
+        const adminPerms = req.user.adminPermissions || [];
+        userPermissions = [
+          ...regularPerms.map(p => typeof p === 'object' ? p.name : p),
+          ...adminPerms.map(p => typeof p === 'object' ? p.name : p)
+        ];
+        
+        if (adminPerms.includes('all')) {
+          return next();
+        }
+        
+      } else if (req.user.role === 'teacher') {
+        const teacherPermissions = [
+          'view_tests',
+          'create_test',
+          'update_test',
+          'view_results',
+          'view_students',
+          'view_assignments',
+          'manage_questions'
+        ];
+        
+        const regularPerms = req.user.permissions || [];
+        userPermissions = [
+          ...regularPerms.map(p => typeof p === 'object' ? p.name : p),
+          ...teacherPermissions
+        ];
+        
+      } else if (req.user.role === 'student') {
+        const regularPerms = req.user.permissions || [];
+        userPermissions = regularPerms.map(p => typeof p === 'object' ? p.name : p);
+      }
+
+      // Check if user has ALL required permissions
+      const hasAllPermissions = permissionNames.every(permissionName => 
+        userPermissions.includes(permissionName)
+      );
+
+      if (!hasAllPermissions) {
+        const missingPermissions = permissionNames.filter(permissionName => 
+          !userPermissions.includes(permissionName)
+        );
+        
+        console.warn('❌ Missing permissions:', missingPermissions);
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied. Missing some permissions.',
+          missingPermissions,
+          requiredPermissions: permissionNames,
+          userPermissions: userPermissions,
+          userRole: req.user.role
+        });
+      }
+
+      console.log('✅ AllPermissions granted for:', permissionNames);
+      next();
+
+    } catch (error) {
+      console.error('💥 AllPermissions check error:', error.message);
+      res.status(500).json({
+        success: false,
+        message: 'Server error during permission check.'
+      });
+    }
+  };
+};
+
+// Debug endpoint to check user permissions
+const checkUserPermissions = async (req, res) => {
+  try {
+    const permissionName = req.query.permission || 'view_users';
+    
+    // Get user permissions based on role
+    let userPermissions = [];
+    
+    if (req.user.role === 'admin') {
+      const regularPerms = req.user.permissions || [];
+      const adminPerms = req.user.adminPermissions || [];
+      userPermissions = [
+        ...regularPerms.map(p => typeof p === 'object' ? p.name : p),
+        ...adminPerms.map(p => typeof p === 'object' ? p.name : p)
+      ];
+      
+    } else if (req.user.role === 'teacher') {
+      const teacherPermissions = [
+        'view_tests',
+        'create_test',
+        'update_test',
+        'view_results',
+        'view_students',
+        'view_assignments',
+        'manage_questions'
+      ];
+      
+      const regularPerms = req.user.permissions || [];
+      userPermissions = [
+        ...regularPerms.map(p => typeof p === 'object' ? p.name : p),
+        ...teacherPermissions
+      ];
+      
+    } else if (req.user.role === 'student') {
+      const regularPerms = req.user.permissions || [];
+      userPermissions = regularPerms.map(p => typeof p === 'object' ? p.name : p);
+    }
+
+    const hasPermission = 
+      req.user.role === 'super_admin' ||
+      userPermissions.includes(permissionName) ||
+      (req.user.role === 'admin' && req.user.adminPermissions?.includes('all'));
+
+    res.json({
+      success: true,
+      user: {
+        id: req.user.id,
+        username: req.user.username,
+        role: req.user.role,
+        subjects: req.user.subjects || []
+      },
+      permission: {
+        name: permissionName,
+        checked: hasPermission
+      },
+      userPermissions: userPermissions,
+      hasPermission,
+      checkResult: hasPermission ? 'GRANTED' : 'DENIED'
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error checking permissions',
+      error: error.message
+    });
+  }
 };
 
 module.exports = {
   checkPermission,
+  teacherOnly,
   checkAnyPermission,
   checkAllPermissions,
-  validateDangerousPermission,
+  checkUserPermissions,
   clearPermissionCache,
   getPermission
 };

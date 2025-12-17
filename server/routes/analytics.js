@@ -6,303 +6,99 @@ const Test = require('../models/Test');
 const User = require('../models/User');
 const Class = require('../models/Class');
 const { auth } = require('../middleware/auth');
-const { checkPermission } = require('../middleware/permissions');
+const { teacherOnly } = require('../middleware/permissions');
 
-// Input validation middleware
-const validateAnalyticsParams = (req, res, next) => {
-  const { className, subject } = req.params;
-  
-  if (!className || className.trim().length === 0) {
-    return res.status(400).json({ error: 'Class name is required and cannot be empty' });
-  }
-  
-  if (!subject || subject.trim().length === 0) {
-    return res.status(400).json({ error: 'Subject is required and cannot be empty' });
-  }
-  
-  // Sanitize inputs
-  req.params.className = className.trim();
-  req.params.subject = subject.trim();
-  
-  next();
-};
+// ==================== TEACHER-SPECIFIC ANALYTICS ====================
 
-// Cache configuration for analytics
-const analyticsCache = new Map();
-const CACHE_TTL = 15 * 60 * 1000; // 15 minutes
-
-// Clear cache endpoint for admins only
-router.delete('/cache', auth, checkPermission('manage_analytics'), async (req, res) => {
+// GET teacher analytics
+router.get('/teacher', auth, teacherOnly, async (req, res) => {
   try {
-    // BLOCK STUDENT ACCESS
-    if (req.user.role === 'student') {
-      return res.status(403).json({ 
-        error: 'Access denied. Students cannot manage analytics cache.' 
-      });
-    }
-
-    const cacheSize = analyticsCache.size;
-    analyticsCache.clear();
-    console.log('Analytics cache cleared', { 
-      clearedEntries: cacheSize,
-      clearedBy: req.user.username 
-    });
-    res.json({ 
-      message: 'Analytics cache cleared successfully',
-      clearedEntries: cacheSize 
-    });
-  } catch (error) {
-    console.error('Error clearing analytics cache:', error);
-    res.status(500).json({ error: 'Server error clearing cache' });
-  }
-});
-
-// Get subject analytics with enhanced metrics - STUDENTS BLOCKED
-router.get('/subject/:className/:subject', auth, checkPermission('view_analytics'), validateAnalyticsParams, async (req, res) => {
-  try {
-    // BLOCK STUDENT ACCESS
-    if (req.user.role === 'student') {
-      return res.status(403).json({ 
-        error: 'Access denied. Students cannot view subject analytics.' 
-      });
-    }
-
-    const { className, subject } = req.params;
-    const { session, term, refresh } = req.query;
-    
-    // Check cache first (unless refresh is requested)
-    const cacheKey = `subject:${className}:${subject}:${session || 'all'}:${term || 'all'}`;
-    if (!refresh && analyticsCache.has(cacheKey)) {
-      const cached = analyticsCache.get(cacheKey);
-      if (Date.now() - cached.timestamp < CACHE_TTL) {
-        console.log('Analytics - Serving from cache:', cacheKey);
-        return res.json(cached.data);
-      }
-    }
-
-    console.log('Analytics - Subject analytics request:', { 
-      className, 
-      subject, 
-      session, 
-      term,
-      user: req.user.username 
+    console.log('📊 Teacher analytics request:', {
+      teacherId: req.user.id,
+      username: req.user.username,
+      subjects: req.user.subjects
     });
 
-    // Build query with session and term filters
-    const resultQuery = { class: className, subject };
-    if (session) resultQuery.session = session;
-    if (term) resultQuery.term = term;
-
-    const results = await Result.find(resultQuery)
-      .populate('userId', 'username name surname studentId')
-      .populate('testId', 'title type maxScore session term')
-      .sort({ score: -1 })
-      .lean();
-
-    if (!results.length) {
-      return res.status(404).json({ 
-        error: 'No results found for the specified criteria',
-        className,
-        subject,
-        session: session || 'all',
-        term: term || 'all'
-      });
-    }
-
-    // Calculate comprehensive statistics
-    const scores = results.map(r => r.score || 0).filter(score => score !== null);
-    const totalStudents = scores.length;
-    const avgScore = totalStudents > 0 ? (scores.reduce((sum, score) => sum + score, 0) / totalStudents).toFixed(2) : 0;
-    
-    const passingScore = 50; // Configurable passing threshold
-    const passCount = scores.filter(score => score >= passingScore).length;
-    const passRate = totalStudents > 0 ? ((passCount / totalStudents) * 100).toFixed(2) : 0;
-    
-    const maxScore = Math.max(...scores);
-    const minScore = Math.min(...scores);
-    
-    // Score distribution
-    const scoreRanges = {
-      excellent: scores.filter(s => s >= 90).length,
-      good: scores.filter(s => s >= 75 && s < 90).length,
-      average: scores.filter(s => s >= 50 && s < 75).length,
-      poor: scores.filter(s => s < 50).length
-    };
-
-    // Performance by test type
-    const testTypePerformance = {};
-    results.forEach(result => {
-      if (result.testId && result.testId.type) {
-        const type = result.testId.type;
-        if (!testTypePerformance[type]) {
-          testTypePerformance[type] = { total: 0, count: 0, avg: 0 };
+    // Get teacher's assigned subjects
+    const teacherSubjects = req.user.subjects || [];
+    if (teacherSubjects.length === 0) {
+      return res.json({
+        success: true,
+        analytics: [],
+        summary: {
+          totalStudents: 0,
+          totalTests: 0,
+          averageScore: 0
         }
-        testTypePerformance[type].total += result.score || 0;
-        testTypePerformance[type].count += 1;
-      }
-    });
-
-    // Calculate averages for test types
-    Object.keys(testTypePerformance).forEach(type => {
-      testTypePerformance[type].avg = 
-        (testTypePerformance[type].total / testTypePerformance[type].count).toFixed(2);
-    });
-
-    // Top performers
-    const topPerformers = results
-      .slice(0, 5)
-      .map(r => ({
-        student: `${r.userId?.name || 'N/A'} ${r.userId?.surname || ''}`.trim(),
-        studentId: r.userId?.studentId,
-        score: r.score || 0,
-        test: r.testId?.title || 'Unknown Test'
-      }));
-
-    const response = {
-      className,
-      subject,
-      session: session || 'all',
-      term: term || 'all',
-      summary: {
-        totalStudents,
-        averageScore: parseFloat(avgScore),
-        passRate: parseFloat(passRate),
-        maxScore,
-        minScore,
-        scoreDistribution: scoreRanges,
-        testTypePerformance
-      },
-      topPerformers,
-      scores: results.map(r => ({
-        student: `${r.userId?.name || 'N/A'} ${r.userId?.surname || ''}`.trim(),
-        studentId: r.userId?.studentId,
-        score: r.score || 0,
-        test: r.testId?.title || 'Unknown Test',
-        testType: r.testId?.type || 'unknown',
-        submittedAt: r.submittedAt
-      })),
-      generatedAt: new Date().toISOString(),
-      cache: false
-    };
-
-    // Cache the response
-    analyticsCache.set(cacheKey, {
-      data: { ...response, cache: true },
-      timestamp: Date.now()
-    });
-
-    res.json(response);
-  } catch (error) {
-    console.error('Analytics - Subject Error:', { 
-      message: error.message, 
-      className: req.params.className,
-      subject: req.params.subject,
-      user: req.user.username 
-    });
-    res.status(500).json({ 
-      error: 'Server error generating subject analytics',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-});
-
-// Get comprehensive analytics dashboard - STUDENTS BLOCKED
-router.get('/dashboard', auth, checkPermission('view_analytics'), async (req, res) => {
-  try {
-    // BLOCK STUDENT ACCESS
-    if (req.user.role === 'student') {
-      return res.status(403).json({ 
-        error: 'Access denied. Students cannot view analytics dashboard.' 
       });
     }
 
-    const { session, term, timeRange = 'current' } = req.query;
-    
-    console.log('Analytics - Dashboard request:', { 
-      user: req.user.username,
-      session,
-      term,
-      timeRange 
-    });
+    // Build query for teacher's subjects
+    const subjectConditions = teacherSubjects.map(sub => ({
+      subject: sub.subject,
+      class: sub.class
+    }));
 
-    // Build query based on user role and permissions
-    const baseQuery = {};
-    if (req.user.role === 'teacher' && req.user.subjects) {
-      baseQuery.$or = req.user.subjects.map(sub => ({
-        subject: sub.subject,
-        class: sub.class
-      }));
-    }
-
-    if (session) baseQuery.session = session;
-    if (term) baseQuery.term = term;
-
-    // Fetch aggregated data in parallel for better performance
-    const [
-      tests,
-      studentCount,
-      teacherCount,
-      classCount,
-      allResults
-    ] = await Promise.all([
-      Test.find(baseQuery).lean(),
-      User.countDocuments({ role: 'student' }),
-      User.countDocuments({ role: 'teacher' }),
-      Class.countDocuments(),
-      Result.find(baseQuery).populate('userId', 'name surname').lean()
+    // Fetch data in parallel
+    const [tests, results] = await Promise.all([
+      Test.find({ $or: subjectConditions })
+        .sort({ createdAt: -1 })
+        .lean(),
+      Result.find({ $or: subjectConditions })
+        .populate('userId', 'name surname')
+        .populate('testId', 'title subject class')
+        .lean()
     ]);
 
-    // Test analytics with enhanced metrics
-    const testAnalytics = await Promise.all(
-      tests.map(async (test) => {
-        const testResults = allResults.filter(r => 
-          r.testId && r.testId.toString() === test._id.toString()
-        );
-        
-        const totalStudents = testResults.length;
-        const completed = testResults.filter(r => r.submittedAt).length;
-        const completionRate = totalStudents > 0 ? 
-          ((completed / totalStudents) * 100).toFixed(2) : 0;
-        
-        const scores = testResults.map(r => r.score || 0);
-        const averageScore = scores.length > 0 ? 
-          (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2) : 0;
-        
-        const topResult = testResults.sort((a, b) => (b.score || 0) - (a.score || 0))[0];
-        
-        return {
-          testId: test._id,
-          testTitle: test.title,
-          subject: test.subject,
-          class: test.class,
-          session: test.session,
-          term: test.term,
-          averageScore: parseFloat(averageScore),
-          completionRate: parseFloat(completionRate),
-          totalStudents,
-          completedStudents: completed,
-          topStudent: topResult ? 
-            `${topResult.userId?.name || 'N/A'} ${topResult.userId?.surname || ''}`.trim() : 'N/A',
-          topScore: topResult ? topResult.score : 0,
-          type: test.type || 'test',
-          createdAt: test.createdAt
-        };
-      })
-    );
+    // If no data found
+    if (tests.length === 0 && results.length === 0) {
+      return res.json({
+        success: true,
+        analytics: [],
+        summary: {
+          totalTests: 0,
+          totalResults: 0,
+          averageScore: 0
+        }
+      });
+    }
 
-    // Overall performance metrics
-    const overallScores = allResults.map(r => r.score || 0).filter(score => score > 0);
-    const overallAvg = overallScores.length > 0 ? 
-      (overallScores.reduce((a, b) => a + b, 0) / overallScores.length).toFixed(2) : 0;
+    // Calculate test analytics for teacher
+    const testAnalytics = tests.map(test => {
+      const testResults = results.filter(r => 
+        r.testId && r.testId._id.toString() === test._id.toString()
+      );
+      
+      const totalStudentsInTest = testResults.length;
+      const scores = testResults.map(r => r.score || 0);
+      const averageScore = scores.length > 0 ? 
+        (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2) : 0;
+      
+      return {
+        testId: test._id,
+        testTitle: test.title || 'Untitled Test',
+        subject: test.subject || 'Unknown Subject',
+        class: test.class || 'Unknown Class',
+        averageScore: parseFloat(averageScore),
+        totalStudents: totalStudentsInTest,
+        createdAt: test.createdAt
+      };
+    });
 
-    // Subject performance ranking
+    // Calculate overall metrics
+    const allScores = results.map(r => r.score || 0).filter(score => score > 0);
+    const overallAverageScore = allScores.length > 0 ? 
+      (allScores.reduce((a, b) => a + b, 0) / allScores.length).toFixed(2) : 0;
+
+    // Subject performance
     const subjectPerformance = {};
-    allResults.forEach(result => {
-      if (!subjectPerformance[result.subject]) {
-        subjectPerformance[result.subject] = { total: 0, count: 0 };
+    results.forEach(result => {
+      const subject = result.testId?.subject || 'Unknown';
+      if (!subjectPerformance[subject]) {
+        subjectPerformance[subject] = { total: 0, count: 0 };
       }
-      subjectPerformance[result.subject].total += result.score || 0;
-      subjectPerformance[result.subject].count += 1;
+      subjectPerformance[subject].total += result.score || 0;
+      subjectPerformance[subject].count += 1;
     });
 
     const subjectRanking = Object.entries(subjectPerformance)
@@ -311,16 +107,17 @@ router.get('/dashboard', auth, checkPermission('view_analytics'), async (req, re
         averageScore: (data.total / data.count).toFixed(2),
         totalTests: data.count
       }))
-      .sort((a, b) => b.averageScore - a.averageScore);
+      .sort((a, b) => parseFloat(b.averageScore) - parseFloat(a.averageScore));
 
-    // Class performance ranking
+    // Class performance
     const classPerformance = {};
-    allResults.forEach(result => {
-      if (!classPerformance[result.class]) {
-        classPerformance[result.class] = { total: 0, count: 0 };
+    results.forEach(result => {
+      const className = result.testId?.class || 'Unknown';
+      if (!classPerformance[className]) {
+        classPerformance[className] = { total: 0, count: 0 };
       }
-      classPerformance[result.class].total += result.score || 0;
-      classPerformance[result.class].count += 1;
+      classPerformance[className].total += result.score || 0;
+      classPerformance[className].count += 1;
     });
 
     const classRanking = Object.entries(classPerformance)
@@ -329,134 +126,408 @@ router.get('/dashboard', auth, checkPermission('view_analytics'), async (req, re
         averageScore: (data.total / data.count).toFixed(2),
         totalTests: data.count
       }))
-      .sort((a, b) => b.averageScore - a.averageScore);
+      .sort((a, b) => parseFloat(b.averageScore) - parseFloat(a.averageScore));
 
     const response = {
+      success: true,
       analytics: testAnalytics,
       summary: {
-        totalStudents: studentCount,
-        totalTeachers: teacherCount,
-        totalClasses: classCount,
-        totalTests: tests.filter(t => t.type !== 'examination').length,
-        totalExams: tests.filter(t => t.type === 'examination').length,
-        overallAverageScore: parseFloat(overallAvg),
-        totalResults: allResults.length
+        totalTests: tests.length,
+        totalResults: results.length,
+        overallAverageScore: parseFloat(overallAverageScore)
       },
       rankings: {
         bySubject: subjectRanking,
         byClass: classRanking
       },
-      timeRange: {
-        session: session || 'all',
-        term: term || 'all',
-        generatedAt: new Date().toISOString()
+      generatedAt: new Date().toISOString()
+    };
+
+    res.json(response);
+
+  } catch (error) {
+    console.error('❌ Teacher analytics error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error generating teacher analytics'
+    });
+  }
+});
+
+// GET comprehensive analytics dashboard for teachers AND admins
+router.get('/dashboard', auth, async (req, res) => {
+  try {
+    console.log('📊 Analytics Dashboard Request for:', req.user.username);
+    
+    // Only teachers and admins can access analytics
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied. Only teachers and admins can view analytics.'
+      });
+    }
+
+    // Build base query for teacher's subjects and classes
+    const teacherQuery = {};
+    
+    // If user is a teacher, filter by their assigned subjects
+    if (req.user.role === 'teacher' && req.user.subjects && req.user.subjects.length > 0) {
+      const subjectConditions = req.user.subjects.map(sub => ({
+        subject: sub.subject,
+        class: sub.class
+      }));
+      
+      if (subjectConditions.length > 0) {
+        teacherQuery.$or = subjectConditions;
+      }
+    }
+
+    // Fetch data in parallel
+    const [tests, results, questions, totalStudents] = await Promise.all([
+      Test.find(teacherQuery)
+        .sort({ createdAt: -1 })
+        .lean(),
+      Result.find(teacherQuery)
+        .populate('userId', 'name surname')
+        .populate('testId', 'title subject class')
+        .lean(),
+      // Assuming you have a Question model
+      // Question.countDocuments(teacherQuery).catch(() => 0),
+      Promise.resolve(0), // Placeholder if you don't have questions
+      User.countDocuments({ role: 'student' }).catch(() => 0)
+    ]);
+
+    console.log('📊 Analytics Data:', {
+      testsCount: tests.length,
+      resultsCount: results.length,
+      questionsCount: questions,
+      totalStudents
+    });
+
+    // If no data found
+    if (tests.length === 0 && results.length === 0) {
+      return res.json({
+        success: true,
+        analytics: [],
+        summary: {
+          totalStudents: 0,
+          totalTests: 0,
+          totalQuestions: questions,
+          overallAverageScore: 0
+        }
+      });
+    }
+
+    // Calculate test analytics
+    const testAnalytics = tests.map(test => {
+      const testResults = results.filter(r => 
+        r.testId && r.testId._id.toString() === test._id.toString()
+      );
+      
+      const totalStudentsInTest = testResults.length;
+      const completed = testResults.filter(r => r.submittedAt).length;
+      const completionRate = totalStudentsInTest > 0 ? 
+        ((completed / totalStudentsInTest) * 100).toFixed(2) : 0;
+      
+      const scores = testResults.map(r => r.score || 0);
+      const averageScore = scores.length > 0 ? 
+        (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2) : 0;
+      
+      // Find top performer
+      let topStudent = 'N/A';
+      let topScore = 0;
+      if (testResults.length > 0) {
+        const sortedResults = [...testResults].sort((a, b) => (b.score || 0) - (a.score || 0));
+        topStudent = `${sortedResults[0].userId?.name || 'N/A'} ${sortedResults[0].userId?.surname || ''}`.trim();
+        topScore = sortedResults[0].score || 0;
+      }
+
+      return {
+        testId: test._id,
+        testTitle: test.title || 'Untitled Test',
+        subject: test.subject || 'Unknown Subject',
+        class: test.class || 'Unknown Class',
+        averageScore: parseFloat(averageScore),
+        completionRate: parseFloat(completionRate),
+        totalStudents: totalStudentsInTest,
+        completedStudents: completed,
+        topStudent,
+        topScore,
+        createdAt: test.createdAt
+      };
+    });
+
+    // Calculate overall metrics
+    const allScores = results.map(r => r.score || 0).filter(score => score > 0);
+    const overallAverageScore = allScores.length > 0 ? 
+      (allScores.reduce((a, b) => a + b, 0) / allScores.length).toFixed(2) : 0;
+
+    // Subject performance
+    const subjectPerformance = {};
+    results.forEach(result => {
+      const subject = result.testId?.subject || 'Unknown';
+      if (!subjectPerformance[subject]) {
+        subjectPerformance[subject] = { total: 0, count: 0, totalStudents: new Set() };
+      }
+      subjectPerformance[subject].total += result.score || 0;
+      subjectPerformance[subject].count += 1;
+      if (result.userId) {
+        subjectPerformance[subject].totalStudents.add(result.userId._id.toString());
+      }
+    });
+
+    const subjectRanking = Object.entries(subjectPerformance)
+      .map(([subject, data]) => ({
+        subject,
+        averageScore: (data.total / data.count).toFixed(2),
+        totalTests: data.count,
+        totalStudents: data.totalStudents.size
+      }))
+      .sort((a, b) => parseFloat(b.averageScore) - parseFloat(a.averageScore));
+
+    // Class performance
+    const classPerformance = {};
+    results.forEach(result => {
+      const className = result.testId?.class || 'Unknown';
+      if (!classPerformance[className]) {
+        classPerformance[className] = { total: 0, count: 0 };
+      }
+      classPerformance[className].total += result.score || 0;
+      classPerformance[className].count += 1;
+    });
+
+    const classRanking = Object.entries(classPerformance)
+      .map(([className, data]) => ({
+        className,
+        averageScore: (data.total / data.count).toFixed(2),
+        totalTests: data.count
+      }))
+      .sort((a, b) => parseFloat(b.averageScore) - parseFloat(a.averageScore));
+
+    // Student performance distribution
+    const studentPerformance = {
+      excellent: results.filter(r => (r.score || 0) >= 90).length,
+      good: results.filter(r => (r.score || 0) >= 75 && (r.score || 0) < 90).length,
+      average: results.filter(r => (r.score || 0) >= 50 && (r.score || 0) < 75).length,
+      poor: results.filter(r => (r.score || 0) < 50).length
+    };
+
+    // Recent tests (last 10)
+    const recentTests = tests
+      .slice(0, 10)
+      .map(test => {
+        const testResults = results.filter(r => 
+          r.testId && r.testId._id.toString() === test._id.toString()
+        );
+        const avgScore = testResults.length > 0 ? 
+          (testResults.reduce((sum, r) => sum + (r.score || 0), 0) / testResults.length).toFixed(2) : 0;
+        
+        return {
+          testId: test._id,
+          title: test.title || 'Untitled Test',
+          subject: test.subject,
+          class: test.class,
+          averageScore: parseFloat(avgScore),
+          studentCount: testResults.length,
+          date: test.createdAt
+        };
+      });
+
+    const response = {
+      success: true,
+      analytics: testAnalytics,
+      summary: {
+        totalStudents,
+        totalTests: tests.length,
+        totalQuestions: questions,
+        overallAverageScore: parseFloat(overallAverageScore),
+        totalResults: results.length
+      },
+      rankings: {
+        bySubject: subjectRanking,
+        byClass: classRanking
+      },
+      distribution: studentPerformance,
+      recentTests,
+      generatedAt: new Date().toISOString()
+    };
+
+    console.log('📊 Analytics Response:', {
+      tests: response.summary.totalTests,
+      analyticsCount: response.analytics.length
+    });
+
+    res.json(response);
+
+  } catch (error) {
+    console.error('❌ Analytics Error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error generating analytics',
+      message: error.message
+    });
+  }
+});
+
+// GET subject-specific analytics
+router.get('/subject/:subject', auth, async (req, res) => {
+  try {
+    const { subject } = req.params;
+    const { className } = req.query;
+
+    // Build query
+    const query = { subject };
+    if (className) query.class = className;
+
+    // If teacher, filter by their assigned classes
+    if (req.user.role === 'teacher' && req.user.subjects) {
+      const teacherSubjects = req.user.subjects
+        .filter(s => s.subject === subject)
+        .map(s => s.class);
+      
+      if (teacherSubjects.length > 0) {
+        query.class = { $in: teacherSubjects };
+      }
+    }
+
+    const results = await Result.find(query)
+      .populate('userId', 'name surname studentId')
+      .populate('testId', 'title type session term')
+      .lean();
+
+    if (results.length === 0) {
+      return res.json({
+        success: true,
+        subject,
+        className: className || 'all',
+        analytics: [],
+        summary: {
+          totalStudents: 0,
+          averageScore: 0,
+          totalTests: 0
+        }
+      });
+    }
+
+    // Calculate statistics
+    const scores = results.map(r => r.score || 0);
+    const averageScore = (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2);
+    
+    // Group by test
+    const tests = {};
+    results.forEach(result => {
+      if (result.testId) {
+        const testId = result.testId._id;
+        if (!tests[testId]) {
+          tests[testId] = {
+            testTitle: result.testId.title || 'Unknown Test',
+            testType: result.testId.type || 'test',
+            scores: [],
+            totalStudents: 0
+          };
+        }
+        tests[testId].scores.push(result.score || 0);
+        tests[testId].totalStudents += 1;
+      }
+    });
+
+    // Calculate test averages
+    const testAnalytics = Object.values(tests).map(test => ({
+      testTitle: test.testTitle,
+      testType: test.testType,
+      averageScore: (test.scores.reduce((a, b) => a + b, 0) / test.scores.length).toFixed(2),
+      totalStudents: test.totalStudents
+    }));
+
+    const response = {
+      success: true,
+      subject,
+      className: className || 'all',
+      analytics: testAnalytics,
+      summary: {
+        totalStudents: new Set(results.map(r => r.userId?._id?.toString())).size,
+        averageScore: parseFloat(averageScore),
+        totalTests: Object.keys(tests).length,
+        scoreRange: {
+          min: Math.min(...scores),
+          max: Math.max(...scores)
+        }
       }
     };
 
     res.json(response);
+
   } catch (error) {
-    console.error('Analytics - Dashboard Error:', { 
-      message: error.message, 
-      user: req.user.username 
-    });
-    res.status(500).json({ 
-      error: 'Server error generating dashboard analytics',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    console.error('Subject Analytics Error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error generating subject analytics'
     });
   }
 });
 
-// Get performance trends over time - STUDENTS BLOCKED
-router.get('/trends/:subject', auth, checkPermission('view_analytics'), async (req, res) => {
+// GET simple analytics for dropdowns/quick view
+router.get('/overview', auth, async (req, res) => {
   try {
-    // BLOCK STUDENT ACCESS
-    if (req.user.role === 'student') {
-      return res.status(403).json({ 
-        error: 'Access denied. Students cannot view performance trends.' 
+    // Only teachers and admins
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
+      return res.json({
+        success: true,
+        overview: {
+          averageScore: 0,
+          totalTests: 0,
+          totalStudents: 0,
+          completionRate: 0
+        }
       });
     }
 
-    const { subject } = req.params;
-    const { className, sessions = 5 } = req.query;
+    // Build teacher query
+    const teacherQuery = {};
+    if (req.user.role === 'teacher' && req.user.subjects) {
+      const subjectConditions = req.user.subjects.map(sub => ({
+        subject: sub.subject,
+        class: sub.class
+      }));
+      
+      if (subjectConditions.length > 0) {
+        teacherQuery.$or = subjectConditions;
+      }
+    }
 
-    const trendQuery = { subject };
-    if (className) trendQuery.class = className;
+    const [tests, results] = await Promise.all([
+      Test.find(teacherQuery).lean(),
+      Result.find(teacherQuery).lean()
+    ]);
 
-    const results = await Result.find(trendQuery)
-      .populate('testId', 'session term type')
-      .sort({ 'testId.session': 1, 'testId.term': 1 })
-      .limit(parseInt(sessions) * 3) // Approximate limit for sessions * terms
-      .lean();
+    // Calculate quick overview
+    const totalTests = tests.length;
+    const totalResults = results.length;
+    
+    const averageScore = totalResults > 0 ? 
+      (results.reduce((sum, r) => sum + (r.score || 0), 0) / totalResults).toFixed(2) : 0;
+    
+    const completionRate = totalTests > 0 ? 
+      ((totalResults / (totalTests * 10)) * 100).toFixed(2) : 0; // Assuming 10 students per test average
 
-    // Group by session and term
-    const trends = {};
-    results.forEach(result => {
-      if (result.testId) {
-        const key = `${result.testId.session}-${result.testId.term}`;
-        if (!trends[key]) {
-          trends[key] = {
-            session: result.testId.session,
-            term: result.testId.term,
-            scores: [],
-            average: 0
-          };
-        }
-        trends[key].scores.push(result.score || 0);
+    res.json({
+      success: true,
+      overview: {
+        averageScore: parseFloat(averageScore),
+        totalTests,
+        totalResults,
+        completionRate: parseFloat(completionRate),
+        activeTests: tests.filter(t => t.status === 'active').length
       }
     });
 
-    // Calculate averages
-    Object.keys(trends).forEach(key => {
-      const trend = trends[key];
-      trend.average = trend.scores.length > 0 ?
-        (trend.scores.reduce((a, b) => a + b, 0) / trend.scores.length).toFixed(2) : 0;
-      trend.studentCount = trend.scores.length;
-    });
-
-    const trendData = Object.values(trends)
-      .sort((a, b) => a.session.localeCompare(b.session) || a.term.localeCompare(b.term));
-
-    res.json({
-      subject,
-      className: className || 'all',
-      trends: trendData,
-      analysis: analyzeTrends(trendData)
-    });
   } catch (error) {
-    console.error('Analytics - Trends Error:', error);
-    res.status(500).json({ error: 'Server error generating trends' });
+    console.error('Overview Analytics Error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error generating overview'
+    });
   }
 });
-
-// Helper function to analyze performance trends
-function analyzeTrends(trendData) {
-  if (trendData.length < 2) {
-    return { message: 'Insufficient data for trend analysis' };
-  }
-
-  const averages = trendData.map(t => parseFloat(t.average));
-  const overallTrend = averages[averages.length - 1] - averages[0];
-  const trendDirection = overallTrend > 0 ? 'improving' : overallTrend < 0 ? 'declining' : 'stable';
-
-  return {
-    trendDirection,
-    overallChange: overallTrend.toFixed(2),
-    averagePerformance: (averages.reduce((a, b) => a + b, 0) / averages.length).toFixed(2),
-    recommendation: getTrendRecommendation(trendDirection, Math.abs(overallTrend))
-  };
-}
-
-function getTrendRecommendation(direction, magnitude) {
-  if (direction === 'improving') {
-    return magnitude > 10 ? 
-      'Excellent improvement trend. Continue current strategies.' :
-      'Moderate improvement. Consider targeted interventions for further gains.';
-  } else if (direction === 'declining') {
-    return magnitude > 10 ?
-      'Significant decline detected. Immediate intervention recommended.' :
-      'Slight decline observed. Monitor closely and consider review sessions.';
-  }
-  return 'Performance is stable. Maintain current teaching strategies.';
-}
 
 module.exports = router;

@@ -10,7 +10,7 @@
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^13.5.0",
     "assert": "^2.1.0",
-    "axios": "^1.10.0",
+    "axios": "^1.13.2",
     "better-react-mathjax": "^2.3.0",
     "browserify-zlib": "^0.2.0",
     "chart.js": "^4.5.0",

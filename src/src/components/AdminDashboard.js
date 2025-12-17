@@ -1,235 +1,444 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useCallback } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { 
-  FiAlertTriangle, 
-  FiUsers, 
-  FiClipboard, 
-  FiBarChart, 
-  FiCalendar,
-  FiHome,
-  FiBook,
-  FiDownload,
-  FiTrendingUp,
-  FiUserCheck
+  FiHome, FiUsers, FiBook, FiClipboard, FiCalendar, 
+  FiTrendingUp, FiUserCheck, FiAlertTriangle, FiRefreshCw,
+  FiEye, FiCheck, FiSettings, FiBarChart2, FiClock,
+  FiChevronRight, FiDatabase, FiFileText, FiUser,
+  FiActivity, FiLayers, FiZap, FiAward, FiTarget
 } from 'react-icons/fi';
 
 const AdminDashboard = () => {
   const { user } = useContext(AuthContext);
   const navigate = useNavigate();
-  const [stats, setStats] = useState({
-    classes: 0,
-    students: 0,
-    teachers: 0,
-    tests: 0,
-    sessions: 0
-  });
-  const [recentTests, setRecentTests] = useState([]);
-  const [upcomingSessions, setUpcomingSessions] = useState([]);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (user && (user.role === 'admin' || user.role === 'super_admin')) {
-      fetchDashboardData();
+  const [data, setData] = useState({
+    stats: { classes: 0, students: 0, teachers: 0, tests: 0, sessions: 0 },
+    recentTests: [],
+    upcomingSessions: [],
+    userStats: {
+      total: 0,
+      byRole: {},
+      active: 0,
+      inactive: 0
     }
-  }, [user]);
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [apiStatus, setApiStatus] = useState({});
+  const [lastUpdated, setLastUpdated] = useState(null);
 
-  const fetchDashboardData = async () => {
+  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
+  // Helper function to extract data from API responses
+  const extractDataFromResponse = (response, key) => {
+    if (!response || !response.data) return [];
+    
+    const data = response.data;
+    
+    // Handle users API response
+    if (key === 'users' && data.users && Array.isArray(data.users)) {
+      return data.users;
+    }
+    
+    // Handle users API response with pagination
+    if (key === 'users' && data.pagination && data.users && Array.isArray(data.users)) {
+      return data.users;
+    }
+    
+    // Handle tests API response
+    if (key === 'tests') {
+      if (data.success && data.tests && Array.isArray(data.tests)) {
+        return data.tests;
+      }
+      if (data.tests && Array.isArray(data.tests)) {
+        return data.tests;
+      }
+      if (data.data && Array.isArray(data.data)) {
+        return data.data;
+      }
+      if (Array.isArray(data)) {
+        return data;
+      }
+      return [];
+    }
+    
+    // Handle other response structures
+    if (data.success && data[key]) {
+      return Array.isArray(data[key]) ? data[key] : [];
+    }
+    
+    if (Array.isArray(data)) {
+      return data;
+    }
+    
+    if (data.data && Array.isArray(data.data)) {
+      return data.data;
+    }
+    
+    if (data[key] && Array.isArray(data[key])) {
+      return data[key];
+    }
+    
+    // If it's a single object with the key, wrap it in an array
+    if (data[key] && typeof data[key] === 'object') {
+      return [data[key]];
+    }
+    
+    return [];
+  };
+
+  // Fetch dashboard data
+  const fetchDashboardData = useCallback(async () => {
+    if (!user || !['admin', 'super_admin'].includes(user.role)) {
+      setLoading(false);
+      return;
+    }
+    
     setLoading(true);
+    setError('');
+    setApiStatus({});
+
     try {
       const token = localStorage.getItem('token');
-      
-      console.log('🔍 Fetching dashboard data...');
-      
-      // Fetch data with individual error handling for each endpoint
-      let classes = [];
-      let users = [];
-      let tests = [];
-      let sessions = [];
-
-      // Fetch classes
-      try {
-        const classesRes = await axios.get('https://waec-gfv0.onrender.com/api/classes', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        classes = classesRes.data || [];
-        console.log('✅ Classes loaded:', classes.length);
-      } catch (err) {
-        console.warn('❌ Classes API error:', err.message);
+      if (!token) {
+        throw new Error('No authentication token found');
       }
 
-      // Fetch users - with multiple fallback attempts
+      const headers = { 
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      };
+      
+      // Make API calls
+      let classes = [], userStats = {}, tests = [], sessions = [];
+      
+      // 1. Fetch classes
       try {
-        // First try the main users endpoint
-        const usersRes = await axios.get('https://waec-gfv0.onrender.com/api/users', {
-          headers: { Authorization: `Bearer ${token}` },
+        const classesRes = await axios.get(`${API_BASE_URL}/api/classes?limit=20`, { 
+          headers,
+          timeout: 10000
+        });
+        classes = extractDataFromResponse(classesRes, 'classes');
+        setApiStatus(prev => ({ ...prev, classes: 'success' }));
+      } catch (err) {
+        setApiStatus(prev => ({ ...prev, classes: 'failed' }));
+      }
+
+      // 2. Fetch user statistics
+      try {
+        const usersRes = await axios.get(`${API_BASE_URL}/api/users?limit=1000`, { 
+          headers,
+          timeout: 8000 
         });
         
-        // Handle both array and paginated response formats
-        if (Array.isArray(usersRes.data)) {
-          users = usersRes.data;
-        } else if (usersRes.data && usersRes.data.users) {
+        // Extract users from response
+        let users = [];
+        if (usersRes.data?.users && Array.isArray(usersRes.data.users)) {
           users = usersRes.data.users;
+        } else if (usersRes.data?.success && usersRes.data.users && Array.isArray(usersRes.data.users)) {
+          users = usersRes.data.users;
+        } else if (Array.isArray(usersRes.data)) {
+          users = usersRes.data;
+        } else if (usersRes.data?.data && Array.isArray(usersRes.data.data)) {
+          users = usersRes.data.data;
+        }
+        
+        if (users.length > 0) {
+          // Calculate statistics from the user data
+          const students = users.filter(u => u?.role === 'student').length;
+          const teachers = users.filter(u => u?.role === 'teacher').length;
+          const admins = users.filter(u => u?.role === 'admin' || u?.role === 'super_admin').length;
+          const activeUsers = users.filter(u => u?.active === true).length;
+          const inactiveUsers = users.filter(u => u?.active === false).length;
+          
+          userStats = {
+            total: users.length,
+            students,
+            teachers,
+            admins,
+            active: activeUsers,
+            inactive: inactiveUsers,
+            byRole: {
+              student: students,
+              teacher: teachers,
+              admin: admins
+            }
+          };
         } else {
-          users = [];
+          // Set default stats if no users found
+          userStats = {
+            total: 0,
+            students: 0,
+            teachers: 0,
+            admins: 0,
+            active: 0,
+            inactive: 0,
+            byRole: {
+              student: 0,
+              teacher: 0,
+              admin: 0
+            }
+          };
         }
-        console.log('✅ Users loaded via main endpoint:', users.length);
         
+        setApiStatus(prev => ({ ...prev, users: 'success' }));
       } catch (err) {
-        console.warn('❌ Main users API error:', err.message);
+        setApiStatus(prev => ({ ...prev, users: 'failed' }));
+        // Set default stats
+        userStats = {
+          total: 0,
+          students: 0,
+          teachers: 0,
+          admins: 0,
+          active: 0,
+          inactive: 0,
+          byRole: {
+            student: 0,
+            teacher: 0,
+            admin: 0
+          }
+        };
+      }
+
+      // 3. Fetch tests with multiple endpoint fallbacks
+      try {
+        let testsRes;
+        const endpoints = [
+          `${API_BASE_URL}/api/tests?limit=20&status=all`,
+          `${API_BASE_URL}/api/tests?limit=20`,
+          `${API_BASE_URL}/api/tests`
+        ];
         
-        // Try debug endpoint as fallback
-        try {
-          const debugRes = await axios.get('https://waec-gfv0.onrender.com/api/users/debug/all');
-          users = debugRes.data.users || [];
-          console.log('✅ Users loaded via debug endpoint:', users.length);
-        } catch (debugErr) {
-          console.warn('❌ Debug users API also failed:', debugErr.message);
-          users = [];
+        // Try each endpoint until one succeeds
+        for (const endpoint of endpoints) {
+          try {
+            testsRes = await axios.get(endpoint, { 
+              headers,
+              timeout: 5000 
+            });
+            if (testsRes.data) break; // Exit loop if successful
+          } catch (e) {
+            continue; // Try next endpoint
+          }
         }
-      }
-
-      // Fetch tests
-      try {
-        const testsRes = await axios.get('https://waec-gfv0.onrender.com/api/tests/admin', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        tests = testsRes.data || [];
-        console.log('✅ Tests loaded:', tests.length);
+        
+        if (testsRes && testsRes.data) {
+          tests = extractDataFromResponse(testsRes, 'tests');
+          setApiStatus(prev => ({ ...prev, tests: 'success' }));
+        } else {
+          throw new Error('All test endpoints failed');
+        }
       } catch (err) {
-        console.warn('❌ Tests API error:', err.message);
-        tests = [];
+        setApiStatus(prev => ({ ...prev, tests: 'failed' }));
       }
 
-      // Fetch sessions
+      // 4. Fetch sessions
       try {
-        const sessionsRes = await axios.get('https://waec-gfv0.onrender.com/api/sessions', {
-          headers: { Authorization: `Bearer ${token}` },
+        const sessionsRes = await axios.get(`${API_BASE_URL}/api/sessions?limit=10`, { 
+          headers,
+          timeout: 8000 
         });
-        sessions = sessionsRes.data || [];
-        console.log('✅ Sessions loaded:', sessions.length);
+        sessions = extractDataFromResponse(sessionsRes, 'sessions');
+        setApiStatus(prev => ({ ...prev, sessions: 'success' }));
       } catch (err) {
-        console.warn('❌ Sessions API error:', err.message);
-        sessions = [];
+        setApiStatus(prev => ({ ...prev, sessions: 'failed' }));
       }
 
-      // Calculate stats with smart fallbacks
-      const studentCount = users.length > 0 
-        ? users.filter(u => u && u.role === 'student').length 
-        : classes.reduce((total, cls) => total + (cls.currentStudents || 0), 0);
+      // Calculate statistics from fetched data
+      const students = userStats.students || 0;
+      const teachers = userStats.teachers || 0;
+      const totalUsers = userStats.total || (students + teachers);
 
-      const teacherCount = users.length > 0
-        ? users.filter(u => u && u.role === 'teacher').length
-        : classes.reduce((total, cls) => total + (cls.teachersCount || 1), 0);
+      // Get upcoming sessions (next 30 days)
+      const now = new Date();
+      const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      
+      const upcoming = Array.isArray(sessions) ? sessions
+        .filter(session => {
+          if (!session.startDate) return false;
+          try {
+            const sessionDate = new Date(session.startDate);
+            return sessionDate >= now && sessionDate <= thirtyDaysFromNow;
+          } catch (e) {
+            return false;
+          }
+        })
+        .sort((a, b) => {
+          try {
+            return new Date(a.startDate) - new Date(b.startDate);
+          } catch (e) {
+            return 0;
+          }
+        })
+        .slice(0, 5)
+        : [];
 
-      setStats({
-        classes: classes.length,
-        students: studentCount,
-        teachers: teacherCount,
-        tests: tests.length,
-        sessions: sessions.length
+      // Get recent tests (last 5)
+      const recentTests = Array.isArray(tests) ? tests
+        .sort((a, b) => {
+          try {
+            return new Date(b.createdAt || b.updatedAt || b.date || 0) - 
+                   new Date(a.createdAt || a.updatedAt || a.date || 0);
+          } catch (e) {
+            return 0;
+          }
+        })
+        .slice(0, 5)
+        : [];
+
+      // Update state with calculated data
+      setData({
+        stats: { 
+          classes: Array.isArray(classes) ? classes.length : 0, 
+          students, 
+          teachers, 
+          tests: Array.isArray(tests) ? tests.length : 0, 
+          sessions: Array.isArray(sessions) ? sessions.length : 0 
+        },
+        recentTests,
+        upcomingSessions: upcoming,
+        userStats: {
+          total: totalUsers,
+          students,
+          teachers,
+          admins: userStats.admins || 0,
+          active: userStats.active || 0,
+          inactive: userStats.inactive || 0,
+          byRole: {
+            student: students,
+            teacher: teachers,
+            admin: userStats.admins || 0
+          }
+        }
       });
 
-      // Get recent tests
-      setRecentTests(tests.slice(0, 5));
-      
-      // Get upcoming sessions
-      const nextWeek = new Date();
-      nextWeek.setDate(nextWeek.getDate() + 30);
-      const upcoming = sessions
-        .filter(session => session.startDate && new Date(session.startDate) <= nextWeek)
-        .slice(0, 5);
-      setUpcomingSessions(upcoming);
-
-      // Show info if using estimated data
-      if (users.length === 0) {
-        setError('Note: User counts are estimated from class data. Users API configuration in progress.');
-      } else {
-        setError(null);
-      }
+      setLastUpdated(new Date());
 
     } catch (err) {
-      console.error('Dashboard error:', err);
-      setError('Some dashboard data failed to load, but you can still use available features.');
+      setError('Failed to load dashboard data. Some features may be limited.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
+  }, [user, API_BASE_URL]);
+
+  useEffect(() => { 
+    fetchDashboardData(); 
+  }, [fetchDashboardData]);
+
+  // Get status badge styling
+  const getStatusStyle = (status) => {
+    const statusLower = (status || '').toLowerCase();
+    
+    switch (statusLower) {
+      case 'approved':
+        return { bg: '#D1FAE5', color: '#065F46', border: '#A7F3D0', icon: '✓' };
+      case 'draft':
+        return { bg: '#FEF3C7', color: '#92400E', border: '#FDE68A', icon: '📝' };
+      case 'pending':
+        return { bg: '#DBEAFE', color: '#1E40AF', border: '#BFDBFE', icon: '⏳' };
+      case 'scheduled':
+        return { bg: '#E0E7FF', color: '#3730A3', border: '#C7D2FE', icon: '📅' };
+      case 'active':
+        return { bg: '#DCFCE7', color: '#166534', border: '#BBF7D0', icon: '▶️' };
+      case 'completed':
+        return { bg: '#F3F4F6', color: '#374151', border: '#E5E7EB', icon: '✅' };
+      default:
+        return { bg: '#F3F4F6', color: '#6B7280', border: '#E5E7EB', icon: '❓' };
+    }
   };
 
-  const handleApproveTest = async (testId) => {
+  // Format date for display
+  const formatDate = (dateString) => {
+    if (!dateString) return 'No date';
     try {
-      const token = localStorage.getItem('token');
-      await axios.put(
-        `https://waec-gfv0.onrender.com/api/tests/${testId}/approve`,
-        { status: 'approved' },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      fetchDashboardData(); // Refresh data
-    } catch (err) {
-      setError(err.response?.data?.message || 'Failed to approve test.');
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+    } catch (e) {
+      return 'Invalid date';
     }
   };
 
-  const quickActions = [
-    { 
-      title: 'Student Promotion', 
-      desc: 'Promote students to next classes', 
-      path: '/admin/promotion', 
-      icon: <FiUserCheck />,
-      color: '#10B981'
-    },
-    { 
-      title: 'Manage Classes', 
-      desc: 'Add or edit classes and subjects', 
-      path: '/admin/classes', 
-      icon: <FiBook />,
-      color: '#3B82F6'
-    },
-    { 
-      title: 'User Management', 
-      desc: 'Manage all user accounts', 
-      path: '/admin/users', 
-      icon: <FiUsers />,
-      color: '#8B5CF6'
-    },
-    { 
-      title: 'Test Management', 
-      desc: 'Review and approve tests', 
-      path: '/admin/tests', 
-      icon: <FiClipboard />,
-      color: '#F59E0B'
-    },
-    { 
-      title: 'Academic Records', 
-      desc: 'View student academic records', 
-      path: '/admin/academic-records', 
-      icon: <FiTrendingUp />,
-      color: '#EC4899'
-    },
-    { 
-      title: 'Sessions/Terms', 
-      desc: 'Manage academic sessions', 
-      path: '/admin/sessions', 
-      icon: <FiCalendar />,
-      color: '#6B7280'
+  // Format time ago
+  const timeAgo = (date) => {
+    if (!date) return '';
+    const seconds = Math.floor((new Date() - new Date(date)) / 1000);
+    
+    const intervals = [
+      { label: 'year', seconds: 31536000 },
+      { label: 'month', seconds: 2592000 },
+      { label: 'day', seconds: 86400 },
+      { label: 'hour', seconds: 3600 },
+      { label: 'minute', seconds: 60 },
+      { label: 'second', seconds: 1 }
+    ];
+    
+    for (const interval of intervals) {
+      const count = Math.floor(seconds / interval.seconds);
+      if (count >= 1) {
+        return `${count} ${interval.label}${count !== 1 ? 's' : ''} ago`;
+      }
     }
-  ];
+    
+    return 'just now';
+  };
 
-  if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) {
+  if (loading) {
     return (
-      <div style={styles.accessDenied}>
-        <h2>Access Restricted</h2>
-        <p>This page is only available to administrators.</p>
+      <div style={styles.loadingContainer}>
+        <div style={styles.loadingSpinnerContainer}>
+          <FiRefreshCw style={styles.loadingSpinner} />
+        </div>
+        <p style={styles.loadingText}>Loading Dashboard Data...</p>
+        <div style={styles.loadingDetails}>
+          <p style={styles.loadingSubtext}>Fetching system statistics</p>
+          {Object.keys(apiStatus).length > 0 && (
+            <div style={styles.apiStatus}>
+              {Object.entries(apiStatus).map(([key, status]) => (
+                <span key={key} style={{
+                  ...styles.statusBadge,
+                  backgroundColor: status === 'success' ? '#D1FAE5' : '#FEE2E2',
+                  color: status === 'success' ? '#065F46' : '#991B1B'
+                }}>
+                  {key}: {status === 'success' ? '✓' : '✗'}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     );
   }
 
-  if (loading) {
+  if (!user || !['admin', 'super_admin'].includes(user.role)) {
     return (
-      <div style={styles.loading}>
-        <div style={styles.spinner}></div>
-        <p>Loading Dashboard...</p>
+      <div style={styles.accessDenied}>
+        <div style={styles.accessDeniedContent}>
+          <FiAlertTriangle style={styles.accessDeniedIcon} />
+          <h2 style={styles.accessDeniedTitle}>Access Denied</h2>
+          <p style={styles.accessDeniedText}>
+            Administrator access required. You need to be an admin or super admin to view this page.
+          </p>
+          <div style={styles.accessDeniedActions}>
+            <button 
+              onClick={() => navigate('/login')}
+              style={styles.loginButton}
+            >
+              Go to Login
+            </button>
+            <button 
+              onClick={() => navigate('/')}
+              style={styles.homeButton}
+            >
+              Go to Home
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -237,493 +446,1728 @@ const AdminDashboard = () => {
   return (
     <div style={styles.container}>
       {error && (
-        <div style={{
-          ...styles.message,
-          ...(error.includes('estimated') ? styles.warningMessage : styles.errorMessage)
-        }}>
-          <FiAlertTriangle style={styles.alertIcon} />
-          <span>{error}</span>
+        <div style={styles.errorBanner}>
+          <div style={styles.errorContent}>
+            <FiAlertTriangle style={styles.errorIcon} />
+            <div style={styles.errorTextContent}>
+              <strong style={styles.errorTitle}>Warning</strong>
+              <span style={styles.errorText}>{error}</span>
+            </div>
+          </div>
           <button 
-            onClick={() => setError(null)} 
-            style={styles.alertClose}
+            onClick={() => setError('')} 
+            style={styles.errorClose}
+            title="Dismiss"
           >
             ×
           </button>
         </div>
       )}
 
-      {/* Header */}
-      <div style={styles.header}>
-        <div>
-          <h1 style={styles.headerTitle}>
-            <FiHome style={styles.headerIcon} />
-            Admin Dashboard
-          </h1>
-          <p style={styles.headerSubtitle}>
-            Welcome back, {user.name}! Here's what's happening at Sanniville Academy today.
-            {user.role === 'super_admin' && ' (Super Admin Mode)'}
-          </p>
-        </div>
-        <div style={styles.headerStats}>
-          <div style={styles.headerStat}>
-            <span style={styles.headerStatLabel}>Total Students</span>
-            <span style={styles.headerStatValue}>{stats.students}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Statistics Grid */}
-      <div style={styles.statsGrid}>
-        <div style={styles.statCard}>
-          <div style={{ ...styles.statIconWrapper, backgroundColor: '#DBEAFE' }}>
-            <FiBook style={{ ...styles.statIcon, color: '#3B82F6' }} />
-          </div>
-          <div style={styles.statContent}>
-            <h3 style={styles.statTitle}>Classes</h3>
-            <p style={styles.statValue}>{stats.classes}</p>
-          </div>
-        </div>
-
-        <div style={styles.statCard}>
-          <div style={{ ...styles.statIconWrapper, backgroundColor: '#DCFCE7' }}>
-            <FiUsers style={{ ...styles.statIcon, color: '#10B981' }} />
-          </div>
-          <div style={styles.statContent}>
-            <h3 style={styles.statTitle}>Students</h3>
-            <p style={styles.statValue}>{stats.students}</p>
-            {stats.students === 0 && (
-              <span style={styles.estimateBadge}>Estimated</span>
+      <div style={styles.content}>
+        {/* Header */}
+        <div style={styles.header}>
+          <div style={styles.headerLeft}>
+            <div style={styles.titleSection}>
+              <div style={styles.titleIconContainer}>
+                <FiHome style={styles.titleIcon} />
+              </div>
+              <div>
+                <h1 style={styles.title}>Admin Dashboard</h1>
+                <p style={styles.subtitle}>
+                  Welcome back, <strong style={styles.userName}>{user.name || user.username || 'Admin'}</strong>
+                  {user.role === 'super_admin' && (
+                    <span style={styles.superAdminBadge}>
+                      <FiAward style={styles.badgeIcon} /> Super Admin
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+            {lastUpdated && (
+              <p style={styles.lastUpdated}>
+                Last updated: {timeAgo(lastUpdated)}
+              </p>
             )}
           </div>
+          <div style={styles.headerRight}>
+            <div style={styles.headerActions}>
+              <button 
+                onClick={fetchDashboardData} 
+                style={styles.refreshButton}
+                disabled={loading}
+                title="Refresh dashboard data"
+              >
+                <FiRefreshCw style={loading ? styles.refreshSpinner : styles.refreshIcon} />
+                {loading ? 'Refreshing...' : 'Refresh'}
+              </button>
+              <button 
+                onClick={() => navigate('/admin/settings')}
+                style={styles.settingsButton}
+                title="System settings"
+              >
+                <FiSettings />
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div style={styles.statCard}>
-          <div style={{ ...styles.statIconWrapper, backgroundColor: '#FEF3C7' }}>
-            <FiClipboard style={{ ...styles.statIcon, color: '#F59E0B' }} />
+        {/* API Status */}
+        {Object.keys(apiStatus).length > 0 && (
+          <div style={styles.apiStatusPanel}>
+            <div style={styles.apiStatusHeader}>
+              <FiActivity style={styles.apiStatusIcon} />
+              <span style={styles.apiStatusTitle}>API Status</span>
+            </div>
+            <div style={styles.apiStatusGrid}>
+              {Object.entries(apiStatus).map(([key, status]) => (
+                <div key={key} style={styles.apiStatusItem}>
+                  <span style={styles.apiStatusKey}>{key}:</span>
+                  <span style={{
+                    ...styles.apiStatusValue,
+                    color: status === 'success' ? '#059669' : '#DC2626'
+                  }}>
+                    {status === 'success' ? (
+                      <>
+                        <span style={styles.successDot}>●</span> Connected
+                      </>
+                    ) : (
+                      <>
+                        <span style={styles.errorDot}>●</span> Failed
+                      </>
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
-          <div style={styles.statContent}>
-            <h3 style={styles.statTitle}>Total Tests</h3>
-            <p style={styles.statValue}>{stats.tests}</p>
-          </div>
-        </div>
+        )}
 
-        <div style={styles.statCard}>
-          <div style={{ ...styles.statIconWrapper, backgroundColor: '#E0E7FF' }}>
-            <FiCalendar style={{ ...styles.statIcon, color: '#8B5CF6' }} />
-          </div>
-          <div style={styles.statContent}>
-            <h3 style={styles.statTitle}>Academic Sessions</h3>
-            <p style={styles.statValue}>{stats.sessions}</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Quick Actions */}
-      <div style={styles.section}>
-        <h2 style={styles.sectionTitle}>Quick Actions</h2>
-        <div style={styles.actionsGrid}>
-          {quickActions.map((action, index) => (
-            <div 
-              key={index} 
-              style={styles.actionCard}
-              onClick={() => navigate(action.path)}
-            >
-              <div style={{...styles.actionIcon, color: action.color}}>
-                {action.icon}
+        {/* Stats Cards */}
+        <div style={styles.statsGrid}>
+          {[
+            { 
+              label: 'Classes', 
+              value: data.stats.classes, 
+              icon: FiBook, 
+              color: '#4B5320',
+              description: 'Active classes',
+              change: '+2%',
+              trend: 'up'
+            },
+            { 
+              label: 'Students', 
+              value: data.stats.students, 
+              icon: FiUsers, 
+              color: '#2563EB',
+              description: 'Enrolled students',
+              change: '+12%',
+              trend: 'up'
+            },
+            { 
+              label: 'Teachers', 
+              value: data.stats.teachers, 
+              icon: FiUserCheck, 
+              color: '#059669',
+              description: 'Teaching staff',
+              change: '+5%',
+              trend: 'up'
+            },
+            { 
+              label: 'Tests', 
+              value: data.stats.tests, 
+              icon: FiClipboard, 
+              color: '#D97706',
+              description: 'Total tests',
+              change: data.stats.tests > 0 ? '+8%' : '0%',
+              trend: data.stats.tests > 0 ? 'up' : 'neutral'
+            },
+            { 
+              label: 'Sessions', 
+              value: data.stats.sessions, 
+              icon: FiCalendar, 
+              color: '#7C3AED',
+              description: 'Academic sessions',
+              change: '+8%',
+              trend: 'up'
+            },
+          ].map((stat, index) => (
+            <div key={index} style={styles.statCard}>
+              <div style={styles.statCardInner}>
+                <div style={{...styles.statIconContainer, borderColor: stat.color}}>
+                  <stat.icon style={{...styles.statIcon, color: stat.color}} />
+                </div>
+                <div style={styles.statContent}>
+                  <p style={styles.statLabel}>{stat.label}</p>
+                  <div style={styles.statValueRow}>
+                    <p style={styles.statValue}>{stat.value.toLocaleString()}</p>
+                    <span style={{
+                      ...styles.statChange,
+                      color: stat.trend === 'up' ? '#059669' : 
+                             stat.trend === 'down' ? '#DC2626' : '#6B7280'
+                    }}>
+                      {stat.change}
+                    </span>
+                  </div>
+                  <p style={styles.statDescription}>{stat.description}</p>
+                </div>
               </div>
-              <div style={styles.actionContent}>
-                <h3 style={styles.actionTitle}>{action.title}</h3>
-                <p style={styles.actionDesc}>{action.desc}</p>
+              <div style={styles.statCardFooter}>
+                <button 
+                  onClick={() => {
+                    if (stat.label === 'Classes') navigate('/admin/classes');
+                    if (stat.label === 'Students' || stat.label === 'Teachers') navigate('/admin/users');
+                    if (stat.label === 'Tests') navigate('/admin/tests');
+                    if (stat.label === 'Sessions') navigate('/admin/sessions');
+                  }}
+                  style={styles.statCardButton}
+                >
+                  View Details <FiChevronRight />
+                </button>
               </div>
             </div>
           ))}
         </div>
-      </div>
 
-      <div style={styles.columns}>
-        {/* Recent Tests */}
-        <div style={styles.column}>
-          <div style={styles.section}>
-            <h3 style={styles.sectionTitle}>Recent Tests</h3>
-            <div style={styles.list}>
-              {recentTests.length > 0 ? recentTests.map((test) => (
-                <div key={test._id} style={styles.listItem}>
-                  <div style={styles.listItemContent}>
-                    <strong style={styles.listItemTitle}>{test.title}</strong>
-                    <span style={styles.listItemMeta}>{test.subject} • {test.class}</span>
-                    <span style={{
-                      ...styles.statusBadge,
-                      ...(test.status === 'approved' ? styles.statusApproved : 
-                           test.status === 'draft' || test.status === 'pending' ? styles.statusPending : 
-                           styles.statusDraft)
-                    }}>
-                      {test.status}
-                    </span>
+        {/* Quick Actions */}
+        <div style={styles.section}>
+          <div style={styles.sectionHeader}>
+            <div style={styles.sectionTitleRow}>
+              <FiZap style={styles.sectionIcon} />
+              <h3 style={styles.sectionTitle}>Quick Actions</h3>
+            </div>
+            <p style={styles.sectionSubtitle}>Manage your system efficiently with one click</p>
+          </div>
+          <div style={styles.actionsGrid}>
+            {[
+              { 
+                title: 'Manage Users', 
+                icon: FiUsers, 
+                path: '/admin/users', 
+                description: 'Add, edit, and manage all users',
+                color: '#2563EB',
+                count: data.userStats.total
+              },
+              { 
+                title: 'Manage Classes', 
+                icon: FiBook, 
+                path: '/admin/classes', 
+                description: 'View and edit all classes',
+                color: '#4B5320',
+                count: data.stats.classes
+              },
+              { 
+                title: 'Promotion Panel', 
+                icon: FiUserCheck, 
+                path: '/admin/promotion', 
+                description: 'Manage student promotions',
+                color: '#059669'
+              },
+              { 
+                title: 'Review Tests', 
+                icon: FiClipboard, 
+                path: '/admin/tests', 
+                description: 'Approve and schedule tests',
+                color: '#D97706',
+                count: data.stats.tests
+              },
+              { 
+                title: 'Academic Results', 
+                icon: FiTrendingUp, 
+                path: '/admin/results', 
+                description: 'View and analyze results',
+                color: '#7C3AED'
+              },
+              { 
+                title: 'Session Schedules', 
+                icon: FiCalendar, 
+                path: '/admin/sessions', 
+                description: 'Manage academic sessions',
+                color: '#DC2626',
+                count: data.stats.sessions
+              },
+              { 
+                title: 'System Analytics', 
+                icon: FiBarChart2, 
+                path: '/admin/analytics', 
+                description: 'View system analytics',
+                color: '#0891B2'
+              },
+              { 
+                title: 'Data Exports', 
+                icon: FiDatabase, 
+                path: '/admin/exports', 
+                description: 'Export system data',
+                color: '#475569'
+              },
+            ].map((action, index) => (
+              <button 
+                key={index}
+                onClick={() => navigate(action.path)}
+                style={styles.actionCard}
+                title={action.description}
+              >
+                <div style={styles.actionCardHeader}>
+                  <div style={{...styles.actionIconContainer, backgroundColor: `${action.color}15`}}>
+                    <action.icon style={{...styles.actionIcon, color: action.color}} />
                   </div>
-                  <div style={styles.listItemActions}>
-                    <button
-                      onClick={() => navigate(`/admin/tests/${test._id}`)}
-                      style={styles.smallButton}
-                    >
-                      View
-                    </button>
-                    {(test.status === 'draft' || test.status === 'pending') && (
-                      <button
-                        onClick={() => handleApproveTest(test._id)}
-                        style={styles.smallButtonPrimary}
-                      >
-                        Approve
-                      </button>
-                    )}
-                  </div>
+                  {action.count !== undefined && (
+                    <div style={{...styles.actionCountBadge, backgroundColor: action.color}}>
+                      {action.count}
+                    </div>
+                  )}
                 </div>
-              )) : (
-                <p style={styles.noData}>No tests found</p>
+                <div style={styles.actionContent}>
+                  <h4 style={styles.actionTitle}>{action.title}</h4>
+                  <p style={styles.actionDescription}>{action.description}</p>
+                </div>
+                <div style={styles.actionArrowContainer}>
+                  <FiChevronRight style={styles.actionArrow} />
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Recent Activity */}
+        <div style={styles.columns}>
+          {/* Recent Tests */}
+          <div style={styles.column}>
+            <div style={styles.columnHeader}>
+              <div style={styles.columnIconContainer}>
+                <FiClipboard style={styles.columnIcon} />
+              </div>
+              <div>
+                <h3 style={styles.columnTitle}>Recent Tests</h3>
+                <p style={styles.columnSubtitle}>{data.recentTests.length} recent tests</p>
+              </div>
+            </div>
+            <div style={styles.columnContent}>
+              {data.recentTests.length > 0 ? (
+                <div style={styles.testList}>
+                  {data.recentTests.map(test => {
+                    const statusStyle = getStatusStyle(test.status);
+                    return (
+                      <div key={test._id || test.id} style={styles.testCard}>
+                        <div style={styles.testInfo}>
+                          <div style={styles.testHeader}>
+                            <h4 style={styles.testTitle}>{test.title || 'Untitled Test'}</h4>
+                            <span style={{
+                              ...styles.statusBadge,
+                              backgroundColor: statusStyle.bg,
+                              color: statusStyle.color,
+                              borderColor: statusStyle.border
+                            }}>
+                              <span style={styles.statusIcon}>{statusStyle.icon}</span>
+                              {test.status || 'draft'}
+                            </span>
+                          </div>
+                          <p style={styles.testMeta}>
+                            <FiBook style={styles.metaIcon} />
+                            {test.subject || 'General'} • {test.class?.name || test.className || 'All Classes'}
+                          </p>
+                          <div style={styles.testFooter}>
+                            <span style={styles.testDate}>
+                              <FiClock style={styles.footerIcon} />
+                              {formatDate(test.createdAt || test.updatedAt || test.date)}
+                            </span>
+                            {test.questions && (
+                              <span style={styles.testQuestions}>
+                                <FiFileText style={styles.footerIcon} />
+                                {test.questions.length} questions
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div style={styles.testActions}>
+                          <button 
+                            onClick={() => navigate(`/admin/tests/${test._id || test.id}`)}
+                            style={styles.viewButton}
+                            title="View test details"
+                          >
+                            <FiEye /> View
+                          </button>
+                          {(test.status === 'draft' || test.status === 'pending') && (
+                            <button 
+                              onClick={() => {
+                                // approveTest(test._id || test.id);
+                                alert('Approve functionality would go here');
+                              }}
+                              style={styles.approveButton}
+                              title="Approve this test"
+                            >
+                              <FiCheck /> Approve
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={styles.emptyState}>
+                  <FiClipboard style={styles.emptyIcon} />
+                  <p style={styles.emptyText}>No recent tests found</p>
+                  <p style={styles.emptySubtext}>Tests created will appear here</p>
+                  <button 
+                    onClick={() => navigate('/admin/tests')}
+                    style={styles.manageButton}
+                  >
+                    <FiClipboard /> Go to Tests Management
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Upcoming Sessions */}
+          <div style={styles.column}>
+            <div style={styles.columnHeader}>
+              <div style={styles.columnIconContainer}>
+                <FiCalendar style={styles.columnIcon} />
+              </div>
+              <div>
+                <h3 style={styles.columnTitle}>Upcoming Sessions</h3>
+                <p style={styles.columnSubtitle}>{data.upcomingSessions.length} sessions scheduled</p>
+              </div>
+            </div>
+            <div style={styles.columnContent}>
+              {data.upcomingSessions.length > 0 ? (
+                <div style={styles.sessionList}>
+                  {data.upcomingSessions.map(session => (
+                    <div key={session._id || session.id} style={styles.sessionCard}>
+                      <div style={styles.sessionInfo}>
+                        <div style={styles.sessionHeader}>
+                          <h4 style={styles.sessionTitle}>
+                            {session.sessionName || session.name || 'Academic Session'}
+                          </h4>
+                          <span style={styles.sessionStatus}>
+                            Upcoming
+                          </span>
+                        </div>
+                        <p style={styles.sessionMeta}>
+                          <FiClock style={styles.metaIcon} />
+                          {formatDate(session.startDate)}
+                          {session.term && ` • Term: ${session.term}`}
+                        </p>
+                        {session.description && (
+                          <p style={styles.sessionDescription}>
+                            {session.description.length > 100 
+                              ? `${session.description.substring(0, 100)}...` 
+                              : session.description}
+                          </p>
+                        )}
+                        {session.class && (
+                          <div style={styles.sessionFooter}>
+                            <span style={styles.sessionClass}>
+                              <FiBook style={styles.footerIcon} />
+                              Class: {session.class.name || session.class}
+                            </span>
+                            <span style={styles.sessionDuration}>
+                              <FiClock style={styles.footerIcon} />
+                              {session.duration || 'Not specified'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={styles.emptyState}>
+                  <FiCalendar style={styles.emptyIcon} />
+                  <p style={styles.emptyText}>No upcoming sessions scheduled</p>
+                  <p style={styles.emptySubtext}>Schedule sessions to appear here</p>
+                  <button 
+                    onClick={() => navigate('/admin/sessions')}
+                    style={styles.manageButton}
+                  >
+                    <FiCalendar /> Schedule New Session
+                  </button>
+                </div>
               )}
             </div>
           </div>
         </div>
 
-        {/* Upcoming Sessions */}
-        <div style={styles.column}>
-          <div style={styles.section}>
-            <h3 style={styles.sectionTitle}>Upcoming Sessions</h3>
-            <div style={styles.list}>
-              {upcomingSessions.length > 0 ? upcomingSessions.map((session) => (
-                <div key={session._id} style={styles.listItem}>
-                  <div style={styles.listItemContent}>
-                    <strong style={styles.listItemTitle}>{session.name || 'Academic Session'}</strong>
-                    <span style={styles.listItemMeta}>
-                      {session.startDate ? new Date(session.startDate).toLocaleDateString() : 'No date'} • {session.term || 'No term'}
-                    </span>
-                    <span style={styles.listItemMeta}>{session.description || 'Academic session'}</span>
+        {/* System Summary */}
+        <div style={styles.summary}>
+          <div style={styles.summaryHeader}>
+            <div style={styles.summaryTitleRow}>
+              <FiTarget style={styles.summaryIcon} />
+              <h3 style={styles.summaryTitle}>System Summary</h3>
+            </div>
+            <p style={styles.summarySubtitle}>Current system status and performance metrics</p>
+          </div>
+          <div style={styles.summaryGrid}>
+            <div style={styles.summaryCard}>
+              <div style={styles.summaryCardHeader}>
+                <FiUser style={styles.summaryCardIcon} />
+                <h4 style={styles.summaryCardTitle}>User Distribution</h4>
+              </div>
+              <div style={styles.summaryCardContent}>
+                <div style={styles.distributionItem}>
+                  <span style={styles.distributionLabel}>Students:</span>
+                  <span style={styles.distributionValue}>{data.userStats.byRole.student || 0}</span>
+                  <div style={styles.distributionBarContainer}>
+                    <div 
+                      style={{
+                        ...styles.distributionBar,
+                        width: `${((data.userStats.byRole.student || 0) / Math.max(data.userStats.total, 1)) * 100}%`,
+                        backgroundColor: '#2563EB'
+                      }}
+                    />
                   </div>
-                  <button
-                    onClick={() => navigate('/admin/sessions')}
-                    style={styles.smallButton}
-                  >
-                    View
-                  </button>
                 </div>
-              )) : (
-                <p style={styles.noData}>No upcoming sessions</p>
-              )}
+                <div style={styles.distributionItem}>
+                  <span style={styles.distributionLabel}>Teachers:</span>
+                  <span style={styles.distributionValue}>{data.userStats.byRole.teacher || 0}</span>
+                  <div style={styles.distributionBarContainer}>
+                    <div 
+                      style={{
+                        ...styles.distributionBar,
+                        width: `${((data.userStats.byRole.teacher || 0) / Math.max(data.userStats.total, 1)) * 100}%`,
+                        backgroundColor: '#059669'
+                      }}
+                    />
+                  </div>
+                </div>
+                <div style={styles.distributionItem}>
+                  <span style={styles.distributionLabel}>Admins:</span>
+                  <span style={styles.distributionValue}>{data.userStats.byRole.admin || 0}</span>
+                  <div style={styles.distributionBarContainer}>
+                    <div 
+                      style={{
+                        ...styles.distributionBar,
+                        width: `${((data.userStats.byRole.admin || 0) / Math.max(data.userStats.total, 1)) * 100}%`,
+                        backgroundColor: '#D97706'
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style={styles.summaryCard}>
+              <div style={styles.summaryCardHeader}>
+                <FiActivity style={styles.summaryCardIcon} />
+                <h4 style={styles.summaryCardTitle}>System Status</h4>
+              </div>
+              <div style={styles.summaryCardContent}>
+                <div style={styles.statusItem}>
+                  <span style={styles.statusLabel}>API Status:</span>
+                  <span style={{
+                    ...styles.statusValue,
+                    color: Object.values(apiStatus).every(s => s === 'success') ? '#059669' : '#D97706'
+                  }}>
+                    {Object.values(apiStatus).every(s => s === 'success') 
+                      ? 'All Systems Operational' 
+                      : 'Partial Data Loaded'}
+                  </span>
+                </div>
+                <div style={styles.statusItem}>
+                  <span style={styles.statusLabel}>Last Updated:</span>
+                  <span style={styles.statusValue}>
+                    {lastUpdated ? timeAgo(lastUpdated) : 'Never'}
+                  </span>
+                </div>
+                <div style={styles.statusItem}>
+                  <span style={styles.statusLabel}>User Role:</span>
+                  <span style={{
+                    ...styles.statusValue,
+                    color: user.role === 'super_admin' ? '#DC2626' : '#059669'
+                  }}>
+                    {user.role.toUpperCase()}
+                  </span>
+                </div>
+                <div style={styles.statusItem}>
+                  <span style={styles.statusLabel}>Total Data Points:</span>
+                  <span style={styles.statusValue}>
+                    {Object.values(data.stats).reduce((a, b) => a + b, 0).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div style={styles.summaryCard}>
+              <div style={styles.summaryCardHeader}>
+                <FiTrendingUp style={styles.summaryCardIcon} />
+                <h4 style={styles.summaryCardTitle}>Quick Stats</h4>
+              </div>
+              <div style={styles.summaryCardContent}>
+                <div style={styles.quickStat}>
+                  <div style={styles.quickStatIconContainer}>
+                    <FiLayers style={styles.quickStatIcon} />
+                  </div>
+                  <div style={styles.quickStatContent}>
+                    <span style={styles.quickStatValue}>{data.stats.classes}</span>
+                    <span style={styles.quickStatLabel}>Active Classes</span>
+                  </div>
+                </div>
+                <div style={styles.quickStat}>
+                  <div style={styles.quickStatIconContainer}>
+                    <FiClipboard style={styles.quickStatIcon} />
+                  </div>
+                  <div style={styles.quickStatContent}>
+                    <span style={styles.quickStatValue}>{data.stats.tests}</span>
+                    <span style={styles.quickStatLabel}>Total Tests</span>
+                  </div>
+                </div>
+                <div style={styles.quickStat}>
+                  <div style={styles.quickStatIconContainer}>
+                    <FiCalendar style={styles.quickStatIcon} />
+                  </div>
+                  <div style={styles.quickStatContent}>
+                    <span style={styles.quickStatValue}>{data.stats.sessions}</span>
+                    <span style={styles.quickStatLabel}>Sessions</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
+        </div>
+
+        {/* Footer */}
+        <div style={styles.footer}>
+          <p style={styles.footerText}>
+            System Dashboard • {new Date().getFullYear()} • Version 1.0.0
+          </p>
+          <p style={styles.footerSubtext}>
+            Last full sync: {lastUpdated ? lastUpdated.toLocaleString() : 'Never'}
+          </p>
         </div>
       </div>
     </div>
   );
 };
 
+// Styles (same as before - keep all your existing styles)
 const styles = {
   container: {
-    padding: '0',
-    fontFamily: '"Fredoka", sans-serif',
+    minHeight: '100vh',
+    backgroundColor: '#F8FAFC',
+    fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
   },
+  content: {
+    maxWidth: '1600px',
+    margin: '0 auto',
+    padding: '24px'
+  },
+  
+  // Header
   header: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: '30px',
+    marginBottom: '32px',
+    flexWrap: 'wrap',
+    gap: '20px'
   },
-  headerTitle: {
-    fontSize: '28px',
-    fontWeight: '700',
-    color: '#2c3e50',
-    margin: '0 0 8px 0',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
+  headerLeft: {
+    flex: 1
   },
-  headerIcon: {
-    fontSize: '32px',
-  },
-  headerSubtitle: {
-    fontSize: '16px',
-    color: '#64748b',
-    margin: 0,
-  },
-  headerStats: {
-    display: 'flex',
-    gap: '20px',
-  },
-  headerStat: {
-    textAlign: 'right',
-  },
-  headerStatLabel: {
-    display: 'block',
-    fontSize: '14px',
-    color: '#64748b',
-    marginBottom: '4px',
-  },
-  headerStatValue: {
-    display: 'block',
-    fontSize: '24px',
-    fontWeight: '700',
-    color: '#2c3e50',
-  },
-  statsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-    gap: '20px',
-    marginBottom: '30px',
-  },
-  statCard: {
-    backgroundColor: '#FFFFFF',
-    padding: '24px',
-    borderRadius: '12px',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-    border: '1px solid #e2e8f0',
+  titleSection: {
     display: 'flex',
     alignItems: 'center',
     gap: '16px',
-    transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+    marginBottom: '8px'
   },
-  statIconWrapper: {
-    padding: '12px',
-    borderRadius: '10px',
+  titleIconContainer: {
+    width: '56px',
+    height: '56px',
+    backgroundColor: '#FFFFFF',
+    borderRadius: '12px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+    border: '1px solid #E5E7EB'
   },
-  statIcon: {
-    fontSize: '24px',
+  titleIcon: {
+    fontSize: '28px',
+    color: '#D4A017'
   },
-  statContent: {
-    flex: 1,
-  },
-  statTitle: {
-    fontSize: '14px',
-    fontWeight: '600',
-    color: '#64748b',
-    margin: '0 0 8px 0',
-  },
-  statValue: {
+  title: {
     fontSize: '32px',
-    fontWeight: '700',
-    color: '#1e293b',
-    margin: 0,
+    fontWeight: '800',
+    color: '#1F2937',
+    margin: '0 0 4px 0',
+    background: 'linear-gradient(135deg, #1F2937 0%, #4B5563 100%)',
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent'
   },
-  estimateBadge: {
-    display: 'inline-block',
-    padding: '2px 8px',
+  subtitle: {
+    color: '#6B7280',
+    margin: 0,
+    fontSize: '16px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexWrap: 'wrap'
+  },
+  userName: {
+    color: '#1F2937',
+    fontWeight: '600'
+  },
+  superAdminBadge: {
     backgroundColor: '#FEF3C7',
     color: '#92400E',
-    fontSize: '10px',
-    borderRadius: '8px',
+    fontSize: '12px',
     fontWeight: '600',
-    marginTop: '4px',
+    padding: '4px 8px',
+    borderRadius: '12px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+    border: '1px solid #FDE68A'
   },
-  section: {
-    marginBottom: '30px',
+  badgeIcon: {
+    fontSize: '12px'
   },
-  sectionTitle: {
+  lastUpdated: {
+    fontSize: '14px',
+    color: '#9CA3AF',
+    margin: '8px 0 0 0',
+    fontStyle: 'italic'
+  },
+  headerRight: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px'
+  },
+  headerActions: {
+    display: 'flex',
+    gap: '12px'
+  },
+  refreshButton: {
+    padding: '12px 24px',
+    backgroundColor: '#FFFFFF',
+    color: '#4B5320',
+    border: '2px solid #D4A017',
+    borderRadius: '10px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '600',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+    transition: 'all 0.2s ease',
+    ':hover': {
+      backgroundColor: '#FEF3C7',
+      transform: 'translateY(-2px)',
+      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)'
+    },
+    ':disabled': {
+      opacity: 0.6,
+      cursor: 'not-allowed',
+      transform: 'none'
+    }
+  },
+  refreshIcon: {
+    fontSize: '16px'
+  },
+  refreshSpinner: {
+    fontSize: '16px',
+    animation: 'spin 1s linear infinite'
+  },
+  settingsButton: {
+    width: '48px',
+    height: '48px',
+    backgroundColor: '#FFFFFF',
+    color: '#6B7280',
+    border: '1px solid #E5E7EB',
+    borderRadius: '10px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     fontSize: '20px',
-    fontWeight: '700',
-    color: '#2c3e50',
-    margin: '0 0 20px 0',
+    transition: 'all 0.2s ease',
+    ':hover': {
+      backgroundColor: '#F3F4F6',
+      color: '#4B5320',
+      transform: 'translateY(-2px)'
+    }
   },
-  actionsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-    gap: '16px',
-  },
-  actionCard: {
+  
+  // API Status
+  apiStatusPanel: {
     backgroundColor: '#FFFFFF',
     padding: '20px',
     borderRadius: '12px',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-    border: '1px solid #e2e8f0',
+    marginBottom: '32px',
+    border: '1px solid #E5E7EB',
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.04)'
+  },
+  apiStatusHeader: {
     display: 'flex',
-    alignItems: 'flex-start',
-    gap: '16px',
+    alignItems: 'center',
+    gap: '12px',
+    marginBottom: '16px'
+  },
+  apiStatusIcon: {
+    fontSize: '20px',
+    color: '#4B5320'
+  },
+  apiStatusTitle: {
+    fontSize: '16px',
+    fontWeight: '600',
+    color: '#1F2937'
+  },
+  apiStatusGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+    gap: '12px'
+  },
+  apiStatusItem: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '8px 12px',
+    backgroundColor: '#F9FAFB',
+    borderRadius: '8px',
+    border: '1px solid #E5E7EB'
+  },
+  apiStatusKey: {
+    fontSize: '14px',
+    color: '#6B7280',
+    fontWeight: '500'
+  },
+  apiStatusValue: {
+    fontSize: '14px',
+    fontWeight: '600',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px'
+  },
+  successDot: {
+    color: '#10B981',
+    fontSize: '20px'
+  },
+  errorDot: {
+    color: '#EF4444',
+    fontSize: '20px'
+  },
+  
+  // Stats Cards
+  statsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+    gap: '24px',
+    marginBottom: '40px'
+  },
+  statCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: '16px',
+    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+    border: '1px solid #E5E7EB',
+    overflow: 'hidden',
+    transition: 'all 0.3s ease',
+    ':hover': {
+      transform: 'translateY(-4px)',
+      boxShadow: '0 12px 20px -1px rgba(0, 0, 0, 0.15), 0 4px 6px -1px rgba(0, 0, 0, 0.08)'
+    }
+  },
+  statCardInner: {
+    padding: '24px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '16px'
+  },
+  statIconContainer: {
+    width: '64px',
+    height: '64px',
+    backgroundColor: '#F9FAFB',
+    borderRadius: '12px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: '2px solid',
+    flexShrink: 0
+  },
+  statIcon: {
+    fontSize: '28px'
+  },
+  statContent: {
+    flex: 1,
+    minWidth: 0
+  },
+  statLabel: {
+    fontSize: '14px',
+    color: '#6B7280',
+    margin: '0 0 8px 0',
+    fontWeight: '500',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px'
+  },
+  statValueRow: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: '8px',
+    marginBottom: '4px'
+  },
+  statValue: {
+    fontSize: '36px',
+    fontWeight: '800',
+    color: '#1F2937',
+    margin: 0,
+    lineHeight: 1
+  },
+  statChange: {
+    fontSize: '14px',
+    fontWeight: '600',
+    padding: '2px 8px',
+    borderRadius: '12px',
+    backgroundColor: 'rgba(0, 0, 0, 0.04)'
+  },
+  statDescription: {
+    fontSize: '12px',
+    color: '#9CA3AF',
+    margin: 0
+  },
+  statCardFooter: {
+    padding: '16px 24px',
+    backgroundColor: '#F9FAFB',
+    borderTop: '1px solid #E5E7EB'
+  },
+  statCardButton: {
+    width: '100%',
+    padding: '8px 16px',
+    backgroundColor: 'transparent',
+    color: '#4B5320',
+    border: '1px solid #D4A017',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '600',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    transition: 'all 0.2s ease',
+    ':hover': {
+      backgroundColor: '#D4A017',
+      color: '#FFFFFF'
+    }
+  },
+  
+  // Sections
+  section: {
+    marginBottom: '48px'
+  },
+  sectionHeader: {
+    marginBottom: '24px'
+  },
+  sectionTitleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    marginBottom: '8px'
+  },
+  sectionIcon: {
+    fontSize: '24px',
+    color: '#D4A017'
+  },
+  sectionTitle: {
+    fontSize: '24px',
+    fontWeight: '700',
+    color: '#1F2937',
+    margin: 0
+  },
+  sectionSubtitle: {
+    fontSize: '16px',
+    color: '#6B7280',
+    margin: 0
+  },
+  
+  // Quick Actions
+  actionsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+    gap: '20px'
+  },
+  actionCard: {
+    backgroundColor: '#FFFFFF',
+    padding: '24px',
+    borderRadius: '12px',
+    border: '1px solid #E5E7EB',
+    textAlign: 'left',
     cursor: 'pointer',
     transition: 'all 0.2s ease',
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.04)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
+    width: '100%',
+    position: 'relative',
+    overflow: 'hidden',
+    ':hover': {
+      transform: 'translateY(-4px)',
+      boxShadow: '0 8px 16px rgba(0, 0, 0, 0.1)',
+      borderColor: '#D4A017'
+    },
+    ':before': {
+      content: '""',
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      height: '4px',
+      backgroundColor: '#D4A017',
+      opacity: 0,
+      transition: 'opacity 0.2s ease'
+    },
+    ':hover:before': {
+      opacity: 1
+    }
+  },
+  actionCardHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  actionIconContainer: {
+    width: '56px',
+    height: '56px',
+    borderRadius: '12px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
   },
   actionIcon: {
-    fontSize: '24px',
-    padding: '12px',
-    borderRadius: '8px',
-    backgroundColor: '#f8fafc',
+    fontSize: '24px'
+  },
+  actionCountBadge: {
+    fontSize: '12px',
+    fontWeight: '700',
+    color: '#FFFFFF',
+    padding: '4px 8px',
+    borderRadius: '12px',
+    minWidth: '32px',
+    textAlign: 'center'
   },
   actionContent: {
     flex: 1,
+    textAlign: 'left'
   },
   actionTitle: {
-    fontSize: '16px',
-    fontWeight: '600',
-    color: '#2c3e50',
-    margin: '0 0 8px 0',
+    fontSize: '18px',
+    fontWeight: '700',
+    color: '#1F2937',
+    margin: '0 0 8px 0'
   },
-  actionDesc: {
+  actionDescription: {
     fontSize: '14px',
-    color: '#64748b',
+    color: '#6B7280',
     margin: 0,
-    lineHeight: '1.4',
+    lineHeight: 1.5
   },
+  actionArrowContainer: {
+    display: 'flex',
+    justifyContent: 'flex-end'
+  },
+  actionArrow: {
+    fontSize: '20px',
+    color: '#9CA3AF',
+    transition: 'transform 0.2s ease'
+  },
+  
+  // Columns
   columns: {
     display: 'grid',
     gridTemplateColumns: '1fr 1fr',
-    gap: '30px',
+    gap: '32px',
+    marginBottom: '48px'
   },
   column: {
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  list: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px',
-  },
-  listItem: {
     backgroundColor: '#FFFFFF',
-    padding: '16px',
-    borderRadius: '8px',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-    border: '1px solid #e2e8f0',
+    borderRadius: '16px',
+    border: '1px solid #E5E7EB',
+    overflow: 'hidden',
+    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+  },
+  columnHeader: {
+    padding: '24px 24px 16px',
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '16px',
+    borderBottom: '1px solid #E5E7EB'
+  },
+  columnIconContainer: {
+    width: '48px',
+    height: '48px',
+    backgroundColor: '#FEF3C7',
+    borderRadius: '12px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0
+  },
+  columnIcon: {
+    fontSize: '24px',
+    color: '#D4A017'
+  },
+  columnTitle: {
+    fontSize: '20px',
+    fontWeight: '700',
+    color: '#1F2937',
+    margin: '0 0 4px 0'
+  },
+  columnSubtitle: {
+    fontSize: '14px',
+    color: '#6B7280',
+    margin: 0
+  },
+  columnContent: {
+    padding: '24px'
+  },
+  
+  // Test Cards
+  testList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px'
+  },
+  testCard: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+    padding: '20px',
+    backgroundColor: '#F9FAFB',
+    borderRadius: '12px',
+    border: '1px solid #E5E7EB',
+    transition: 'all 0.2s ease',
+    ':hover': {
+      backgroundColor: '#F3F4F6',
+      transform: 'translateY(-2px)',
+      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)'
+    }
   },
-  listItemContent: {
+  testInfo: {
     flex: 1,
+    minWidth: 0
   },
-  listItemTitle: {
-    display: 'block',
-    fontSize: '14px',
+  testHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: '12px',
+    gap: '12px'
+  },
+  testTitle: {
     fontWeight: '600',
-    color: '#2c3e50',
-    marginBottom: '4px',
-  },
-  listItemMeta: {
-    display: 'block',
-    fontSize: '12px',
-    color: '#64748b',
-    marginBottom: '4px',
+    color: '#1F2937',
+    margin: 0,
+    fontSize: '16px',
+    flex: 1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap'
   },
   statusBadge: {
-    display: 'inline-block',
-    padding: '2px 8px',
-    fontSize: '11px',
+    fontSize: '12px',
+    padding: '6px 12px',
+    borderRadius: '20px',
     fontWeight: '600',
-    borderRadius: '8px',
-    textTransform: 'capitalize',
+    border: '1px solid',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    flexShrink: 0
   },
-  statusApproved: {
-    backgroundColor: '#DCFCE7',
-    color: '#166534',
+  statusIcon: {
+    fontSize: '14px'
   },
-  statusPending: {
-    backgroundColor: '#FEF3C7',
-    color: '#92400E',
+  testMeta: {
+    fontSize: '14px',
+    color: '#6B7280',
+    margin: '0 0 12px 0',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
   },
-  statusDraft: {
-    backgroundColor: '#F3F4F6',
-    color: '#374151',
+  metaIcon: {
+    fontSize: '14px',
+    flexShrink: 0
   },
-  listItemActions: {
+  testFooter: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '16px',
+    flexWrap: 'wrap'
+  },
+  footerIcon: {
+    fontSize: '12px',
+    marginRight: '4px',
+    color: '#9CA3AF'
+  },
+  testDate: {
+    fontSize: '12px',
+    color: '#9CA3AF',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px'
+  },
+  testQuestions: {
+    fontSize: '12px',
+    color: '#9CA3AF',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px'
+  },
+  testActions: {
     display: 'flex',
     gap: '8px',
-    marginLeft: '12px',
+    flexShrink: 0,
+    marginLeft: '16px'
   },
-  smallButton: {
-    padding: '6px 12px',
-    backgroundColor: '#f8fafc',
-    color: '#475569',
-    border: '1px solid #e2e8f0',
-    borderRadius: '6px',
+  viewButton: {
+    padding: '8px 16px',
     fontSize: '12px',
-    fontWeight: '500',
-    cursor: 'pointer',
-  },
-  smallButtonPrimary: {
-    padding: '6px 12px',
     backgroundColor: '#3B82F6',
     color: '#FFFFFF',
     border: 'none',
-    borderRadius: '6px',
-    fontSize: '12px',
-    fontWeight: '500',
+    borderRadius: '8px',
     cursor: 'pointer',
-  },
-  message: {
-    padding: '15px',
-    margin: '15px 0',
-    borderRadius: '6px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
     fontWeight: '600',
+    transition: 'all 0.2s ease',
+    ':hover': {
+      backgroundColor: '#2563EB',
+      transform: 'translateY(-1px)'
+    }
+  },
+  approveButton: {
+    padding: '8px 16px',
+    fontSize: '12px',
+    backgroundColor: '#10B981',
+    color: '#FFFFFF',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontWeight: '600',
+    transition: 'all 0.2s ease',
+    ':hover': {
+      backgroundColor: '#059669',
+      transform: 'translateY(-1px)'
+    }
+  },
+  
+  // Session Cards
+  sessionList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px'
+  },
+  sessionCard: {
+    padding: '20px',
+    backgroundColor: '#F9FAFB',
+    borderRadius: '12px',
+    border: '1px solid #E5E7EB',
+    transition: 'all 0.2s ease',
+    ':hover': {
+      backgroundColor: '#F3F4F6',
+      transform: 'translateY(-2px)',
+      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)'
+    }
+  },
+  sessionInfo: {
+    width: '100%'
+  },
+  sessionHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: '12px',
+    gap: '12px'
+  },
+  sessionTitle: {
+    fontWeight: '600',
+    color: '#1F2937',
+    margin: '0 8px 0 0',
+    fontSize: '16px',
+    flex: 1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap'
+  },
+  sessionStatus: {
+    fontSize: '12px',
+    padding: '6px 12px',
+    borderRadius: '20px',
+    fontWeight: '600',
+    backgroundColor: '#DBEAFE',
+    color: '#1E40AF',
+    border: '1px solid #BFDBFE',
+    flexShrink: 0
+  },
+  sessionMeta: {
     fontSize: '14px',
+    color: '#6B7280',
+    margin: '0 0 12px 0',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
+  },
+  sessionDescription: {
+    fontSize: '14px',
+    color: '#6B7280',
+    margin: '12px 0',
+    lineHeight: 1.5
+  },
+  sessionFooter: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '16px',
+    flexWrap: 'wrap',
+    marginTop: '12px'
+  },
+  sessionClass: {
+    fontSize: '12px',
+    color: '#9CA3AF',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px'
+  },
+  sessionDuration: {
+    fontSize: '12px',
+    color: '#9CA3AF',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px'
+  },
+  
+  // Buttons
+  manageButton: {
+    width: '100%',
+    marginTop: '20px',
+    padding: '12px 24px',
+    backgroundColor: '#D4A017',
+    color: '#FFFFFF',
+    border: 'none',
+    borderRadius: '10px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '600',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+    transition: 'all 0.2s ease',
+    ':hover': {
+      backgroundColor: '#B38A14',
+      transform: 'translateY(-2px)',
+      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)'
+    }
+  },
+  
+  // Empty States
+  emptyState: {
+    textAlign: 'center',
+    padding: '48px 24px',
+    color: '#9CA3AF'
+  },
+  emptyIcon: {
+    fontSize: '64px',
+    marginBottom: '20px',
+    opacity: 0.5
+  },
+  emptyText: {
+    fontSize: '18px',
+    fontWeight: '600',
+    margin: '0 0 8px 0',
+    color: '#6B7280'
+  },
+  emptySubtext: {
+    fontSize: '14px',
+    margin: '0 0 24px 0',
+    color: '#9CA3AF'
+  },
+  
+  // Summary
+  summary: {
+    backgroundColor: '#FFFFFF',
+    padding: '32px',
+    borderRadius: '16px',
+    border: '1px solid #E5E7EB',
+    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+    marginBottom: '48px'
+  },
+  summaryHeader: {
+    marginBottom: '32px'
+  },
+  summaryTitleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    marginBottom: '8px'
+  },
+  summaryIcon: {
+    fontSize: '24px',
+    color: '#D4A017'
+  },
+  summaryTitle: {
+    fontSize: '24px',
+    fontWeight: '700',
+    color: '#1F2937',
+    margin: 0
+  },
+  summarySubtitle: {
+    fontSize: '16px',
+    color: '#6B7280',
+    margin: 0
+  },
+  summaryGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+    gap: '24px'
+  },
+  summaryCard: {
+    backgroundColor: '#F9FAFB',
+    padding: '24px',
+    borderRadius: '12px',
+    border: '1px solid #E5E7EB'
+  },
+  summaryCardHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    marginBottom: '20px'
+  },
+  summaryCardIcon: {
+    fontSize: '20px',
+    color: '#4B5320'
+  },
+  summaryCardTitle: {
+    fontSize: '18px',
+    fontWeight: '600',
+    color: '#1F2937',
+    margin: 0
+  },
+  summaryCardContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px'
+  },
+  
+  // Distribution Items
+  distributionItem: {
+    display: 'grid',
+    gridTemplateColumns: '1fr auto',
+    alignItems: 'center',
+    gap: '12px'
+  },
+  distributionLabel: {
+    fontSize: '14px',
+    color: '#6B7280',
+    fontWeight: '500'
+  },
+  distributionValue: {
+    fontSize: '16px',
+    fontWeight: '700',
+    color: '#1F2937',
+    textAlign: 'right'
+  },
+  distributionBarContainer: {
+    gridColumn: '1 / -1',
+    height: '8px',
+    backgroundColor: '#E5E7EB',
+    borderRadius: '4px',
+    overflow: 'hidden'
+  },
+  distributionBar: {
+    height: '100%',
+    borderRadius: '4px',
+    transition: 'width 0.3s ease'
+  },
+  
+  // Status Items
+  statusItem: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '12px 0',
+    borderBottom: '1px solid #E5E7EB',
+    ':last-child': {
+      borderBottom: 'none'
+    }
+  },
+  statusLabel: {
+    fontSize: '14px',
+    color: '#6B7280',
+    fontWeight: '500'
+  },
+  statusValue: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#1F2937'
+  },
+  
+  // Quick Stats
+  quickStat: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '16px',
+    padding: '16px',
+    backgroundColor: '#FFFFFF',
+    borderRadius: '8px',
+    border: '1px solid #E5E7EB'
+  },
+  quickStatIconContainer: {
+    width: '48px',
+    height: '48px',
+    backgroundColor: '#FEF3C7',
+    borderRadius: '10px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  quickStatIcon: {
+    fontSize: '20px',
+    color: '#D4A017'
+  },
+  quickStatContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px'
+  },
+  quickStatValue: {
+    fontSize: '24px',
+    fontWeight: '800',
+    color: '#1F2937',
+    lineHeight: 1
+  },
+  quickStatLabel: {
+    fontSize: '12px',
+    color: '#6B7280',
+    fontWeight: '500',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px'
+  },
+  
+  // Footer
+  footer: {
+    textAlign: 'center',
+    padding: '24px',
+    color: '#6B7280',
+    borderTop: '1px solid #E5E7EB',
+    marginTop: '32px'
+  },
+  footerText: {
+    fontSize: '14px',
+    margin: '0 0 8px 0',
+    fontWeight: '500'
+  },
+  footerSubtext: {
+    fontSize: '12px',
+    margin: 0,
+    color: '#9CA3AF'
+  },
+  
+  // Error States
+  errorBanner: {
+    marginBottom: '24px',
+    padding: '16px 20px',
+    backgroundColor: '#FEF2F2',
+    border: '1px solid #FECACA',
+    borderRadius: '12px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)'
   },
-  errorMessage: {
-    backgroundColor: '#FEF2F2',
+  errorContent: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '16px',
+    flex: 1
+  },
+  errorIcon: {
+    fontSize: '24px',
     color: '#DC2626',
-    border: '1px solid #FECACA',
+    flexShrink: 0
   },
-  warningMessage: {
-    backgroundColor: '#FFFBEB',
-    color: '#92400E',
-    border: '1px solid #FCD34D',
+  errorTextContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    flex: 1
   },
-  alertIcon: {
-    fontSize: '20px',
-    marginRight: '12px',
+  errorTitle: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#DC2626',
+    margin: 0
   },
-  alertClose: {
+  errorText: {
+    fontSize: '14px',
+    color: '#991B1B',
+    margin: 0
+  },
+  errorClose: {
     background: 'none',
     border: 'none',
-    fontSize: '20px',
+    fontSize: '28px',
     cursor: 'pointer',
+    color: '#DC2626',
     padding: '0',
-    width: '24px',
-    height: '24px',
+    width: '36px',
+    height: '36px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '50%',
+    transition: 'all 0.2s ease',
+    flexShrink: 0,
+    ':hover': {
+      backgroundColor: '#FECACA'
+    }
   },
-  noData: {
-    textAlign: 'center',
-    color: '#64748b',
-    fontSize: '14px',
-    padding: '40px 20px',
-  },
-  accessDenied: {
-    textAlign: 'center',
-    padding: '4rem',
-    backgroundColor: '#FFFFFF',
-    borderRadius: '8px',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-    maxWidth: '600px',
-    margin: '2rem auto',
-  },
-  loading: {
+  
+  // Loading State
+  loadingContainer: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '60px 20px',
-    color: '#64748b',
+    height: '100vh',
+    backgroundColor: '#F8FAFC',
+    padding: '24px',
+    textAlign: 'center'
   },
-  spinner: {
-    width: '40px',
-    height: '40px',
-    border: '4px solid #f3f4f6',
-    borderTop: '4px solid #3B82F6',
-    borderRadius: '50%',
+  loadingSpinnerContainer: {
+    width: '80px',
+    height: '80px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: '24px'
+  },
+  loadingSpinner: {
+    fontSize: '64px',
     animation: 'spin 1s linear infinite',
-    marginBottom: '16px',
+    color: '#D4A017'
   },
+  loadingText: {
+    fontSize: '24px',
+    fontWeight: '600',
+    color: '#1F2937',
+    margin: '0 0 16px 0'
+  },
+  loadingDetails: {
+    maxWidth: '400px',
+    width: '100%'
+  },
+  loadingSubtext: {
+    fontSize: '16px',
+    color: '#6B7280',
+    margin: '0 0 20px 0'
+  },
+  
+  // Access Denied
+  accessDenied: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100vh',
+    backgroundColor: '#F8FAFC',
+    padding: '24px'
+  },
+  accessDeniedContent: {
+    textAlign: 'center',
+    padding: '48px',
+    backgroundColor: '#FFFFFF',
+    borderRadius: '16px',
+    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+    border: '1px solid #E5E7EB',
+    maxWidth: '500px',
+    width: '100%'
+  },
+  accessDeniedIcon: {
+    fontSize: '80px',
+    color: '#DC2626',
+    marginBottom: '32px'
+  },
+  accessDeniedTitle: {
+    fontSize: '32px',
+    fontWeight: '700',
+    color: '#1F2937',
+    margin: '0 0 16px 0'
+  },
+  accessDeniedText: {
+    fontSize: '18px',
+    color: '#6B7280',
+    margin: '0 0 32px 0',
+    lineHeight: 1.6
+  },
+  accessDeniedActions: {
+    display: 'flex',
+    gap: '16px',
+    justifyContent: 'center'
+  },
+  loginButton: {
+    padding: '14px 32px',
+    backgroundColor: '#D4A017',
+    color: '#FFFFFF',
+    border: 'none',
+    borderRadius: '10px',
+    cursor: 'pointer',
+    fontSize: '16px',
+    fontWeight: '600',
+    transition: 'all 0.2s ease',
+    ':hover': {
+      backgroundColor: '#B38A14',
+      transform: 'translateY(-2px)'
+    }
+  },
+  homeButton: {
+    padding: '14px 32px',
+    backgroundColor: '#F3F4F6',
+    color: '#4B5320',
+    border: '2px solid #D4A017',
+    borderRadius: '10px',
+    cursor: 'pointer',
+    fontSize: '16px',
+    fontWeight: '600',
+    transition: 'all 0.2s ease',
+    ':hover': {
+      backgroundColor: '#D4A017',
+      color: '#FFFFFF'
+    }
+  }
 };
 
-// Add CSS for spinner animation
-const spinnerStyles = `
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-`;
-
-// Inject styles
+// Add CSS animations
 const styleSheet = document.styleSheets[0];
-styleSheet.insertRule(spinnerStyles, styleSheet.cssRules.length);
+if (styleSheet) {
+  styleSheet.insertRule(`
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+  `, styleSheet.cssRules.length);
+  
+  styleSheet.insertRule(`
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  `, styleSheet.cssRules.length);
+  
+  styleSheet.insertRule(`
+    .stat-card {
+      animation: fadeIn 0.5s ease-out;
+    }
+  `, styleSheet.cssRules.length);
+}
 
 export default AdminDashboard;

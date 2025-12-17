@@ -1,21 +1,29 @@
-import React, { useContext, useEffect, useState } from 'react';
+// components/ProtectedRoute.js - COMPLETE FIXED VERSION
+import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { AuthContext } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
 
-const ProtectedRoute = ({ children, requiredRole, requiredRoles }) => {
-  const { user, loading } = useContext(AuthContext);
-  const [isReady, setIsReady] = useState(false);
+const ProtectedRoute = ({ 
+  children, 
+  requiredRole, 
+  requiredRoles = [],
+  permissions = []
+}) => {
+  const { user, loading, hasPermission } = useAuth();
   const location = useLocation();
 
-  useEffect(() => {
-    if (!loading) {
-      setIsReady(true);
-    }
-  }, [loading]);
+  console.log('ProtectedRoute - Debug:', {
+    user,
+    userRole: user?.role,
+    requiredRole,
+    requiredRoles,
+    loading,
+    path: location.pathname,
+    isAuthenticated: !!user
+  });
 
-  console.log('ProtectedRoute - user:', user, 'requiredRole:', requiredRole, 'requiredRoles:', requiredRoles, 'loading:', loading, 'isReady:', isReady, 'path:', location.pathname);
-
-  if (loading || !isReady) {
+  // Show loading spinner while checking authentication
+  if (loading) {
     return (
       <div style={{ 
         display: 'flex', 
@@ -60,31 +68,60 @@ const ProtectedRoute = ({ children, requiredRole, requiredRoles }) => {
     );
   }
 
+  // Redirect to login if not authenticated
   if (!user) {
     console.log('ProtectedRoute - No user, redirecting to /login');
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // Check role access
-  if (requiredRole || requiredRoles) {
-    const rolesToCheck = requiredRoles || [requiredRole];
-    const userRoles = [user.role];
+  // Check role-based access
+  const userRole = user.role;
+  
+  if (requiredRole || requiredRoles.length > 0) {
+    const rolesToCheck = requiredRole ? [requiredRole] : requiredRoles;
     
+    console.log('ProtectedRoute - Role check:', { 
+      userRole, 
+      requiredRoles: rolesToCheck 
+    });
+
     // Super admin has access to everything
-    if (user.role === 'super_admin') {
+    if (userRole === 'super_admin') {
       console.log('ProtectedRoute - Super admin access granted');
       return children;
     }
 
     // Check if user has any of the required roles
-    const hasAccess = rolesToCheck.some(role => userRoles.includes(role));
+    const hasRequiredRole = rolesToCheck.includes(userRole);
     
-    if (!hasAccess) {
-      console.log(`ProtectedRoute - Role mismatch (user: ${user.role}, required: ${rolesToCheck.join(', ')}), redirecting to /unauthorized`);
-      return <Navigate to="/unauthorized" replace />;
+    if (!hasRequiredRole) {
+      console.log('ProtectedRoute - Insufficient role permissions, redirecting to /unauthorized');
+      return <Navigate to="/unauthorized" state={{ from: location }} replace />;
     }
   }
 
+  // Check specific permissions if required
+  if (permissions.length > 0) {
+    console.log('ProtectedRoute - Checking permissions:', permissions);
+    
+    // Super admin has all permissions
+    if (userRole === 'super_admin') {
+      console.log('ProtectedRoute - Super admin, all permissions granted');
+      return children;
+    }
+
+    // Check each required permission
+    const hasAllPermissions = permissions.every(permission => 
+      hasPermission(permission)
+    );
+    
+    if (!hasAllPermissions) {
+      console.log('ProtectedRoute - Missing required permissions, redirecting to /unauthorized');
+      return <Navigate to="/unauthorized" state={{ from: location }} replace />;
+    }
+  }
+
+  console.log('ProtectedRoute - Access granted for user:', user.username);
   return children;
 };
 
