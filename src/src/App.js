@@ -11,7 +11,7 @@ import EditResults from './pages/EditResults';
 import ClassSubjectsManager from './pages/ClassSubjectsManager';
 import ClassDetails from './pages/ClassDetails';
 import EditClass from './pages/EditClass';
-import Analytics from './components/teacher/Analytics';
+import Analytics from './components/teacher/Analytics'; // Teacher analytics
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider } from './context/AuthContext';
 import AdminLayout from './components/AdminLayout';
@@ -41,6 +41,9 @@ import AddTestQuestions from './components/teacher/AddTestQuestions';
 
 // Add the Mock Tests component
 import MockTests from './pages/MockTests';
+
+// ADD THIS IMPORT - Make sure the path is correct
+import AnalyticsPage from './pages/AnalyticsPage'; // Admin analytics page
 
 // Simple components that don't use AuthContext
 const RootRedirect = () => {
@@ -162,6 +165,16 @@ const AppContent = () => {
               <TeacherHome />
             </ProtectedRoute>
           } 
+        />
+        
+        {/* Teacher Analytics route (keep this for teachers) */}
+        <Route
+          path="/teacher/analytics"
+          element={
+            <ProtectedRoute requiredRole="teacher">
+              <TeacherHome><Analytics /></TeacherHome>
+            </ProtectedRoute>
+          }
         />
         
         {/* Admin routes */}
@@ -362,11 +375,13 @@ const AppContent = () => {
             </ProtectedRoute>
           }
         />
+        
+        {/* CHANGED: Admin Analytics Route - Use AnalyticsPage instead of Analytics */}
         <Route
           path="/admin/analytics"
           element={
             <ProtectedRoute requiredRoles={['admin', 'super_admin']}>
-              <AdminLayout><Analytics /></AdminLayout>
+              <AdminLayout><AnalyticsPage /></AdminLayout>
             </ProtectedRoute>
           }
         />

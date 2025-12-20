@@ -1,4 +1,4 @@
-// tests.js - COMPLETE UPDATED FILE WITH ALL FIXES
+// tests.js - COMPLETE UPDATED FILE WITH ENHANCED SCORING FOR TEXT-BASED ANSWERS
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
@@ -188,6 +188,107 @@ const checkTeacherAccess = async (user, subject, classId) => {
 
   console.log('📊 Teacher access result:', hasAccess ? '✅ Granted' : '❌ Denied');
   return hasAccess || false;
+};
+
+// ENHANCED SCORING FUNCTION - Handles text-based correct answers
+const calculateScoreWithDebug = (questions, answers) => {
+  let score = 0;
+  let totalPossibleMarks = 0;
+  const correctness = {};
+  
+  console.log('🎯 ENHANCED SCORING - Starting calculation:', {
+    questionCount: questions.length,
+    answerCount: Object.keys(answers).length
+  });
+  
+  for (const question of questions) {
+    const questionId = question._id.toString();
+    const selectedAnswer = answers[questionId];
+    
+    console.log(`\n🔍 Question ${questionId}:`);
+    console.log('  Text:', question.text?.substring(0, 50) + '...');
+    console.log('  Options:', question.options);
+    console.log('  User selected index:', selectedAnswer);
+    
+    // Skip if no answer provided
+    if (selectedAnswer === undefined || selectedAnswer === null) {
+      correctness[questionId] = false;
+      totalPossibleMarks += (question.marks || 1);
+      console.log('  ❓ No answer provided');
+      continue;
+    }
+    
+    // Convert user's answer to integer index
+    const userAnswerIndex = parseInt(selectedAnswer);
+    
+    if (isNaN(userAnswerIndex) || userAnswerIndex < 0 || userAnswerIndex >= question.options.length) {
+      correctness[questionId] = false;
+      totalPossibleMarks += (question.marks || 1);
+      console.log('  ⚠️ Invalid answer index:', selectedAnswer);
+      continue;
+    }
+    
+    // Get the text of the user's selected option
+    const userSelectedText = question.options[userAnswerIndex];
+    console.log('  User selected text:', userSelectedText);
+    console.log('  Correct answer in DB:', question.correctAnswer);
+    
+    // Check if correct answer matches
+    let isCorrect = false;
+    
+    if (question.correctAnswer) {
+      // Handle different types of correctAnswer
+      const correctAnswer = String(question.correctAnswer).trim();
+      
+      // Strategy 1: Direct text comparison
+      if (userSelectedText && correctAnswer === userSelectedText.trim()) {
+        isCorrect = true;
+        console.log(`  🎯 CORRECT! Text match: "${userSelectedText}" = "${correctAnswer}"`);
+      }
+      // Strategy 2: Check if correctAnswer is an index (0,1,2,3)
+      else if (/^[0-3]$/.test(correctAnswer)) {
+        const correctIndex = parseInt(correctAnswer);
+        if (userAnswerIndex === correctIndex) {
+          isCorrect = true;
+          console.log(`  🎯 CORRECT! Index match: ${userAnswerIndex} = ${correctIndex}`);
+        }
+      }
+      // Strategy 3: Check if correctAnswer is a letter (A,B,C,D)
+      else if (/^[A-D]$/.test(correctAnswer.toUpperCase())) {
+        // Convert letter to index (A=0, B=1, C=2, D=3)
+        const letterIndex = correctAnswer.toUpperCase().charCodeAt(0) - 65;
+        if (userAnswerIndex === letterIndex) {
+          isCorrect = true;
+          console.log(`  🎯 CORRECT! Letter match: ${userAnswerIndex} = ${correctAnswer} (index ${letterIndex})`);
+        }
+      }
+      
+      if (!isCorrect) {
+        console.log(`  ❌ INCORRECT. User: "${userSelectedText}" (index ${userAnswerIndex}), DB: "${correctAnswer}"`);
+      }
+    } else {
+      console.log(`  ⚠️ No correct answer found in database`);
+      isCorrect = false;
+    }
+    
+    correctness[questionId] = isCorrect;
+    const questionMarks = question.marks || 1;
+    totalPossibleMarks += questionMarks;
+    
+    if (isCorrect) {
+      score += questionMarks;
+      console.log(`  💰 Added ${questionMarks} marks. Total: ${score}`);
+    }
+  }
+  
+  console.log('\n📊 FINAL SCORING RESULTS:');
+  console.log('  Score:', score);
+  console.log('  Total Possible Marks:', totalPossibleMarks);
+  console.log('  Correct Answers:', Object.values(correctness).filter(v => v).length);
+  console.log('  Total Questions:', questions.length);
+  console.log('  Percentage:', totalPossibleMarks > 0 ? ((score / totalPossibleMarks) * 100).toFixed(2) + '%' : '0%');
+  
+  return { score, correctness, totalPossibleMarks };
 };
 
 // ==================== NEW ENDPOINTS FOR FRONTEND ====================
@@ -1578,15 +1679,14 @@ router.get('/teacher/:teacherId', auth, async (req, res) => {
   }
 });
 
-// ==================== TEST SUBMISSION ENDPOINT (FIXED WITH RETAKES CONTROL) ====================
+// ==================== TEST SUBMISSION ENDPOINT (FIXED WITH ENHANCED SCORING) ====================
 
-// Submit test answers - FIXED VERSION WITH RETAKES CONTROL
+// Submit test answers - UPDATED WITH ENHANCED SCORING FOR TEXT-BASED ANSWERS
 router.post('/:id/submit', [auth, validateObjectId('id')], async (req, res) => {
   try {
     const { answers, timeSpent } = req.body;
     
-    // ADD DEBUG LOGGING AT THE START
-    console.log('🔍 SUBMIT DEBUG - Full request details:', {
+    console.log('🎯 SUBMIT DEBUG - Starting submission:', {
       testId: req.params.id,
       userId: req.user.id,
       username: req.user.username,
@@ -1598,7 +1698,7 @@ router.post('/:id/submit', [auth, validateObjectId('id')], async (req, res) => {
     const test = await Test.findById(req.params.id)
       .populate({
         path: 'questions',
-        select: '_id text options correctAnswer correctOption answer marks'
+        select: '_id text type options marks correctAnswer correctOption answer'
       });
 
     if (!test) {
@@ -1606,32 +1706,6 @@ router.post('/:id/submit', [auth, validateObjectId('id')], async (req, res) => {
       return res.status(404).json({ 
         success: false,
         error: 'Test not found.' 
-      });
-    }
-
-    // ADD DEBUG LOGGING FOR TEST DETAILS
-    console.log('🔍 SUBMIT DEBUG - Test details:', {
-      testStatus: test?.status,
-      testTitle: test?.title,
-      testSession: test?.session,
-      testTerm: test?.term,
-      hasQuestions: !!test?.questions,
-      questionsLength: test?.questions?.length || 0,
-      questionsSample: test?.questions?.slice(0, 2) || 'none',
-      allowRetakes: test?.allowRetakes,
-      maxAttempts: test?.maxAttempts
-    });
-
-    // Check if test.questions is properly populated
-    if (test.questions && test.questions.length > 0) {
-      console.log('🔍 SUBMIT DEBUG - First question sample:', {
-        _id: test.questions[0]._id,
-        text: test.questions[0].text?.substring(0, 50),
-        correctAnswer: test.questions[0].correctAnswer,
-        correctOption: test.questions[0].correctOption,
-        answer: test.questions[0].answer,
-        marks: test.questions[0].marks,
-        optionsCount: test.questions[0].options?.length
       });
     }
 
@@ -1674,7 +1748,7 @@ router.post('/:id/submit', [auth, validateObjectId('id')], async (req, res) => {
       userId: req.user.id
     }).sort({ submittedAt: -1 });
 
-    console.log('🔍 SUBMIT DEBUG - Existing results check:', {
+    console.log('📊 SUBMIT DEBUG - Existing results check:', {
       userId: req.user.id,
       testId: req.params.id,
       existingResultsCount: existingResults.length,
@@ -1766,66 +1840,19 @@ router.post('/:id/submit', [auth, validateObjectId('id')], async (req, res) => {
       });
     }
 
-    // Calculate score - FIXED VERSION
-    let score = 0;
-    let totalPossibleMarks = 0;
-    const correctness = {};
+    // Use the ENHANCED scoring function for text-based answers
+    const { score, correctness, totalPossibleMarks } = calculateScoreWithDebug(test.questions || [], answers);
     
-    if (test.questions && test.questions.length > 0) {
-      console.log('✅ Calculating score from', test.questions.length, 'questions');
-      
-      for (const question of test.questions) {
-        const questionId = question._id.toString();
-        const selectedAnswer = answers[questionId];
-        
-        // Convert answers to comparable format
-        const userAnswer = selectedAnswer !== undefined ? String(selectedAnswer).trim() : null;
-        
-        // FIX: Check if correctAnswer exists in different possible fields
-        let correctAnswer = null;
-        if (question.correctAnswer !== undefined) {
-          correctAnswer = String(question.correctAnswer).trim();
-        } else if (question.correctOption !== undefined) {
-          correctAnswer = String(question.correctOption).trim();
-        } else if (question.answer !== undefined) {
-          correctAnswer = String(question.answer).trim();
-        }
-        
-        console.log('🔍 Question:', {
-          id: questionId,
-          userAnswer,
-          correctAnswer,
-          hasCorrectAnswer: question.correctAnswer !== undefined,
-          hasCorrectOption: question.correctOption !== undefined,
-          hasAnswer: question.answer !== undefined
-        });
-        
-        const isCorrect = correctAnswer !== null && userAnswer === correctAnswer;
-        
-        correctness[questionId] = isCorrect;
-        
-        const questionMarks = question.marks || 1;
-        totalPossibleMarks += questionMarks;
-        
-        if (isCorrect) {
-          score += questionMarks;
-        }
-      }
-    } else {
-      console.log('⚠️ No questions found in test for score calculation');
-    }
-
-    // Use test total marks if available, otherwise calculate
+    // Use test total marks if available, otherwise calculate from possible marks
     const totalMarks = test.totalMarks || totalPossibleMarks;
     const percentage = totalMarks > 0 ? Math.round((score / totalMarks) * 100) : 0;
     const passed = score >= (test.passingMarks || Math.ceil(totalMarks * 0.4));
 
-    // FIX: Format session correctly for Result model validation
-    // Result model expects format: "YYYY/YYYY First/Second/Third Term"
+    // Format session correctly for Result model validation
     let session = test.session;
     let term = test.term;
     
-    console.log('🔍 SUBMIT DEBUG - Session/Term from test:', {
+    console.log('📅 SUBMIT DEBUG - Session/Term from test:', {
       originalSession: session,
       originalTerm: term,
       sessionType: typeof session,
@@ -1886,7 +1913,7 @@ router.post('/:id/submit', [auth, validateObjectId('id')], async (req, res) => {
       isRetake: attemptNumber > 1
     };
 
-    console.log('🔍 SUBMIT DEBUG - Result data to save:', {
+    console.log('📝 SUBMIT DEBUG - Result data to save:', {
       session: resultData.session,
       term: resultData.term,
       subject: resultData.subject,
@@ -1895,7 +1922,8 @@ router.post('/:id/submit', [auth, validateObjectId('id')], async (req, res) => {
       totalMarks: resultData.totalMarks,
       percentage: resultData.percentage,
       attemptNumber: resultData.attemptNumber,
-      isRetake: resultData.isRetake
+      isRetake: resultData.isRetake,
+      correctAnswers: Object.values(correctness).filter(v => v).length
     });
 
     const result = new Result(resultData);
@@ -2286,7 +2314,9 @@ router.delete('/:testId', [auth, validateObjectId('testId')], async (req, res) =
   }
 });
 
-// Get test results
+// ==================== GET TEST RESULTS - UPDATED WITH TEACHER PERMISSIONS ====================
+
+// Get test results - UPDATED TO WORK WITH TEACHER PERMISSIONS
 router.get('/:testId/results', [auth, validateObjectId('testId')], async (req, res) => {
   try {
     console.log('📊 Tests route - Fetching results:', { 
@@ -2295,7 +2325,10 @@ router.get('/:testId/results', [auth, validateObjectId('testId')], async (req, r
       role: req.user.role 
     });
 
-    const test = await Test.findById(req.params.testId);
+    const test = await Test.findById(req.params.testId)
+      .populate('createdBy', 'username name')
+      .populate('class', 'name');
+    
     if (!test) {
       console.log('❌ Tests route - Test not found:', { testId: req.params.testId });
       return res.status(404).json({ 
@@ -2314,20 +2347,48 @@ router.get('/:testId/results', [auth, validateObjectId('testId')], async (req, r
     }
     
     if (req.user.role === 'teacher') {
-      if (test.createdBy.toString() !== req.user.id.toString()) {
-        console.log('❌ Tests route - Teacher not the creator:', { 
-          creator: test.createdBy, 
-          user: req.user.id 
+      // Check if teacher created the test OR is assigned to the subject/class
+      const isCreator = test.createdBy._id.toString() === req.user.id.toString();
+      
+      if (!isCreator) {
+        // Check if teacher is assigned to this subject/class
+        const teacherSubjects = req.user.subjects || [];
+        const testSubject = test.subject;
+        const testClass = test.class?._id || test.class;
+        
+        const isAssigned = teacherSubjects.some(assignment => {
+          const subjectMatch = assignment.subject === testSubject;
+          
+          let classMatch = false;
+          if (assignment.class && assignment.class.toString() === testClass.toString()) {
+            classMatch = true;
+          } else if (assignment.className && assignment.className === testClass) {
+            classMatch = true;
+          } else if (assignment.classId && assignment.classId.toString() === testClass.toString()) {
+            classMatch = true;
+          }
+          
+          return subjectMatch && classMatch;
         });
-        return res.status(403).json({ 
-          success: false,
-          error: 'You can only view results for tests you created.' 
-        });
+        
+        if (!isAssigned) {
+          console.log('❌ Tests route - Teacher not authorized:', { 
+            creator: test.createdBy._id, 
+            user: req.user.id,
+            teacherSubjects,
+            testSubject,
+            testClass
+          });
+          return res.status(403).json({ 
+            success: false,
+            error: 'You can only view results for tests you created or are assigned to teach.' 
+          });
+        }
       }
     }
 
     const results = await Result.find({ testId: req.params.testId })
-      .populate('userId', 'username name')
+      .populate('userId', 'username name studentId')
       .sort({ score: -1, submittedAt: -1 });
 
     console.log('✅ Tests route - Results fetched:', { 

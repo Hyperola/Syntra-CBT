@@ -3,6 +3,7 @@ const router = express.Router();
 const Result = require('../models/Result');
 const User = require('../models/User');
 const Test = require('../models/Test');
+const Class = require('../models/Class');
 const Session = require('../models/Session');
 const { auth } = require('../middleware/auth');
 const { checkPermission, teacherOnly } = require('../middleware/permissions');
@@ -33,6 +34,197 @@ const validateResultParams = (req, res, next) => {
   next();
 };
 
+// Helper function to convert class name to ObjectId if needed
+const getClassForQuery = async (className) => {
+  if (!className) return null;
+  
+  if (mongoose.Types.ObjectId.isValid(className)) {
+    return className; // Already an ObjectId
+  }
+  
+  // Try to find class by name
+  const classDoc = await Class.findOne({
+    $or: [
+      { name: className },
+      { shortName: className },
+      { level: className }
+    ]
+  }).select('_id');
+  
+  return classDoc ? classDoc._id : className; // Return ObjectId if found, otherwise string
+};
+
+// Helper function to check if teacher has access to test results - COMPLETELY FIXED VERSION
+const checkTeacherTestAccess = async (teacher, testId) => {
+  try {
+    console.log('🔍 Checking teacher test access:', {
+      teacherId: teacher?._id || teacher?.id,
+      username: teacher?.username,
+      testId
+    });
+
+    if (!teacher) {
+      console.log('❌ Teacher object is undefined');
+      return false;
+    }
+
+    // Get the test
+    const test = await Test.findById(testId)
+      .populate('createdBy', 'username name _id')
+      .populate('class', 'name _id');
+    
+    if (!test) {
+      console.log('❌ Test not found');
+      return false;
+    }
+
+    const teacherSubjects = teacher.subjects || [];
+    const testSubject = test.subject;
+    
+    // Get test class information SAFELY
+    let testClass = test.class;
+    let testClassId = null;
+    let testClassName = null;
+    
+    if (testClass) {
+      if (testClass._id) {
+        // Populated class object
+        testClassId = testClass._id.toString();
+        testClassName = testClass.name;
+      } else if (mongoose.Types.ObjectId.isValid(testClass)) {
+        // String/ObjectId
+        testClassId = testClass.toString();
+        // Get class name from database
+        try {
+          const classDoc = await Class.findById(testClass).select('name').lean();
+          testClassName = classDoc?.name;
+        } catch (err) {
+          console.log('⚠️ Could not fetch class name:', err.message);
+        }
+      } else if (typeof testClass === 'string') {
+        // String class name
+        testClassId = testClass;
+        testClassName = testClass;
+      }
+    }
+    
+    // Check if teacher created the test
+    let isCreator = false;
+    if (test.createdBy && test.createdBy._id && teacher._id) {
+      isCreator = test.createdBy._id.toString() === teacher._id.toString();
+    }
+
+    console.log('📊 Access check details:', {
+      testSubject,
+      testClass,
+      testClassId,
+      testClassName,
+      isCreator,
+      teacherSubjectsCount: teacherSubjects.length,
+      teacherUsername: teacher.username,
+      testCreator: test.createdBy?.username,
+      testCreatorId: test.createdBy?._id,
+      teacherId: teacher._id
+    });
+
+    // If teacher created the test, grant access
+    if (isCreator) {
+      console.log('✅ Teacher created this test, granting access');
+      return true;
+    }
+
+    // If no teacher subjects, deny access
+    if (teacherSubjects.length === 0) {
+      console.log('❌ Teacher has no subjects assigned');
+      return false;
+    }
+
+    // Check if teacher is assigned to this test's subject/class
+    const hasAccess = teacherSubjects.some(assignment => {
+      const subjectMatch = assignment.subject === testSubject;
+      
+      // If no test class, only check subject
+      if (!testClassId) {
+        console.log('⚠️ No test class found, only checking subject');
+        return subjectMatch;
+      }
+      
+      let classMatch = false;
+      
+      // Check assignment.class
+      if (assignment.class) {
+        try {
+          const assignmentClass = assignment.class.toString();
+          
+          // Direct comparison
+          if (assignmentClass === testClassId) {
+            classMatch = true;
+          }
+          // Compare with class name
+          else if (testClassName && assignmentClass === testClassName) {
+            classMatch = true;
+          }
+          // If assignment.class is ObjectId and testClass is string ObjectId
+          else if (mongoose.Types.ObjectId.isValid(assignmentClass) && typeof testClassId === 'string') {
+            if (assignmentClass === testClassId) {
+              classMatch = true;
+            }
+          }
+        } catch (err) {
+          console.log('⚠️ Error checking assignment.class:', err.message);
+        }
+      }
+      
+      // Check assignment.className
+      if (!classMatch && assignment.className) {
+        try {
+          if (assignment.className === testClassId) {
+            classMatch = true;
+          }
+          else if (testClassName && assignment.className === testClassName) {
+            classMatch = true;
+          }
+        } catch (err) {
+          console.log('⚠️ Error checking assignment.className:', err.message);
+        }
+      }
+      
+      // Check assignment.classId
+      if (!classMatch && assignment.classId) {
+        try {
+          const classIdStr = assignment.classId.toString();
+          if (classIdStr === testClassId) {
+            classMatch = true;
+          }
+        } catch (err) {
+          console.log('⚠️ Error checking assignment.classId:', err.message);
+        }
+      }
+      
+      console.log('📊 Assignment check result:', {
+        assignmentSubject: assignment.subject,
+        testSubject,
+        subjectMatch,
+        classMatch,
+        finalMatch: subjectMatch && (classMatch || !testClassId)
+      });
+      
+      return subjectMatch && (classMatch || !testClassId);
+    });
+
+    console.log('✅ Teacher access final result:', hasAccess);
+    return hasAccess;
+  } catch (error) {
+    console.error('❌ Error in checkTeacherTestAccess:', {
+      message: error.message,
+      stack: error.stack,
+      teacherId: teacher?._id,
+      testId
+    });
+    return false;
+  }
+};
+
 // ==================== TEACHER-SPECIFIC ROUTES ====================
 
 // Get teacher's own results (for their classes only) - FIXED VERSION
@@ -48,7 +240,7 @@ router.get('/teacher', auth, teacherOnly, async (req, res) => {
       page = 1,
       limit = 10,
       subject,
-      class: className, // Changed from classId to className
+      class: className,
       session: sessionName,
       term,
       studentId,
@@ -71,32 +263,39 @@ router.get('/teacher', auth, teacherOnly, async (req, res) => {
     }
 
     // Create OR conditions for all teacher's subjects
-    // FIX: Use class string (className) instead of ObjectId
-    query.$or = teacherSubjects.map(sub => {
+    const subjectConditions = [];
+    
+    for (const sub of teacherSubjects) {
       const condition = {
         subject: sub.subject
       };
       
-      // Handle both ObjectId and string class formats
-      if (sub.class) {
-        if (mongoose.Types.ObjectId.isValid(sub.class)) {
-          // If it's an ObjectId, populate to get class name
-          condition.$or = [
-            { class: sub.class }, // Match by ObjectId
-            { 'class._id': sub.class } // Match in populated field
-          ];
-        } else {
-          // If it's a string, match directly
-          condition.class = sub.class;
+      // Handle class in different formats - SAFELY
+      try {
+        if (sub.class) {
+          if (mongoose.Types.ObjectId.isValid(sub.class)) {
+            condition.class = sub.class;
+          } else if (typeof sub.class === 'string') {
+            condition.class = sub.class;
+          }
+        } else if (sub.className) {
+          condition.class = sub.className;
+        } else if (sub.classId) {
+          condition.class = sub.classId;
         }
+      } catch (err) {
+        console.log('⚠️ Error processing subject condition:', err.message);
       }
       
-      return condition;
-    });
+      subjectConditions.push(condition);
+    }
+
+    if (subjectConditions.length > 0) {
+      query.$or = subjectConditions;
+    }
 
     // Apply additional filters
     if (subject) {
-      // Ensure teacher has access to this subject
       const hasSubject = teacherSubjects.some(subj => subj.subject === subject);
       if (!hasSubject) {
         return res.status(403).json({
@@ -108,7 +307,6 @@ router.get('/teacher', auth, teacherOnly, async (req, res) => {
     }
 
     if (className) {
-      // Ensure teacher has access to this class (match by string name)
       const hasClass = teacherSubjects.some(subj => 
         subj.class === className || subj.className === className
       );
@@ -118,67 +316,112 @@ router.get('/teacher', auth, teacherOnly, async (req, res) => {
           error: 'Not assigned to this class'
         });
       }
-      // Handle both ObjectId and string class formats
-      if (mongoose.Types.ObjectId.isValid(className)) {
-        query.$or = [
-          { class: className },
-          { 'class._id': className }
-        ];
-      } else {
-        query.class = className;
+      
+      // Convert class name to ObjectId if possible
+      const classForQuery = await getClassForQuery(className);
+      if (classForQuery) {
+        query.class = classForQuery;
       }
     }
 
     if (sessionName) query.session = sessionName;
     if (term) query.term = term;
-    if (studentId) {
-      query.userId = studentId;
-    }
-    
+    if (studentId) query.userId = studentId;
     if (testId) query.testId = testId;
 
     console.log('🔍 Teacher results query:', JSON.stringify(query, null, 2));
 
-    const [results, total] = await Promise.all([
-      Result.find(query)
-        .populate('userId', 'name surname studentId')
-        .populate('testId', 'title subject class totalMarks type')
-        .populate({
-          path: 'class',
-          select: 'name level stream',
-          // Handle both string and ObjectId class references
-          match: teacherSubjects.length > 0 ? {
-            $or: teacherSubjects.map(sub => ({
-              $or: [
-                { _id: sub.class },
-                { name: sub.class }
-              ]
-            }))
-          } : {}
-        })
-        .sort({ submittedAt: -1 })
-        .skip(parseInt(skip))
-        .limit(parseInt(limit))
-        .lean(),
-      Result.countDocuments(query)
-    ]);
+    let results, total;
+    try {
+      [results, total] = await Promise.all([
+        Result.find(query)
+          .populate('userId', 'name surname studentId')
+          .populate('testId', 'title subject class totalMarks type')
+          .populate({
+            path: 'class',
+            select: 'name level stream'
+          })
+          .sort({ submittedAt: -1 })
+          .skip(parseInt(skip))
+          .limit(parseInt(limit))
+          .lean(),
+        Result.countDocuments(query)
+      ]);
+    } catch (queryError) {
+      if (queryError.name === 'CastError' && queryError.path === 'class') {
+        console.log('⚠️ CastError occurred, trying to fix query...');
+        // Try without class filter in $or conditions
+        if (query.$or) {
+          const fixedConditions = query.$or.map(condition => {
+            // Remove class field if it causes issues
+            const { class: classField, ...rest } = condition;
+            return rest;
+          }).filter(condition => Object.keys(condition).length > 0);
+          
+          if (fixedConditions.length > 0) {
+            query.$or = fixedConditions;
+          } else {
+            delete query.$or;
+          }
+        }
+        
+        // Retry query
+        [results, total] = await Promise.all([
+          Result.find(query)
+            .populate('userId', 'name surname studentId')
+            .populate('testId', 'title subject class totalMarks type')
+            .populate({
+              path: 'class',
+              select: 'name level stream'
+            })
+            .sort({ submittedAt: -1 })
+            .skip(parseInt(skip))
+            .limit(parseInt(limit))
+            .lean(),
+          Result.countDocuments(query)
+        ]);
+      } else {
+        throw queryError;
+      }
+    }
 
-    // Filter out results where class population failed (teacher doesn't have access)
+    // Filter out results where class doesn't match teacher's assignments
     const filteredResults = results.filter(result => {
-      // If class is populated and exists, check if teacher has access
-      if (result.class && result.class._id) {
-        return teacherSubjects.some(sub => 
-          (sub.class && sub.class.toString() === result.class._id.toString()) ||
-          (sub.className === result.class.name)
-        );
+      try {
+        const resultClass = result.class?._id?.toString() || result.class?.toString() || result.class;
+        const resultClassName = result.class?.name || result.class;
+        
+        return teacherSubjects.some(sub => {
+          const subjectMatch = sub.subject === result.subject;
+          
+          let classMatch = false;
+          
+          // Compare class IDs
+          if (sub.class) {
+            if (mongoose.Types.ObjectId.isValid(sub.class)) {
+              classMatch = sub.class.toString() === resultClass;
+            } else if (typeof sub.class === 'string') {
+              classMatch = sub.class === resultClassName || sub.class === resultClass;
+            }
+          }
+          
+          // Compare class name from className field
+          if (!classMatch && sub.className) {
+            classMatch = sub.className === resultClassName || sub.className === resultClass;
+          }
+          
+          // Compare classId field
+          if (!classMatch && sub.classId) {
+            const classIdStr = sub.classId.toString();
+            classMatch = classIdStr === resultClass || classIdStr === resultClassName;
+          }
+          
+          return subjectMatch && classMatch;
+        });
+      } catch (err) {
+        console.log('⚠️ Error filtering result:', err.message);
+        return false;
       }
-      // If class is a string, check directly
-      if (typeof result.class === 'string') {
-        return teacherSubjects.some(sub => 
-          sub.class === result.class || sub.className === result.class
-        );
-      }
-      return false;
     });
 
     const totalPages = Math.ceil(total / limit);
@@ -189,7 +432,7 @@ router.get('/teacher', auth, teacherOnly, async (req, res) => {
       pagination: {
         currentPage: parseInt(page),
         totalPages,
-        totalResults: total,
+        totalResults: filteredResults.length,
         hasNext: page < totalPages,
         hasPrev: page > 1
       }
@@ -197,6 +440,15 @@ router.get('/teacher', auth, teacherOnly, async (req, res) => {
 
   } catch (error) {
     console.error('❌ Teacher results error:', error);
+    
+    // Handle CastError specifically
+    if (error.name === 'CastError') {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid data format in query. Please check your filter values.'
+      });
+    }
+    
     res.status(500).json({
       success: false,
       error: 'Server error fetching teacher results',
@@ -205,383 +457,10 @@ router.get('/teacher', auth, teacherOnly, async (req, res) => {
   }
 });
 
-// Get teacher's test results - FIXED VERSION
-router.get('/teacher/test/:testId', auth, teacherOnly, async (req, res) => {
-  try {
-    const { testId } = req.params;
-    const { includeAnalysis = false } = req.query;
+// ==================== MAIN RESULTS ROUTE FOR TestResults.js ====================
 
-    console.log('Teacher test results request:', {
-      testId,
-      teacherId: req.user.id,
-      username: req.user.username
-    });
-
-    // Verify test exists
-    const test = await Test.findById(testId);
-    if (!test) {
-      return res.status(404).json({ 
-        success: false,
-        error: 'Test not found' 
-      });
-    }
-
-    // Check if teacher has access to this test's subject/class
-    const teacherSubjects = req.user.subjects || [];
-    const hasAccess = teacherSubjects.some(sub => {
-      // Match subject
-      if (sub.subject !== test.subject) return false;
-      
-      // Match class - handle both ObjectId and string
-      if (mongoose.Types.ObjectId.isValid(test.class)) {
-        // Test class is ObjectId
-        return sub.class && sub.class.toString() === test.class.toString();
-      } else {
-        // Test class is string
-        return sub.class === test.class || sub.className === test.class;
-      }
-    });
-
-    if (!hasAccess) {
-      return res.status(403).json({ 
-        success: false,
-        error: 'Not assigned to this subject/class' 
-      });
-    }
-
-    // Build query - handle both ObjectId and string class formats
-    const query = { 
-      testId, 
-      isActive: true,
-      subject: test.subject
-    };
-
-    // Add class condition based on test.class type
-    if (mongoose.Types.ObjectId.isValid(test.class)) {
-      query.$or = [
-        { class: test.class },
-        { 'class._id': test.class }
-      ];
-    } else {
-      query.class = test.class;
-    }
-
-    const results = await Result.find(query)
-      .populate('userId', 'name surname studentId')
-      .populate({
-        path: 'class',
-        select: 'name level',
-        match: teacherSubjects.length > 0 ? {
-          $or: teacherSubjects.map(sub => ({
-            $or: [
-              { _id: sub.class },
-              { name: sub.class }
-            ]
-          }))
-        } : {}
-      })
-      .sort({ score: -1 })
-      .lean();
-
-    // Filter results to only those teacher has access to
-    const accessibleResults = results.filter(result => {
-      if (!result.class) return false;
-      
-      return teacherSubjects.some(sub => {
-        if (result.class._id) {
-          return sub.class && sub.class.toString() === result.class._id.toString();
-        }
-        return sub.class === result.class || sub.className === result.class;
-      });
-    });
-
-    // Calculate statistics
-    const statistics = {
-      totalStudents: accessibleResults.length,
-      averageScore: accessibleResults.length > 0 ?
-        (accessibleResults.reduce((sum, r) => sum + (r.score || 0), 0) / accessibleResults.length).toFixed(2) : 0,
-      highestScore: accessibleResults.length > 0 ? 
-        Math.max(...accessibleResults.map(r => r.score || 0)) : 0,
-      lowestScore: accessibleResults.length > 0 ? 
-        Math.min(...accessibleResults.map(r => r.score || 0)) : 0,
-      passRate: accessibleResults.length > 0 ?
-        (accessibleResults.filter(r => (r.score || 0) >= (test.passingMarks || test.totalMarks * 0.5)).length / accessibleResults.length * 100).toFixed(2) : 0
-    };
-
-    // Add analysis if requested
-    let enhancedResults = accessibleResults;
-    if (includeAnalysis === 'true') {
-      enhancedResults = accessibleResults.map(result => ({
-        ...result,
-        analysis: {
-          correctAnswers: Array.from(result.correctness?.values() || []).filter(Boolean).length,
-          totalQuestions: result.totalQuestions,
-          accuracy: result.totalQuestions > 0 ?
-            (Array.from(result.correctness?.values() || []).filter(Boolean).length / result.totalQuestions * 100).toFixed(2) : 0,
-          percentage: result.percentage,
-          grade: result.grade
-        }
-      }));
-    }
-
-    res.json({
-      success: true,
-      test: {
-        id: test._id,
-        title: test.title,
-        subject: test.subject,
-        class: test.class,
-        totalMarks: test.totalMarks,
-        passingMarks: test.passingMarks
-      },
-      results: enhancedResults,
-      statistics
-    });
-
-  } catch (error) {
-    console.error('❌ Teacher test results error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Server error fetching teacher test results',
-      details: error.message
-    });
-  }
-});
-
-// Get teacher's student performance - FIXED VERSION
-router.get('/teacher/student/:studentId/performance', auth, teacherOnly, async (req, res) => {
-  try {
-    const { studentId } = req.params;
-    const { session: sessionName, term } = req.query;
-
-    console.log('Teacher student performance request:', {
-      studentId,
-      teacherId: req.user.id,
-      username: req.user.username
-    });
-
-    // Check if student exists
-    const student = await User.findById(studentId);
-    if (!student) {
-      return res.status(404).json({ 
-        success: false,
-        error: 'Student not found' 
-      });
-    }
-
-    // Check if teacher has access to student's class
-    const teacherSubjects = req.user.subjects || [];
-    const hasAccess = teacherSubjects.some(sub => {
-      // Handle both ObjectId and string class formats
-      if (mongoose.Types.ObjectId.isValid(student.class)) {
-        return sub.class && sub.class.toString() === student.class.toString();
-      } else {
-        return sub.class === student.class || sub.className === student.class;
-      }
-    });
-
-    if (!hasAccess) {
-      return res.status(403).json({ 
-        success: false,
-        error: 'Student not in your assigned classes' 
-      });
-    }
-
-    // Build query with teacher's subjects
-    const query = { 
-      userId: studentId, 
-      isActive: true
-    };
-
-    // Add OR conditions for teacher's subjects
-    if (teacherSubjects.length > 0) {
-      query.$or = teacherSubjects.map(sub => ({
-        subject: sub.subject,
-        // Handle class condition based on type
-        ...(sub.class ? (mongoose.Types.ObjectId.isValid(sub.class) ? {
-          $or: [
-            { class: sub.class },
-            { 'class._id': sub.class }
-          ]
-        } : {
-          class: sub.class
-        }) : {})
-      }));
-    }
-    
-    if (sessionName) query.session = sessionName;
-    if (term) query.term = term;
-
-    const results = await Result.find(query)
-      .populate('testId', 'title type subject totalMarks')
-      .populate({
-        path: 'class',
-        select: 'name level',
-        match: teacherSubjects.length > 0 ? {
-          $or: teacherSubjects.map(sub => ({
-            $or: [
-              { _id: sub.class },
-              { name: sub.class }
-            ]
-          }))
-        } : {}
-      })
-      .sort({ submittedAt: -1 })
-      .lean();
-
-    // Filter to only accessible results
-    const accessibleResults = results.filter(result => {
-      if (!result.subject) return false;
-      
-      return teacherSubjects.some(sub => {
-        if (sub.subject !== result.subject) return false;
-        
-        if (!result.class) return false;
-        
-        if (result.class._id) {
-          return sub.class && sub.class.toString() === result.class._id.toString();
-        }
-        return sub.class === result.class || sub.className === result.class;
-      });
-    });
-
-    if (accessibleResults.length === 0) {
-      return res.json({
-        success: true,
-        student: {
-          id: student._id,
-          name: student.name,
-          surname: student.surname,
-          studentId: student.studentId
-        },
-        performance: {
-          totalTests: 0,
-          averageScore: 0,
-          averagePercentage: 0,
-          bestScore: 0,
-          worstScore: 0
-        },
-        results: []
-      });
-    }
-
-    // Calculate performance metrics
-    const scores = accessibleResults.map(r => r.score || 0);
-    const percentages = accessibleResults.map(r => r.percentage || 0);
-    
-    const performance = {
-      totalTests: accessibleResults.length,
-      averageScore: (scores.reduce((sum, score) => sum + score, 0) / accessibleResults.length).toFixed(2),
-      averagePercentage: (percentages.reduce((sum, perc) => sum + perc, 0) / accessibleResults.length).toFixed(2),
-      bestScore: Math.max(...scores),
-      worstScore: Math.min(...scores)
-    };
-
-    res.json({
-      success: true,
-      student: {
-        id: student._id,
-        name: student.name,
-        surname: student.surname,
-        studentId: student.studentId,
-        class: student.class
-      },
-      performance,
-      results: accessibleResults.slice(0, 10) // Recent 10 results
-    });
-
-  } catch (error) {
-    console.error('❌ Teacher student performance error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Server error fetching student performance',
-      details: error.message
-    });
-  }
-});
-
-// ==================== ADMIN ROUTES ====================
-
-// Get all results with advanced filtering and pagination - ADMIN ONLY
-router.get('/', auth, checkPermission('view_results'), async (req, res) => {
-  try {
-    const {
-      page = 1,
-      limit = 10,
-      subject,
-      class: className,
-      session: sessionName,
-      term,
-      studentId,
-      testId,
-      sortBy = 'submittedAt',
-      sortOrder = 'desc'
-    } = req.query;
-   
-    const skip = (page - 1) * limit;
-   
-    // Build query
-    let query = { isActive: true };
-
-    // Apply filters - handle class as both string and ObjectId
-    if (subject) query.subject = subject;
-    
-    if (className) {
-      if (mongoose.Types.ObjectId.isValid(className)) {
-        query.$or = [
-          { class: className },
-          { 'class._id': className }
-        ];
-      } else {
-        query.class = className;
-      }
-    }
-    
-    if (sessionName) query.session = sessionName;
-    if (term) query.term = term;
-    if (studentId) query.userId = studentId;
-    if (testId) query.testId = testId;
-
-    // Build sort object
-    const sort = {};
-    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
-
-    const [results, total] = await Promise.all([
-      Result.find(query)
-        .populate('userId', 'name surname studentId')
-        .populate('testId', 'title subject class totalMarks type')
-        .populate('class', 'name level')
-        .sort(sort)
-        .skip(parseInt(skip))
-        .limit(parseInt(limit))
-        .lean(),
-      Result.countDocuments(query)
-    ]);
-
-    const totalPages = Math.ceil(total / limit);
-
-    res.json({
-      success: true,
-      results,
-      pagination: {
-        currentPage: parseInt(page),
-        totalPages,
-        totalResults: total,
-        hasNext: page < totalPages,
-        hasPrev: page > 1
-      }
-    });
-  } catch (error) {
-    console.error('Admin results error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Server error fetching results'
-    });
-  }
-});
-
-// Get results for specific test - ADMIN/TEACHER ACCESS
-router.get('/test/:testId', auth, validateResultParams, async (req, res) => {
+// Get results for specific test - COMPLETELY FIXED VERSION
+router.get('/test/:testId', auth, async (req, res) => {
   const { testId } = req.params;
   
   try {
@@ -589,55 +468,116 @@ router.get('/test/:testId', auth, validateResultParams, async (req, res) => {
 
     console.log('GET /api/results/test/:testId - Request:', {
       testId,
-      user: req.user.username
+      user: req.user.username,
+      role: req.user.role
     });
 
-    // Verify test exists
-    const test = await Test.findById(testId);
+    // Verify test exists with proper population
+    const test = await Test.findById(testId)
+      .populate('createdBy', 'username name _id')
+      .populate('class', 'name _id');
+    
     if (!test) {
-      return res.status(404).json({ error: 'Test not found' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'Test not found' 
+      });
     }
+
+    console.log('🔍 Test found with details:', {
+      testId: test._id,
+      title: test.title,
+      subject: test.subject,
+      class: test.class,
+      classType: typeof test.class,
+      classId: test.class?._id || test.class,
+      createdBy: test.createdBy,
+      createdById: test.createdBy?._id,
+      createdByUsername: test.createdBy?.username
+    });
 
     // Authorization checks
     if (req.user.role === 'teacher') {
-      const teacherSubjects = req.user.subjects || [];
-      const hasAccess = teacherSubjects.some(sub => {
-        if (sub.subject !== test.subject) return false;
-        
-        // Handle class matching
-        if (mongoose.Types.ObjectId.isValid(test.class)) {
-          return sub.class && sub.class.toString() === test.class.toString();
-        } else {
-          return sub.class === test.class || sub.className === test.class;
-        }
-      });
+      // Check if teacher has access to this test
+      const hasAccess = await checkTeacherTestAccess(req.user, testId);
       
       if (!hasAccess) {
-        return res.status(403).json({ error: 'Not assigned to this subject/class' });
+        console.log('❌ Teacher does not have access to this test');
+        return res.status(403).json({ 
+          success: false,
+          error: 'You are not assigned to this test\'s subject/class.' 
+        });
       }
     } else if (req.user.role === 'student') {
       return res.status(403).json({ 
+        success: false,
         error: 'Access denied. Students cannot view test results.' 
       });
     }
 
-    // Build query
-    const query = { testId, isActive: true };
+    // Build query - handle both ObjectId and string class values
+    const query = { 
+      testId, 
+      isActive: true,
+      subject: test.subject
+    };
+
+    // Add class condition - handle all possible formats
+    const testClass = test.class;
     
-    // Add class condition
-    if (mongoose.Types.ObjectId.isValid(test.class)) {
-      query.$or = [
-        { class: test.class },
-        { 'class._id': test.class }
-      ];
+    if (testClass) {
+      if (testClass._id) {
+        // Populated class object
+        query.class = testClass._id;
+      } else if (mongoose.Types.ObjectId.isValid(testClass)) {
+        // String/ObjectId
+        query.class = testClass;
+      } else if (typeof testClass === 'string') {
+        // String class name, try to convert to ObjectId
+        const classForQuery = await getClassForQuery(testClass);
+        if (classForQuery) {
+          query.class = classForQuery;
+        } else {
+          query.class = testClass;
+        }
+      }
     } else {
-      query.class = test.class;
+      // If class is undefined or null, find results without class filter
+      console.warn('⚠️ Class is undefined or null in test:', testId);
+      delete query.class;
     }
 
-    const results = await Result.find(query)
-      .populate('userId', 'name surname studentId')
-      .populate('class', 'name level')
-      .sort({ score: -1 });
+    console.log('🔍 Final query for results:', query);
+
+    // Try to find results - with error handling
+    let results;
+    try {
+      results = await Result.find(query)
+        .populate('userId', 'name surname username studentId')
+        .populate({
+          path: 'class',
+          select: 'name level'
+        })
+        .sort({ score: -1, submittedAt: -1 });
+    } catch (findError) {
+      console.error('❌ Error finding results:', findError);
+      if (findError.name === 'CastError' && findError.path === 'class') {
+        console.log('⚠️ CastError occurred, trying alternative query...');
+        // Try without class filter
+        delete query.class;
+        results = await Result.find(query)
+          .populate('userId', 'name surname username studentId')
+          .populate({
+            path: 'class',
+            select: 'name level'
+          })
+          .sort({ score: -1, submittedAt: -1 });
+      } else {
+        throw findError;
+      }
+    }
+
+    console.log('✅ Found results:', results.length);
 
     // Add analysis if requested
     let enhancedResults = results;
@@ -667,13 +607,15 @@ router.get('/test/:testId', auth, validateResultParams, async (req, res) => {
     };
 
     res.json({
+      success: true,
       test: {
         id: test._id,
         title: test.title,
         subject: test.subject,
         class: test.class,
         totalMarks: test.totalMarks,
-        passingMarks: test.passingMarks
+        passingMarks: test.passingMarks,
+        createdBy: test.createdBy
       },
       results: enhancedResults,
       statistics
@@ -681,13 +623,134 @@ router.get('/test/:testId', auth, validateResultParams, async (req, res) => {
   } catch (error) {
     console.error('GET /api/results/test/:testId - Error:', {
       message: error.message,
-      testId
+      testId,
+      stack: error.stack
     });
-    res.status(500).json({ error: 'Server error fetching test results' });
+    
+    if (error.name === 'CastError') {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Data format error. Please contact administrator.' 
+      });
+    }
+    
+    res.status(500).json({ 
+      success: false,
+      error: 'Server error fetching test results' 
+    });
   }
 });
 
-// Get detailed result analysis - ADMIN/TEACHER ACCESS
+// ==================== ADMIN ROUTES ====================
+
+// Get all results with advanced filtering and pagination - ADMIN ONLY
+router.get('/', auth, checkPermission('view_results'), async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 10,
+      subject,
+      class: className,
+      session: sessionName,
+      term,
+      studentId,
+      testId,
+      sortBy = 'submittedAt',
+      sortOrder = 'desc'
+    } = req.query;
+   
+    const skip = (page - 1) * limit;
+   
+    // Build query
+    let query = { isActive: true };
+
+    // Apply filters
+    if (subject) query.subject = subject;
+    
+    if (className) {
+      // Handle both ObjectId and string class values
+      const classForQuery = await getClassForQuery(className);
+      if (classForQuery) {
+        query.class = classForQuery;
+      } else {
+        query.class = className;
+      }
+    }
+    
+    if (sessionName) query.session = sessionName;
+    if (term) query.term = term;
+    if (studentId) query.userId = studentId;
+    if (testId) query.testId = testId;
+
+    // Build sort object
+    const sort = {};
+    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+    let results, total;
+    try {
+      [results, total] = await Promise.all([
+        Result.find(query)
+          .populate('userId', 'name surname studentId')
+          .populate('testId', 'title subject class totalMarks type')
+          .populate('class', 'name level')
+          .sort(sort)
+          .skip(parseInt(skip))
+          .limit(parseInt(limit))
+          .lean(),
+        Result.countDocuments(query)
+      ]);
+    } catch (queryError) {
+      if (queryError.name === 'CastError' && queryError.path === 'class') {
+        console.log('⚠️ CastError occurred, trying without class filter...');
+        delete query.class;
+        [results, total] = await Promise.all([
+          Result.find(query)
+            .populate('userId', 'name surname studentId')
+            .populate('testId', 'title subject class totalMarks type')
+            .populate('class', 'name level')
+            .sort(sort)
+            .skip(parseInt(skip))
+            .limit(parseInt(limit))
+            .lean(),
+          Result.countDocuments(query)
+        ]);
+      } else {
+        throw queryError;
+      }
+    }
+
+    const totalPages = Math.ceil(total / limit);
+
+    res.json({
+      success: true,
+      results,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages,
+        totalResults: total,
+        hasNext: page < totalPages,
+        hasPrev: page > 1
+      }
+    });
+  } catch (error) {
+    console.error('Admin results error:', error);
+    
+    // Handle CastError specifically
+    if (error.name === 'CastError') {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid data format in query. Please check your filter values.'
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: 'Server error fetching results'
+    });
+  }
+});
+
+// Get detailed result analysis
 router.get('/details/:resultId', auth, async (req, res) => {
   const { resultId } = req.params;
   
@@ -708,20 +771,7 @@ router.get('/details/:resultId', auth, async (req, res) => {
 
     // Authorization check
     if (req.user.role === 'teacher') {
-      const teacherSubjects = req.user.subjects || [];
-      const hasAccess = teacherSubjects.some(sub => {
-        if (sub.subject !== result.subject) return false;
-        
-        // Handle class matching
-        if (mongoose.Types.ObjectId.isValid(result.class)) {
-          return sub.class && sub.class.toString() === result.class.toString();
-        } else if (typeof result.class === 'string') {
-          return sub.class === result.class || sub.className === result.class;
-        } else if (result.class && result.class._id) {
-          return sub.class && sub.class.toString() === result.class._id.toString();
-        }
-        return false;
-      });
+      const hasAccess = await checkTeacherTestAccess(req.user, result.testId._id);
       
       if (!hasAccess) {
         return res.status(403).json({ error: 'Not assigned to this subject/class' });
@@ -863,6 +913,7 @@ router.put('/:resultId', auth, checkPermission('manage_results'), async (req, re
     });
 
     res.json({
+      success: true,
       message: 'Result updated successfully',
       result: {
         id: result._id,
@@ -890,7 +941,10 @@ router.put('/:resultId', auth, checkPermission('manage_results'), async (req, re
       });
     }
    
-    res.status(500).json({ error: 'Server error updating result' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Server error updating result' 
+    });
   }
 });
 
@@ -934,6 +988,7 @@ router.delete('/:resultId', auth, checkPermission('manage_results'), async (req,
     });
 
     res.json({
+      success: true,
       message: 'Result deleted successfully',
       deletedResult: {
         id: result._id,
@@ -950,11 +1005,14 @@ router.delete('/:resultId', auth, checkPermission('manage_results'), async (req,
       message: error.message,
       resultId
     });
-    res.status(500).json({ error: 'Server error deleting result' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Server error deleting result' 
+    });
   }
 });
 
-// Get student performance overview - TEACHERS/ADMINS/STUDENTS
+// Get student performance overview
 router.get('/student/:studentId/performance', auth, validateResultParams, async (req, res) => {
   const { studentId } = req.params;
   
@@ -979,11 +1037,26 @@ router.get('/student/:studentId/performance', auth, validateResultParams, async 
      
       const teacherSubjects = req.user.subjects || [];
       const hasAccess = teacherSubjects.some(sub => {
-        if (mongoose.Types.ObjectId.isValid(student.class)) {
-          return sub.class && sub.class.toString() === student.class.toString();
-        } else {
-          return sub.class === student.class || sub.className === student.class;
+        const studentClass = student.class?.toString() || student.class;
+        
+        if (sub.class) {
+          if (mongoose.Types.ObjectId.isValid(sub.class)) {
+            return sub.class.toString() === studentClass;
+          } else {
+            return sub.class === studentClass;
+          }
         }
+        
+        if (sub.className) {
+          return sub.className === studentClass;
+        }
+        
+        if (sub.classId) {
+          const classIdStr = sub.classId.toString();
+          return classIdStr === studentClass;
+        }
+        
+        return false;
       });
       
       if (!hasAccess) {
@@ -1041,7 +1114,7 @@ router.get('/student/:studentId/performance', auth, validateResultParams, async 
     res.json({
       student,
       performance,
-      results: results.slice(0, 10), // Recent 10 results
+      results: results.slice(0, 10),
       period: {
         session: sessionName || 'all',
         term: term || 'all'
@@ -1053,6 +1126,528 @@ router.get('/student/:studentId/performance', auth, validateResultParams, async 
       studentId
     });
     res.status(500).json({ error: 'Server error fetching student performance' });
+  }
+});
+
+// ==================== REPORT CARD GENERATION ENDPOINTS ====================
+
+// Generate report card PDF for student by term - FIXED VERSION
+router.get('/export/report/:studentId/:session/:term', auth, async (req, res) => {
+  try {
+    const { studentId, session, term } = req.params;
+    
+    console.log('📊 Report card request:', {
+      studentId,
+      session,
+      term,
+      user: req.user.username,
+      role: req.user.role
+    });
+
+    // Validate session format
+    const sessionRegex = /^\d{4}\/\d{4} (First|Second|Third) Term$/;
+    if (!sessionRegex.test(session)) {
+      return res.status(400).json({ 
+        error: 'Session must be in format: "YYYY/YYYY First/Second/Third Term"' 
+      });
+    }
+
+    // Extract year and term from session
+    const [yearPart, termPart] = session.split(' ');
+    const termName = term || termPart || 'First Term';
+
+    // Validate student ID
+    if (!mongoose.Types.ObjectId.isValid(studentId)) {
+      return res.status(400).json({ error: 'Invalid student ID format' });
+    }
+
+    // Check permissions
+    if (req.user.role === 'student') {
+      if (req.user._id.toString() !== studentId) {
+        return res.status(403).json({ 
+          error: 'Students can only view their own report cards' 
+        });
+      }
+    }
+
+    // Get student details
+    const student = await User.findById(studentId)
+      .populate('class', 'name level')
+      .populate('enrolledSubjects.subject', 'name')
+      .populate('enrolledSubjects.class', 'name');
+
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+
+    // Get student's class
+    const studentClass = student.class;
+    if (!studentClass) {
+      return res.status(400).json({ error: 'Student is not assigned to any class' });
+    }
+
+    // Get all results for the student for the specific session and term
+    const query = {
+      userId: studentId,
+      session: session, // Use full session format
+      term: termName,
+      isActive: true
+    };
+
+    console.log('🔍 Query for results:', query);
+
+    const results = await Result.find(query)
+      .populate('testId', 'title type subject totalMarks')
+      .populate('class', 'name')
+      .sort({ subject: 1, submittedAt: -1 });
+
+    if (results.length === 0) {
+      console.log('❌ No results found for query:', query);
+      return res.status(404).json({ 
+        error: `No results found for ${session} - ${termName}` 
+      });
+    }
+
+    console.log('✅ Found results:', results.length);
+
+    // Group results by subject
+    const subjectResults = {};
+    results.forEach(result => {
+      const subject = result.subject;
+      if (!subjectResults[subject]) {
+        subjectResults[subject] = [];
+      }
+      subjectResults[subject].push(result);
+    });
+
+    // Calculate subject averages
+    const subjectAverages = {};
+    Object.keys(subjectResults).forEach(subject => {
+      const subjectRes = subjectResults[subject];
+      const totalScore = subjectRes.reduce((sum, r) => sum + r.score, 0);
+      const totalMarks = subjectRes.reduce((sum, r) => sum + r.totalMarks, 0);
+      const averageScore = totalScore / subjectRes.length;
+      const averagePercentage = totalMarks > 0 ? (totalScore / totalMarks) * 100 : 0;
+      
+      subjectAverages[subject] = {
+        averageScore: averageScore.toFixed(2),
+        averagePercentage: averagePercentage.toFixed(2),
+        totalTests: subjectRes.length,
+        latestGrade: subjectRes[0].grade || 'N/A'
+      };
+    });
+
+    // Calculate overall statistics
+    const overallStats = {
+      totalSubjects: Object.keys(subjectResults).length,
+      totalTests: results.length,
+      averageScore: (results.reduce((sum, r) => sum + r.score, 0) / results.length).toFixed(2),
+      averagePercentage: (results.reduce((sum, r) => sum + r.percentage, 0) / results.length).toFixed(2),
+      bestSubject: Object.keys(subjectAverages).reduce((best, subject) => 
+        parseFloat(subjectAverages[subject].averagePercentage) > parseFloat(subjectAverages[best]?.averagePercentage || 0) 
+          ? subject 
+          : best, Object.keys(subjectAverages)[0] || 'N/A'),
+      worstSubject: Object.keys(subjectAverages).reduce((worst, subject) => 
+        parseFloat(subjectAverages[subject].averagePercentage) < parseFloat(subjectAverages[worst]?.averagePercentage || 100) 
+          ? subject 
+          : worst, Object.keys(subjectAverages)[0] || 'N/A')
+    };
+
+    // Generate PDF
+    const doc = new PDFDocument({ 
+      margin: 50,
+      size: 'A4',
+      info: {
+        Title: `Report Card - ${student.name} ${student.surname}`,
+        Author: 'School Management System',
+        Subject: 'Academic Report Card'
+      }
+    });
+
+    // Set response headers for PDF download
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="report_${student.username}_${session.replace(/\//g, '_')}_${termName.replace(/\s/g, '_')}.pdf"`);
+
+    // Pipe PDF to response
+    doc.pipe(res);
+
+    // Header
+    doc.fontSize(24)
+       .font('Helvetica-Bold')
+       .fillColor('#4B5320') // Brand color
+       .text('ACADEMIC REPORT CARD', { align: 'center' });
+
+    doc.moveDown(0.5);
+
+    // School Info
+    doc.fontSize(12)
+       .font('Helvetica')
+       .fillColor('#000000')
+       .text('SCHOOL MANAGEMENT SYSTEM', { align: 'center' });
+
+    doc.fontSize(10)
+       .text('123 Education Street, Academic City, 100001', { align: 'center' });
+
+    doc.moveDown(1);
+
+    // Student Information Table
+    doc.fontSize(14)
+       .font('Helvetica-Bold')
+       .text('STUDENT INFORMATION', { underline: true });
+
+    doc.moveDown(0.5);
+    doc.fontSize(10);
+    doc.font('Helvetica');
+
+    const studentInfo = [
+      ['Student Name:', `${student.name} ${student.surname}`],
+      ['Student ID:', student.studentId || student.username],
+      ['Class:', studentClass.name],
+      ['Session:', session],
+      ['Term:', termName],
+      ['Date Generated:', new Date().toLocaleDateString('en-GB')]
+    ];
+
+    let studentInfoY = doc.y;
+    studentInfo.forEach(([label, value], i) => {
+      doc.text(label, 50, studentInfoY + (i * 20));
+      doc.text(value, 200, studentInfoY + (i * 20));
+    });
+
+    doc.moveDown(2);
+
+    // Academic Performance Section
+    doc.fontSize(14)
+       .font('Helvetica-Bold')
+       .text('ACADEMIC PERFORMANCE', { underline: true });
+
+    doc.moveDown(0.5);
+
+    // Table headers
+    const tableTop = doc.y;
+    doc.fontSize(10).font('Helvetica-Bold');
+    doc.text('SUBJECT', 50, tableTop);
+    doc.text('AVG SCORE', 200, tableTop);
+    doc.text('AVG %', 280, tableTop);
+    doc.text('GRADE', 350, tableTop);
+    doc.text('TESTS', 400, tableTop);
+
+    // Table rows
+    doc.font('Helvetica');
+    let currentY = tableTop + 20;
+
+    Object.keys(subjectResults).forEach((subject, index) => {
+      const avg = subjectAverages[subject];
+      
+      // Alternate row colors
+      if (index % 2 === 0) {
+        doc.rect(45, currentY - 5, 410, 20).fill('#F8F9FA');
+      }
+
+      doc.fillColor('#000000');
+      doc.text(subject, 50, currentY, { width: 140 });
+      doc.text(avg.averageScore, 200, currentY);
+      doc.text(`${avg.averagePercentage}%`, 280, currentY);
+      doc.text(avg.latestGrade, 350, currentY);
+      doc.text(avg.totalTests.toString(), 400, currentY);
+
+      currentY += 20;
+    });
+
+    doc.moveDown(1);
+
+    // Overall Statistics
+    doc.fontSize(12)
+       .font('Helvetica-Bold')
+       .fillColor('#4B5320')
+       .text('OVERALL STATISTICS', { underline: true });
+
+    doc.moveDown(0.5);
+    doc.fontSize(10).font('Helvetica').fillColor('#000000');
+
+    const stats = [
+      ['Total Subjects:', overallStats.totalSubjects],
+      ['Total Tests Taken:', overallStats.totalTests],
+      ['Average Score:', overallStats.averageScore],
+      ['Average Percentage:', `${overallStats.averagePercentage}%`],
+      ['Best Performing Subject:', overallStats.bestSubject],
+      ['Needs Improvement:', overallStats.worstSubject]
+    ];
+
+    let statsY = doc.y;
+    stats.forEach(([label, value], i) => {
+      doc.text(label, 50, statsY + (i * 20));
+      doc.text(value.toString(), 250, statsY + (i * 20));
+    });
+
+    doc.moveDown(2);
+
+    // Performance Summary
+    doc.fontSize(12)
+       .font('Helvetica-Bold')
+       .fillColor('#4B5320')
+       .text('PERFORMANCE SUMMARY', { underline: true });
+
+    doc.moveDown(0.5);
+    doc.fontSize(10).font('Helvetica').fillColor('#000000');
+
+    const avgPercentage = parseFloat(overallStats.averagePercentage);
+    let summary = '';
+    if (avgPercentage >= 75) {
+      summary = 'EXCELLENT: Student is performing exceptionally well across all subjects.';
+    } else if (avgPercentage >= 60) {
+      summary = 'GOOD: Student shows good understanding of the subjects.';
+    } else if (avgPercentage >= 50) {
+      summary = 'SATISFACTORY: Student meets the minimum requirements.';
+    } else {
+      summary = 'NEEDS IMPROVEMENT: Student requires additional support and practice.';
+    }
+
+    doc.text(summary, { width: 450, align: 'justify' });
+
+    doc.moveDown(1);
+
+    // Teacher Comments
+    doc.fontSize(12)
+       .font('Helvetica-Bold')
+       .fillColor('#4B5320')
+       .text('TEACHER COMMENTS', { underline: true });
+
+    doc.moveDown(0.5);
+    doc.fontSize(10).font('Helvetica').fillColor('#000000');
+    doc.text('This report reflects the student\'s academic performance for the term. Parents/Guardians are encouraged to discuss this report with the student and provide necessary support for improvement.', { width: 450, align: 'justify' });
+
+    doc.moveDown(2);
+
+    // Signatures Section
+    const signatureY = doc.y;
+    doc.fontSize(10).font('Helvetica-Bold');
+    
+    // Class Teacher
+    doc.text('Class Teacher:', 50, signatureY);
+    doc.font('Helvetica');
+    doc.text('________________________', 50, signatureY + 20);
+    doc.text('Signature/Stamp', 50, signatureY + 40);
+
+    // Principal
+    doc.font('Helvetica-Bold');
+    doc.text('Principal:', 300, signatureY);
+    doc.font('Helvetica');
+    doc.text('________________________', 300, signatureY + 20);
+    doc.text('Signature/Stamp', 300, signatureY + 40);
+
+    // Footer
+    doc.moveDown(4);
+    doc.fontSize(8)
+       .font('Helvetica-Oblique')
+       .fillColor('#666666')
+       .text('Generated by School Management System • This is an official document', { align: 'center' });
+
+    // Finalize PDF
+    doc.end();
+
+    console.log('✅ Report card generated successfully:', {
+      student: student.username,
+      session,
+      term: termName,
+      subjects: Object.keys(subjectResults).length,
+      results: results.length
+    });
+
+  } catch (error) {
+    console.error('❌ Report card generation error:', {
+      message: error.message,
+      stack: error.stack,
+      params: req.params,
+      user: req.user?.username
+    });
+    
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        error: 'Failed to generate report card',
+        details: error.message 
+      });
+    }
+  }
+});
+
+// Generate report card for entire class by term
+router.get('/export/report/class/:classId/:session/:term', auth, async (req, res) => {
+  try {
+    const { classId, session, term } = req.params;
+    
+    console.log('📊 Class report cards request:', {
+      classId,
+      session,
+      term,
+      user: req.user.username,
+      role: req.user.role
+    });
+
+    // Only admins and teachers can generate class reports
+    if (!['admin', 'super_admin', 'teacher'].includes(req.user.role)) {
+      return res.status(403).json({ 
+        error: 'Only administrators and teachers can generate class reports' 
+      });
+    }
+
+    // If teacher, check if assigned to this class
+    if (req.user.role === 'teacher') {
+      const teacherSubjects = req.user.subjects || [];
+      const isAssigned = teacherSubjects.some(subject => {
+        const subjectClass = subject.classId || subject.class || subject.className;
+        return subjectClass && subjectClass.toString() === classId;
+      });
+      
+      if (!isAssigned) {
+        return res.status(403).json({ 
+          error: 'You are not assigned to this class' 
+        });
+      }
+    }
+
+    // Validate session format
+    const sessionRegex = /^\d{4}\/\d{4} (First|Second|Third) Term$/;
+    if (!sessionRegex.test(session)) {
+      return res.status(400).json({ 
+        error: 'Session must be in format: "YYYY/YYYY First/Second/Third Term"' 
+      });
+    }
+
+    // Get class details
+    const classDoc = await Class.findById(classId);
+    if (!classDoc) {
+      return res.status(404).json({ error: 'Class not found' });
+    }
+
+    // Get all students in the class
+    const students = await User.find({ 
+      class: classId,
+      role: 'student',
+      isActive: true
+    }).select('_id name surname studentId username');
+
+    if (students.length === 0) {
+      return res.status(404).json({ error: 'No students found in this class' });
+    }
+
+    // Create a zip file containing all report cards
+    const archiver = require('archiver');
+    const archive = archiver('zip', {
+      zlib: { level: 9 } // Maximum compression
+    });
+
+    // Set response headers for zip download
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="class_reports_${classDoc.name.replace(/\s/g, '_')}_${session.replace(/\//g, '_')}_${term.replace(/\s/g, '_')}.zip"`);
+
+    archive.pipe(res);
+
+    // Generate report card for each student
+    let generatedCount = 0;
+    let failedCount = 0;
+
+    for (const student of students) {
+      try {
+        // Get student's results for the term
+        const results = await Result.find({
+          userId: student._id,
+          session: session,
+          term: term,
+          isActive: true
+        });
+
+        if (results.length === 0) {
+          console.log(`⚠️ No results for student ${student.username}`);
+          failedCount++;
+          continue;
+        }
+
+        // Generate PDF for this student
+        const doc = new PDFDocument({ 
+          margin: 50,
+          size: 'A4'
+        });
+
+        const pdfBuffers = [];
+        doc.on('data', chunk => pdfBuffers.push(chunk));
+        doc.on('end', () => {
+          const pdfBuffer = Buffer.concat(pdfBuffers);
+          archive.append(pdfBuffer, { 
+            name: `report_${student.username}_${session.replace(/\//g, '_')}_${term.replace(/\s/g, '_')}.pdf` 
+          });
+        });
+
+        // Generate PDF content (simplified version)
+        doc.fontSize(20).text('REPORT CARD', { align: 'center' });
+        doc.moveDown(0.5);
+        doc.fontSize(12).text(`Name: ${student.name} ${student.surname}`);
+        doc.text(`Student ID: ${student.studentId || student.username}`);
+        doc.text(`Class: ${classDoc.name}`);
+        doc.text(`Session: ${session}`);
+        doc.text(`Term: ${term}`);
+        doc.moveDown(1);
+        doc.text(`Total Tests: ${results.length}`);
+        doc.end();
+
+        generatedCount++;
+      } catch (error) {
+        console.error(`Error generating report for ${student.username}:`, error.message);
+        failedCount++;
+      }
+    }
+
+    // Finalize zip file
+    archive.finalize();
+
+    console.log('✅ Class reports generated:', {
+      class: classDoc.name,
+      totalStudents: students.length,
+      generated: generatedCount,
+      failed: failedCount
+    });
+
+  } catch (error) {
+    console.error('❌ Class report cards error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        error: 'Failed to generate class report cards',
+        details: error.message 
+      });
+    }
+  }
+});
+
+// Alternative endpoint with query parameters (for frontend compatibility)
+router.get('/export/report', auth, async (req, res) => {
+  try {
+    const { studentId, session, term } = req.query;
+    
+    console.log('📊 Alternative report card endpoint:', {
+      studentId,
+      session,
+      term,
+      user: req.user.username
+    });
+
+    if (!studentId || !session || !term) {
+      return res.status(400).json({ 
+        error: 'Missing required parameters: studentId, session, term' 
+      });
+    }
+
+    // Redirect to the main endpoint
+    const redirectUrl = `/api/results/export/report/${studentId}/${encodeURIComponent(session)}/${encodeURIComponent(term)}`;
+    console.log('🔄 Redirecting to:', redirectUrl);
+    
+    return req.app.get('router').handle(req, res);
+
+  } catch (error) {
+    console.error('❌ Alternative report endpoint error:', error);
+    res.status(500).json({ 
+      error: 'Failed to process report request',
+      details: error.message 
+    });
   }
 });
 

@@ -311,8 +311,8 @@ const EditResults = () => {
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <h1 style={{ margin: '0 0 8px 0', fontSize: '24px' }}>Results Management</h1>
-            <p style={{ margin: 0, opacity: 0.9 }}>Super Admin Dashboard - Manage all test results</p>
+            <h1 style={{ margin: '0 0 8px 0', fontSize: '24px' }}>Edit Results</h1>
+            <p style={{ margin: 0, opacity: 0.9 }}>Edit and manage test results</p>
           </div>
           <button
             onClick={() => navigate('/admin')}
@@ -647,6 +647,25 @@ const EditResults = () => {
                         >
                           <FiEye /> View
                         </button>
+                        <button
+                          onClick={() => startEditing(result)}
+                          style={{
+                            backgroundColor: '#D4A017',
+                            color: '#4B5320',
+                            border: 'none',
+                            padding: '6px 12px',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                          title="Edit score"
+                          disabled={editingResultId === result._id}
+                        >
+                          <FiEdit /> Edit
+                        </button>
                         {user.role === 'super_admin' && (
                           <button
                             onClick={() => handleDeleteResult(result._id)}
@@ -841,12 +860,12 @@ const EditResults = () => {
                           Score: {result.score} / {result.totalMarks} ({result.percentage}%)
                         </div>
                       </div>
-                      {user.role === 'super_admin' && (
+                      <div style={{ display: 'flex', gap: '8px' }}>
                         <button
-                          onClick={() => handleDeleteResult(result._id)}
+                          onClick={() => startEditing(result)}
                           style={{
-                            backgroundColor: '#dc3545',
-                            color: 'white',
+                            backgroundColor: '#D4A017',
+                            color: '#4B5320',
                             border: 'none',
                             padding: '6px 12px',
                             borderRadius: '4px',
@@ -856,10 +875,30 @@ const EditResults = () => {
                             alignItems: 'center',
                             gap: '4px'
                           }}
+                          disabled={editingResultId === result._id}
                         >
-                          <FiTrash2 /> Delete
+                          <FiEdit /> Edit Score
                         </button>
-                      )}
+                        {user.role === 'super_admin' && (
+                          <button
+                            onClick={() => handleDeleteResult(result._id)}
+                            style={{
+                              backgroundColor: '#dc3545',
+                              color: 'white',
+                              border: 'none',
+                              padding: '6px 12px',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              fontSize: '12px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                          >
+                            <FiTrash2 /> Delete
+                          </button>
+                        )}
+                      </div>
                     </div>
                     
                     {result.questionAnalysis && result.questionAnalysis.length > 0 && (
@@ -883,7 +922,29 @@ const EditResults = () => {
                               <div style={{ fontSize: '13px' }}>
                                 <div><strong>Selected:</strong> {qa.selectedAnswer}</div>
                                 <div><strong>Correct:</strong> {qa.correctAnswer}</div>
-                                <div style={{ color: qa.isCorrect ? '#155724' : '#721c24' }}>
+                                {qa.options && (
+                                  <div style={{ marginTop: '8px' }}>
+                                    <strong>Options:</strong>
+                                    <ul style={{ margin: '4px 0 0 0', paddingLeft: '20px' }}>
+                                      {qa.options.map((option, optIndex) => (
+                                        <li key={optIndex} style={{
+                                          color: option === qa.correctAnswer ? '#28a745' : 
+                                                 option === qa.selectedAnswer ? '#dc3545' : '#6c757d',
+                                          fontWeight: option === qa.correctAnswer ? 'bold' : 'normal'
+                                        }}>
+                                          {option}
+                                          {option === qa.correctAnswer && ' ✓'}
+                                          {option === qa.selectedAnswer && option !== qa.correctAnswer && ' ✗'}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                                <div style={{ 
+                                  color: qa.isCorrect ? '#155724' : '#721c24',
+                                  marginTop: '8px',
+                                  fontWeight: 'bold'
+                                }}>
                                   <strong>Status:</strong> {qa.isCorrect ? 'Correct' : 'Incorrect'}
                                 </div>
                               </div>
@@ -892,10 +953,100 @@ const EditResults = () => {
                         </div>
                       </div>
                     )}
+                    
+                    {/* If no questionAnalysis but have detailedData */}
+                    {(!result.questionAnalysis || result.questionAnalysis.length === 0) && result.detailedData && (
+                      <div>
+                        <h5 style={{ margin: '0 0 12px 0', color: '#4B5320' }}>Result Details</h5>
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                          gap: '12px',
+                          padding: '12px',
+                          backgroundColor: '#f8f9fa',
+                          borderRadius: '4px'
+                        }}>
+                          <div>
+                            <strong>Correct Answers:</strong> {result.detailedData.summary?.correctAnswers || 'N/A'}
+                          </div>
+                          <div>
+                            <strong>Total Questions:</strong> {result.detailedData.summary?.totalQuestions || 'N/A'}
+                          </div>
+                          <div>
+                            <strong>Accuracy:</strong> {result.detailedData.analysis?.accuracy || 'N/A'}%
+                          </div>
+                          <div>
+                            <strong>Time Per Question:</strong> {result.detailedData.summary?.timePerQuestion || 'N/A'}s
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))
               )}
             </div>
+            
+            {/* Edit Score Section in Modal */}
+            {editingResultId && selectedTest.results.some(r => r._id === editingResultId) && (
+              <div style={{
+                position: 'sticky',
+                bottom: 0,
+                backgroundColor: 'white',
+                borderTop: '1px solid #dee2e6',
+                padding: '16px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}>
+                <div>
+                  <strong>Editing Score for:</strong> {
+                    selectedTest.results.find(r => r._id === editingResultId)?.userId?.name || 'Unknown Student'
+                  }
+                </div>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <input
+                    type="number"
+                    value={editScore}
+                    onChange={(e) => setEditScore(e.target.value)}
+                    min="0"
+                    max={selectedTest.results.find(r => r._id === editingResultId)?.totalMarks || 100}
+                    style={{
+                      padding: '8px',
+                      border: '1px solid #dee2e6',
+                      borderRadius: '4px',
+                      width: '100px'
+                    }}
+                  />
+                  <button
+                    onClick={() => handleSaveScore(editingResultId)}
+                    disabled={editingLoading}
+                    style={{
+                      backgroundColor: '#28a745',
+                      color: 'white',
+                      border: 'none',
+                      padding: '8px 16px',
+                      borderRadius: '4px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {editingLoading ? 'Saving...' : 'Save'}
+                  </button>
+                  <button
+                    onClick={cancelEditing}
+                    style={{
+                      backgroundColor: '#6c757d',
+                      color: 'white',
+                      border: 'none',
+                      padding: '8px 16px',
+                      borderRadius: '4px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -197,7 +197,7 @@ const SetBatch = () => {
               }}
             />
             <div>
-              <h1 style={{ fontSize: '24px', fontWeight: 'bold' }}>Sanniville Academy</h1>
+              <h1 style={{ fontSize: '24px', fontWeight: 'bold' }}>Syntra Academy</h1>
               <p style={{ fontSize: '14px', color: '#D4A017' }}>Set Test Batches</p>
             </div>
           </div>

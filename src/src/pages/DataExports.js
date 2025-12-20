@@ -3,7 +3,10 @@ import axios from 'axios';
 import Papa from 'papaparse';
 import { useAuth } from '../context/AuthContext';
 
-const API_BASE_URL = process.env.NODE_ENV === 'production' ? 'http://localhost:5000' : 'http://localhost:5000';
+// Use the correct API URL
+const API_BASE_URL = process.env.NODE_ENV === 'production' 
+  ? window.location.origin 
+  : 'http://localhost:5000';
 
 const DataExports = () => {
   const { user } = useAuth();
@@ -12,8 +15,8 @@ const DataExports = () => {
   const [subjects, setSubjects] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [terms, setTerms] = useState(['First Term', 'Second Term', 'Third Term']);
-  const [classSubjects, setClassSubjects] = useState({}); // Subjects by class
-  const [classStudents, setClassStudents] = useState({}); // Students by class
+  const [classSubjects, setClassSubjects] = useState({});
+  const [classStudents, setClassStudents] = useState({});
   const [fetchingData, setFetchingData] = useState({
     users: false,
     classes: false,
@@ -45,12 +48,15 @@ const DataExports = () => {
     principalSignature: null,
   });
 
+  // Combined session options
+  const [combinedSessions, setCombinedSessions] = useState([]);
+
   // Brand colors
   const colors = {
-    primary: '#4B5320', // Army green
+    primary: '#4B5320',
     primaryDark: '#3a4319',
     primaryLight: '#6a7530',
-    secondary: '#D4A017', // Gold
+    secondary: '#D4A017',
     secondaryDark: '#b68d14',
     secondaryLight: '#e6b82e',
     background: '#f8f9fa',
@@ -78,12 +84,6 @@ const DataExports = () => {
     return classStudents[className] || [];
   };
 
-  // Get filtered students for results
-  const getFilteredStudentsForResults = (className) => {
-    if (!className) return [];
-    return classStudents[className] || [];
-  };
-
   // Get subjects for a specific class
   const getSubjectsForClass = (className) => {
     if (!className) return [];
@@ -93,7 +93,7 @@ const DataExports = () => {
   // Inline SVG icons
   const DownloadIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2 2v-4"/>
       <polyline points="7 10 12 15 17 10"/>
       <line x1="12" y1="15" x2="12" y2="3"/>
     </svg>
@@ -175,14 +175,28 @@ const DataExports = () => {
   }, []);
 
   useEffect(() => {
-    // When class is selected for results, fetch its data
+    // Create combined session options when sessions or terms change
+    if (sessions.length > 0 && terms.length > 0) {
+      const combined = [];
+      sessions.forEach(session => {
+        terms.forEach(term => {
+          combined.push({
+            value: `${session} ${term}`,
+            label: `${session} - ${term}`
+          });
+        });
+      });
+      setCombinedSessions(combined);
+    }
+  }, [sessions, terms]);
+
+  useEffect(() => {
     if (filters.resultClass) {
       fetchClassData(filters.resultClass);
     }
   }, [filters.resultClass]);
 
   useEffect(() => {
-    // When class is selected for report cards, fetch its data
     if (filters.reportClass) {
       fetchClassData(filters.reportClass);
     }
@@ -197,10 +211,10 @@ const DataExports = () => {
         sessions: true,
       });
       
-      // Fetch data sequentially
       await fetchClasses();
       await fetchUsers();
       await fetchSessions();
+      await fetchSubjects();
     } catch (err) {
       console.error('Failed to fetch initial data:', err);
       setError('Failed to load initial data. Please refresh the page.');
@@ -219,20 +233,20 @@ const DataExports = () => {
       const token = localStorage.getItem('token');
       if (!token) throw new Error('No authentication token found.');
       
-      // First, find the class object to get its ID
+      // Find the class object
       const classObj = classes.find(c => c.name === className);
       if (!classObj) {
         console.log('Class not found:', className);
         return;
       }
       
-      // Fetch students for this class using the /api/users endpoint with class filter
+      // Fetch students for this class
       const studentsRes = await axios.get(`${API_BASE_URL}/api/users`, {
         headers: { Authorization: `Bearer ${token}` },
         params: {
-          class: classObj._id || classObj.id,
+          class: classObj._id,
           role: 'student',
-          limit: 1000 // Get all students
+          limit: 1000
         },
         timeout: 10000,
       });
@@ -247,25 +261,49 @@ const DataExports = () => {
         [className]: students
       }));
       
-      // Fetch subjects for this class using the assignment endpoint
-      const subjectsRes = await axios.get(`${API_BASE_URL}/api/users/assignment/classes/${classObj._id || classObj.id}/subjects`, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 10000,
-      });
-      
+      // Fetch subjects for this class - multiple fallback options
       let classSubjectsList = [];
-      if (subjectsRes.data && subjectsRes.data.success) {
-        classSubjectsList = subjectsRes.data.subjects.map(sub => ({
-          id: sub._id,
-          name: sub.name,
-          code: sub.code,
-          category: sub.category,
-          isCore: sub.isCore
-        }));
+      
+      // Try different endpoints for fetching class subjects
+      const endpoints = [
+        `${API_BASE_URL}/api/classes/${classObj._id}/subjects`,
+        `${API_BASE_URL}/api/subjects/class/${classObj._id}`,
+        `${API_BASE_URL}/api/assignments/class/${classObj._id}/subjects`,
+      ];
+      
+      for (const endpoint of endpoints) {
+        try {
+          const subjectsRes = await axios.get(endpoint, {
+            headers: { Authorization: `Bearer ${token}` },
+            timeout: 5000,
+          });
+          
+          if (subjectsRes.data) {
+            if (Array.isArray(subjectsRes.data)) {
+              classSubjectsList = subjectsRes.data;
+            } else if (Array.isArray(subjectsRes.data.subjects)) {
+              classSubjectsList = subjectsRes.data.subjects;
+            } else if (Array.isArray(subjectsRes.data.data)) {
+              classSubjectsList = subjectsRes.data.data;
+            }
+            break;
+          }
+        } catch (err) {
+          console.log(`Failed to fetch subjects from ${endpoint}:`, err.message);
+          continue;
+        }
       }
       
-      // Remove duplicates and empty values
-      classSubjectsList = [...new Set(classSubjectsList.filter(sub => sub && sub.name && sub.name.trim() !== ''))];
+      // If no subjects found, use all subjects as fallback
+      if (classSubjectsList.length === 0) {
+        classSubjectsList = subjects;
+      }
+      
+      // Format subjects properly
+      classSubjectsList = classSubjectsList.map(sub => ({
+        _id: sub._id || sub.id || sub.subject?._id,
+        name: sub.name || sub.subject?.name || sub.subjectName || 'Unknown Subject'
+      })).filter(sub => sub.name && sub.name.trim() !== '');
       
       setClassSubjects(prev => ({
         ...prev,
@@ -274,19 +312,10 @@ const DataExports = () => {
       
     } catch (err) {
       console.error(`Error fetching data for class ${className}:`, err);
-      // Fallback to filtering from all users and subjects
-      const students = users.filter(user => user.role === 'student' && user.class && 
-        (user.class.name === className || user.class === className));
-      setClassStudents(prev => ({
-        ...prev,
-        [className]: students
-      }));
-      
-      // Fallback for subjects
-      const allSubjectsRes = await fetchSubjects();
+      // Fallback to filtering from all subjects
       setClassSubjects(prev => ({
         ...prev,
-        [className]: allSubjectsRes || []
+        [className]: subjects
       }));
     }
   };
@@ -298,22 +327,19 @@ const DataExports = () => {
       
       const res = await axios.get(`${API_BASE_URL}/api/users`, {
         headers: { Authorization: `Bearer ${token}` },
-        params: { limit: 1000 }, // Get all users for filtering
+        params: { limit: 1000 },
         timeout: 10000,
       });
       
-      console.log('Users API Response:', res.data);
-      
-      let usersData = [];
-      if (res.data && res.data.success && Array.isArray(res.data.users)) {
-        usersData = res.data.users;
+      if (res.data && res.data.success) {
+        setUsers(res.data.users || []);
+      } else {
+        setUsers([]);
       }
-      
-      setUsers(usersData);
       setError(null);
     } catch (err) {
       console.error('Error fetching users:', err);
-      setError(err.response?.data?.message || err.response?.data?.error || 'Failed to load users. Please try again.');
+      setError('Failed to load users. Please try again.');
       setUsers([]);
     }
   };
@@ -328,60 +354,24 @@ const DataExports = () => {
         timeout: 10000,
       });
       
-      console.log('Classes API Response:', res.data);
       let classList = [];
-      
-      // Handle different response formats
       if (Array.isArray(res.data)) {
-        classList = res.data.map(cls => {
-          if (typeof cls === 'string') {
-            return { _id: cls, name: cls, id: cls };
-          } else if (typeof cls === 'object' && cls !== null) {
-            return {
-              _id: cls._id || cls.id,
-              id: cls._id || cls.id,
-              name: cls.name || cls.className || 'Unknown Class'
-            };
-          }
-          return { _id: 'unknown', id: 'unknown', name: 'Unknown Class' };
-        });
+        classList = res.data;
       } else if (res.data && Array.isArray(res.data.classes)) {
-        classList = res.data.classes.map(cls => {
-          if (typeof cls === 'string') {
-            return { _id: cls, name: cls, id: cls };
-          } else if (typeof cls === 'object' && cls !== null) {
-            return {
-              _id: cls._id || cls.id,
-              id: cls._id || cls.id,
-              name: cls.name || cls.className || 'Unknown Class'
-            };
-          }
-          return { _id: 'unknown', id: 'unknown', name: 'Unknown Class' };
-        });
+        classList = res.data.classes;
       } else if (res.data && Array.isArray(res.data.data)) {
-        classList = res.data.data.map(cls => {
-          if (typeof cls === 'string') {
-            return { _id: cls, name: cls, id: cls };
-          } else if (typeof cls === 'object' && cls !== null) {
-            return {
-              _id: cls._id || cls.id,
-              id: cls._id || cls.id,
-              name: cls.name || cls.className || 'Unknown Class'
-            };
-          }
-          return { _id: 'unknown', id: 'unknown', name: 'Unknown Class' };
-        });
+        classList = res.data.data;
       }
       
-      // Remove duplicates and empty values
-      classList = [...new Map(classList.map(item => [item.name, item])).values()]
-        .filter(cls => cls && cls.name && cls.name.trim() !== '');
+      classList = classList.map(cls => ({
+        _id: cls._id || cls.id,
+        name: cls.name || cls.className || 'Unknown Class'
+      })).filter(cls => cls.name && cls.name.trim() !== '');
       
       setClasses(classList);
       setError(null);
     } catch (err) {
       console.error('Error fetching classes:', err);
-      console.log('Setting empty classes array due to error');
       setClasses([]);
     }
   };
@@ -396,58 +386,25 @@ const DataExports = () => {
         timeout: 10000,
       });
       
-      console.log('Subjects API Response:', res.data);
       let subjectList = [];
-      
-      // Handle different response formats
       if (Array.isArray(res.data)) {
-        subjectList = res.data.map(sub => {
-          if (typeof sub === 'string') {
-            return { id: sub, name: sub };
-          } else if (typeof sub === 'object' && sub !== null) {
-            return {
-              id: sub._id || sub.id,
-              name: sub.name || sub.subjectName || 'Unknown Subject'
-            };
-          }
-          return { id: 'unknown', name: 'Unknown Subject' };
-        });
+        subjectList = res.data;
       } else if (res.data && Array.isArray(res.data.subjects)) {
-        subjectList = res.data.subjects.map(sub => {
-          if (typeof sub === 'string') {
-            return { id: sub, name: sub };
-          } else if (typeof sub === 'object' && sub !== null) {
-            return {
-              id: sub._id || sub.id,
-              name: sub.name || sub.subjectName || 'Unknown Subject'
-            };
-          }
-          return { id: 'unknown', name: 'Unknown Subject' };
-        });
+        subjectList = res.data.subjects;
       } else if (res.data && Array.isArray(res.data.data)) {
-        subjectList = res.data.data.map(sub => {
-          if (typeof sub === 'string') {
-            return { id: sub, name: sub };
-          } else if (typeof sub === 'object' && sub !== null) {
-            return {
-              id: sub._id || sub.id,
-              name: sub.name || sub.subjectName || 'Unknown Subject'
-            };
-          }
-          return { id: 'unknown', name: 'Unknown Subject' };
-        });
+        subjectList = res.data.data;
       }
       
-      // Remove duplicates and empty values
-      subjectList = [...new Map(subjectList.map(item => [item.name, item])).values()]
-        .filter(sub => sub && sub.name && sub.name.trim() !== '');
+      subjectList = subjectList.map(sub => ({
+        id: sub._id || sub.id,
+        name: sub.name || sub.subjectName || 'Unknown Subject'
+      })).filter(sub => sub.name && sub.name.trim() !== '');
       
       setSubjects(subjectList);
       setError(null);
       return subjectList;
     } catch (err) {
       console.error('Error fetching subjects:', err);
-      console.log('Setting empty subjects array due to error');
       setSubjects([]);
       return [];
     }
@@ -463,47 +420,28 @@ const DataExports = () => {
         timeout: 10000,
       });
       
-      console.log('Sessions API Response:', res.data);
       let sessionList = [];
-      
-      // Handle different response formats
       if (Array.isArray(res.data)) {
-        sessionList = res.data.map(session => {
-          if (typeof session === 'string') {
-            return session;
-          } else if (typeof session === 'object' && session !== null) {
-            return session.sessionName || session.name || session.title || session._id || 'Unknown Session';
-          }
-          return 'Unknown Session';
-        });
+        sessionList = res.data;
       } else if (res.data && Array.isArray(res.data.sessions)) {
-        sessionList = res.data.sessions.map(session => {
-          if (typeof session === 'string') {
-            return session;
-          } else if (typeof session === 'object' && session !== null) {
-            return session.sessionName || session.name || session.title || session._id || 'Unknown Session';
-          }
-          return 'Unknown Session';
-        });
+        sessionList = res.data.sessions;
       } else if (res.data && Array.isArray(res.data.data)) {
-        sessionList = res.data.data.map(session => {
-          if (typeof session === 'string') {
-            return session;
-          } else if (typeof session === 'object' && session !== null) {
-            return session.sessionName || session.name || session.title || session._id || 'Unknown Session';
-          }
-          return 'Unknown Session';
-        });
+        sessionList = res.data.data;
       }
       
-      // Remove duplicates and empty values
-      sessionList = [...new Set(sessionList.filter(session => session && session.trim() !== ''))];
+      // Extract session names
+      sessionList = sessionList.map(session => {
+        if (typeof session === 'string') return session;
+        if (typeof session === 'object' && session !== null) {
+          return session.sessionName || session.name || session.title || session._id || 'Unknown Session';
+        }
+        return 'Unknown Session';
+      }).filter(session => session && session.trim() !== '');
       
       setSessions(sessionList);
       setError(null);
     } catch (err) {
       console.error('Error fetching sessions:', err);
-      console.log('Setting empty sessions array due to error');
       setSessions([]);
     }
   };
@@ -513,10 +451,9 @@ const DataExports = () => {
     setFilters(prev => ({ 
       ...prev, 
       [name]: value,
-      // Reset dependent filters when class changes
       ...(name === 'reportClass' && { reportStudent: '' }),
       ...(name === 'resultClass' && { resultStudent: '' }),
-      ...(name === 'resultClass' && { resultSubject: '' }), // Reset subject when class changes
+      ...(name === 'resultClass' && { resultSubject: '' }),
     }));
     setError(null);
     setSuccess(null);
@@ -628,42 +565,192 @@ const DataExports = () => {
       const token = localStorage.getItem('token');
       if (!token) throw new Error('No authentication token found.');
       
-      let endpoint = '';
-      let filename = '';
+      let results = [];
       
       if (filters.resultType === 'class' && filters.resultClass) {
-        const className = encodeURIComponent(filters.resultClass);
-        const subjectName = filters.resultSubject || 'all';
-        const term = filters.resultTerm || 'all';
-        endpoint = `${API_BASE_URL}/api/results/export/class/${className}/subject/${subjectName}/term/${term}`;
-        filename = `results_${className}_${subjectName.replace(/\s/g, '_')}_${term.replace(/\s/g, '_')}_${new Date().getTime()}.csv`;
+        // Get results for the entire class for a specific term
+        const classObj = classes.find(c => c.name === filters.resultClass);
+        if (!classObj) {
+          setError('Class not found.');
+          return;
+        }
+        
+        // Build query parameters
+        const params = {
+          class: classObj._id,
+          limit: 1000
+        };
+        
+        // Add optional filters
+        if (filters.resultSubject) {
+          params.subject = filters.resultSubject;
+        }
+        if (filters.resultTerm) {
+          params.term = filters.resultTerm;
+        }
+        if (filters.reportSession) {
+          params.session = filters.reportSession;
+        }
+        
+        const res = await axios.get(`${API_BASE_URL}/api/results`, {
+          headers: { Authorization: `Bearer ${token}` },
+          params: params,
+          timeout: 15000,
+        });
+        
+        if (res.data && res.data.success) {
+          results = res.data.results || [];
+        }
+        
       } else if (filters.resultType === 'student' && filters.resultStudent && filters.reportSession && filters.resultTerm) {
-        const sanitizedSession = encodeURIComponent(filters.reportSession);
-        endpoint = `${API_BASE_URL}/api/results/export/student/${filters.resultStudent}/session/${sanitizedSession}/term/${filters.resultTerm}`;
-        filename = `results_student_${filters.resultStudent}_${sanitizedSession.replace(/[/\s]/g, '_')}_${filters.resultTerm.replace(/\s/g, '_')}.csv`;
+        // Get results for a specific student for a specific term
+        const res = await axios.get(`${API_BASE_URL}/api/results`, {
+          headers: { Authorization: `Bearer ${token}` },
+          params: {
+            studentId: filters.resultStudent,
+            session: filters.reportSession,
+            term: filters.resultTerm,
+            limit: 1000
+          },
+          timeout: 15000,
+        });
+        
+        if (res.data && res.data.success) {
+          results = res.data.results || [];
+        }
       } else {
         setError('Please select valid filters for result export.');
         return;
       }
       
-      console.log('Exporting results from:', endpoint);
-      
-      const res = await axios.get(endpoint, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 15000,
-      });
-      
-      if (!res.data) {
+      if (results.length === 0) {
         setError('No results found for the selected filters.');
         return;
       }
       
-      downloadCSV(res.data, filename);
-      setSuccess('Results exported successfully.');
+      // Format results for CSV
+      const csvData = results.map(result => ({
+        Student: result.userId?.name || 'N/A',
+        'Student ID': result.userId?.studentId || 'N/A',
+        Class: result.class?.name || result.class || 'N/A',
+        Subject: result.subject || 'N/A',
+        Test: result.testId?.title || 'N/A',
+        Score: result.score || 0,
+        'Total Marks': result.totalMarks || 0,
+        Percentage: result.percentage || 0,
+        Grade: result.grade || 'N/A',
+        Session: result.session || 'N/A',
+        Term: result.term || 'N/A',
+        'Submitted At': result.submittedAt ? new Date(result.submittedAt).toLocaleString() : 'N/A'
+      }));
+      
+      const csv = Papa.unparse(csvData);
+      downloadCSV(csv, `results_${filters.resultType}_${filters.resultClass || filters.resultStudent}_${filters.resultTerm || 'all'}_${new Date().getTime()}.csv`);
+      setSuccess(`Exported ${results.length} results successfully.`);
       setError(null);
     } catch (err) {
       console.error('Error exporting results:', err);
-      const errorMessage = err.response?.data?.error || 'Failed to export results. Please check your filters and try again.';
+      setError(err.response?.data?.error || 'Failed to export results. Please check your filters and try again.');
+      setSuccess(null);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // FIXED REPORT CARD EXPORT FUNCTION
+  const exportReportCard = async () => {
+    setExporting(true);
+    try {
+      if (!filters.reportStudent || !filters.reportSession) {
+        setError('Please select a student and session for report card export.');
+        return;
+      }
+      
+      const token = localStorage.getItem('token');
+      if (!token) throw new Error('No authentication token found.');
+      
+      // Parse the combined session (e.g., "2025/2026 First Term")
+      const sessionParts = filters.reportSession.split(' ');
+      const sessionName = sessionParts.slice(0, -2).join(' '); // Get "2025/2026"
+      const term = sessionParts.slice(-2).join(' '); // Get "First Term"
+      
+      // Use the correct endpoint with query parameters
+      const endpoint = `${API_BASE_URL}/api/reports/export/report/${filters.reportStudent}/${encodeURIComponent(sessionName)}?term=${encodeURIComponent(term)}`;
+      
+      console.log('📤 Exporting report card from:', endpoint);
+      console.log('📋 Details:', {
+        studentId: filters.reportStudent,
+        session: sessionName,
+        term: term,
+        fullEndpoint: endpoint
+      });
+      
+      const res = await axios.get(endpoint, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob',
+        timeout: 30000,
+      });
+      
+      // Check if response is PDF
+      if (res.headers['content-type'] !== 'application/pdf') {
+        console.error('Response is not PDF:', res.headers['content-type']);
+        throw new Error('Server returned non-PDF response');
+      }
+      
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url;
+      const filename = `report_${filters.reportStudent}_${sessionName.replace(/\//g, '_')}_${term.replace(/\s/g, '_')}.pdf`;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+      setSuccess('Report card exported successfully.');
+      setError(null);
+    } catch (err) {
+      console.error('❌ Error exporting report card:', err);
+      let errorMessage = 'Failed to export report card.';
+      
+      if (err.response) {
+        console.error('Response details:', {
+          status: err.response.status,
+          statusText: err.response.statusText,
+          headers: err.response.headers,
+          data: err.response.data
+        });
+        
+        if (err.response.status === 404) {
+          errorMessage = 'No results found for the selected student and session.';
+        } else if (err.response.status === 400) {
+          errorMessage = 'Invalid student ID or session format.';
+        } else if (err.response.status === 500) {
+          errorMessage = 'Server error generating report card.';
+        }
+        
+        // Try to extract error message from response data
+        if (err.response.data) {
+          try {
+            if (err.response.data instanceof Blob) {
+              const blobText = await err.response.data.text();
+              const errorData = JSON.parse(blobText);
+              errorMessage = errorData.error || errorData.message || errorMessage;
+            } else if (typeof err.response.data === 'string') {
+              errorMessage = err.response.data;
+            } else if (err.response.data.error) {
+              errorMessage = err.response.data.error;
+            }
+          } catch (parseError) {
+            console.error('Failed to parse error response:', parseError);
+          }
+        }
+      } else if (err.request) {
+        errorMessage = 'No response received from server. Please check your connection.';
+      } else {
+        errorMessage = `Request error: ${err.message}`;
+      }
+      
       setError(errorMessage);
       setSuccess(null);
     } finally {
@@ -671,22 +758,27 @@ const DataExports = () => {
     }
   };
 
-  const exportReportCard = async () => {
+  // Alternative report card export using results.js endpoint
+  const exportReportCardAlt = async () => {
     setExporting(true);
     try {
-      if (!filters.reportStudent || !filters.reportSession || !filters.reportTerm) {
-        setError('Please select a student, session, and term for report card export.');
+      if (!filters.reportStudent || !filters.reportSession) {
+        setError('Please select a student and session for report card export.');
         return;
       }
       
       const token = localStorage.getItem('token');
       if (!token) throw new Error('No authentication token found.');
       
-      const sanitizedSession = encodeURIComponent(filters.reportSession);
-      const sanitizedTerm = encodeURIComponent(filters.reportTerm);
-      const endpoint = `${API_BASE_URL}/api/reports/export/report/${filters.reportStudent}/${sanitizedSession}/${sanitizedTerm}`;
+      // Parse the combined session
+      const sessionParts = filters.reportSession.split(' ');
+      const sessionName = sessionParts.slice(0, -2).join(' ');
+      const term = sessionParts.slice(-2).join(' ');
       
-      console.log('Exporting report card from:', endpoint);
+      // Alternative endpoint from results.js
+      const endpoint = `${API_BASE_URL}/api/results/export/report/${filters.reportStudent}/${encodeURIComponent(sessionName)}/${encodeURIComponent(term)}`;
+      
+      console.log('📤 Exporting report card (alternative) from:', endpoint);
       
       const res = await axios.get(endpoint, {
         headers: { Authorization: `Bearer ${token}` },
@@ -697,30 +789,122 @@ const DataExports = () => {
       const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `report_${filters.reportStudent}_${sanitizedSession.replace(/[/\s]/g, '_')}_${sanitizedTerm.replace(/\s/g, '_')}.pdf`);
+      const filename = `report_alt_${filters.reportStudent}_${sessionName.replace(/\//g, '_')}_${term.replace(/\s/g, '_')}.pdf`;
+      link.setAttribute('download', filename);
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
       
-      setSuccess('Report card exported successfully.');
+      setSuccess('Report card exported successfully (alternative endpoint).');
       setError(null);
     } catch (err) {
-      console.error('Error exporting report card:', err);
-      let errorMessage = 'Failed to export report card.';
-      if (err.response) {
-        if (err.response.status === 404) {
-          errorMessage = 'No results found for the selected student, session, and term.';
-        } else if (err.response.status === 400) {
-          errorMessage = 'Invalid student ID, session, or term format.';
-        } else if (err.response.data?.error) {
-          errorMessage = err.response.data.error;
-        }
-      }
-      setError(errorMessage);
-      setSuccess(null);
+      console.error('Error exporting report card (alternative):', err);
+      setError('Failed to export report card using alternative endpoint.');
     } finally {
       setExporting(false);
+    }
+  };
+
+  // Helper function to fetch results by class and term
+  const exportClassResultsByTerm = async (className, term, session) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) throw new Error('No authentication token found.');
+      
+      const classObj = classes.find(c => c.name === className);
+      if (!classObj) {
+        setError('Class not found.');
+        return [];
+      }
+      
+      const params = {
+        class: classObj._id,
+        term: term,
+        limit: 1000
+      };
+      
+      if (session) {
+        params.session = session;
+      }
+      
+      const res = await axios.get(`${API_BASE_URL}/api/results`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: params,
+        timeout: 15000,
+      });
+      
+      if (res.data && res.data.success) {
+        return res.data.results || [];
+      }
+      
+      return [];
+    } catch (err) {
+      console.error('Error fetching class results:', err);
+      throw err;
+    }
+  };
+
+  // Function for quick term exports
+  const handleQuickTermExport = async (term) => {
+    if (!filters.resultClass) {
+      setError('Please select a class first.');
+      return;
+    }
+    
+    setExporting(true);
+    try {
+      const results = await exportClassResultsByTerm(filters.resultClass, term, filters.reportSession);
+      if (results.length > 0) {
+        const csvData = results.map(result => ({
+          Student: result.userId?.name || 'N/A',
+          'Student ID': result.userId?.studentId || 'N/A',
+          Class: result.class?.name || result.class || 'N/A',
+          Subject: result.subject || 'N/A',
+          Score: result.score || 0,
+          'Total Marks': result.totalMarks || 0,
+          Percentage: result.percentage || 0,
+          Grade: result.grade || 'N/A',
+          Term: result.term || 'N/A',
+          Session: result.session || 'N/A'
+        }));
+        
+        const csv = Papa.unparse(csvData);
+        downloadCSV(csv, `results_${filters.resultClass}_${term.replace(/\s/g, '_')}_${new Date().getTime()}.csv`);
+        setSuccess(`Exported ${results.length} results for ${term}`);
+        setError(null);
+      } else {
+        setError(`No results found for ${term}`);
+      }
+    } catch (err) {
+      setError('Failed to export results');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Test endpoint function
+  const testEndpoint = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) throw new Error('No authentication token found.');
+      
+      // Test with a known working example
+      const testEndpoint = `${API_BASE_URL}/api/results/export/report/69340bb643e15fa3f5b42a6e/2025/2026/First Term`;
+      
+      console.log('Testing endpoint:', testEndpoint);
+      
+      const response = await axios.get(testEndpoint, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob',
+        timeout: 10000,
+      });
+      
+      console.log('✅ Endpoint works!', response.status);
+      setSuccess('Endpoint test successful!');
+    } catch (err) {
+      console.log('❌ Endpoint failed:', err.response?.status, err.message);
+      setError(`Endpoint test failed: ${err.message}`);
     }
   };
 
@@ -1205,6 +1389,33 @@ const DataExports = () => {
                               color: colors.gray700,
                               marginBottom: '0.25rem',
                             }}>
+                              Session
+                            </label>
+                            <select
+                              name="reportSession"
+                              value={filters.reportSession}
+                              onChange={handleFilterChange}
+                              style={inputStyle}
+                            >
+                              <option value="">All Sessions</option>
+                              {sessions.length > 0 ? (
+                                sessions.map((session, index) => (
+                                  <option key={index} value={session}>{session}</option>
+                                ))
+                              ) : (
+                                <option value="" disabled>No sessions available</option>
+                              )}
+                            </select>
+                          </div>
+                          
+                          <div>
+                            <label style={{
+                              display: 'block',
+                              fontSize: '0.875rem',
+                              fontWeight: '500',
+                              color: colors.gray700,
+                              marginBottom: '0.25rem',
+                            }}>
                               Term
                             </label>
                             <select
@@ -1219,6 +1430,45 @@ const DataExports = () => {
                               ))}
                             </select>
                           </div>
+                          
+                          {/* Quick Term Export Buttons */}
+                          {filters.resultClass && (
+                            <div>
+                              <label style={{
+                                display: 'block',
+                                fontSize: '0.875rem',
+                                fontWeight: '500',
+                                color: colors.gray700,
+                                marginBottom: '0.25rem',
+                              }}>
+                                Quick Export by Term
+                              </label>
+                              <div style={{
+                                display: 'flex',
+                                gap: '0.5rem',
+                                flexWrap: 'wrap'
+                              }}>
+                                {terms.map(term => (
+                                  <button
+                                    key={term}
+                                    onClick={() => handleQuickTermExport(term)}
+                                    disabled={exporting}
+                                    style={{
+                                      padding: '0.5rem 1rem',
+                                      border: `1px solid ${colors.gray300}`,
+                                      background: colors.white,
+                                      borderRadius: '6px',
+                                      cursor: exporting ? 'not-allowed' : 'pointer',
+                                      fontSize: '0.875rem',
+                                      opacity: exporting ? 0.6 : 1
+                                    }}
+                                  >
+                                    Export {term}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </>
                       )}
 
@@ -1270,8 +1520,8 @@ const DataExports = () => {
                             >
                               <option value="">Select Student</option>
                               {filters.resultClass ? (
-                                getFilteredStudentsForResults(filters.resultClass).length > 0 ? (
-                                  getFilteredStudentsForResults(filters.resultClass).map(user => (
+                                getFilteredStudentsByClass(filters.resultClass).length > 0 ? (
+                                  getFilteredStudentsByClass(filters.resultClass).map(user => (
                                     <option key={user._id} value={user._id}>
                                       {`${user.name || 'N/A'} ${user.surname || 'N/A'}`}
                                     </option>
@@ -1512,37 +1762,19 @@ const DataExports = () => {
                           style={inputStyle}
                         >
                           <option value="">Select Session</option>
-                          {sessions.length > 0 ? (
-                            sessions.map((session, index) => (
-                              <option key={index} value={session}>{session}</option>
+                          {combinedSessions.length > 0 ? (
+                            combinedSessions.map((session, index) => (
+                              <option key={index} value={session.value}>
+                                {session.label}
+                              </option>
                             ))
                           ) : (
                             <option value="" disabled>No sessions available</option>
                           )}
                         </select>
-                      </div>
-                      
-                      <div>
-                        <label style={{
-                          display: 'block',
-                          fontSize: '0.875rem',
-                          fontWeight: '500',
-                          color: colors.gray700,
-                          marginBottom: '0.25rem',
-                        }}>
-                          Term
-                        </label>
-                        <select
-                          name="reportTerm"
-                          value={filters.reportTerm}
-                          onChange={handleFilterChange}
-                          style={inputStyle}
-                        >
-                          <option value="">Select Term</option>
-                          {terms.map((term, index) => (
-                            <option key={index} value={term}>{term}</option>
-                          ))}
-                        </select>
+                        <p style={{ fontSize: '0.75rem', color: colors.gray500, marginTop: '0.25rem' }}>
+                          Format: "YYYY/YYYY First/Second/Third Term"
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -1560,9 +1792,59 @@ const DataExports = () => {
                         <p style={{ fontSize: '0.875rem', color: '#92400e' }}>
                           Report cards include academic performance, attendance, teacher comments, and official signatures.
                         </p>
+                        <p style={{ fontSize: '0.75rem', color: colors.gray600, marginTop: '0.25rem' }}>
+                          Note: The session field includes both session year and term (e.g., "2025/2026 First Term")
+                        </p>
                       </div>
                     </div>
                   </div>
+                  
+                  {/* Debug Section */}
+                  {(user?.role === 'admin' || user?.role === 'super_admin') && (
+                    <div style={{
+                      background: 'rgba(59, 130, 246, 0.1)',
+                      borderLeft: `4px solid ${colors.blue}`,
+                      padding: '1rem',
+                      borderRadius: '0 4px 4px 0',
+                      marginTop: '1rem',
+                    }}>
+                      <h4 style={{ fontSize: '0.875rem', fontWeight: '600', color: colors.blue, marginBottom: '0.5rem' }}>
+                        Admin Tools
+                      </h4>
+                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <button
+                          onClick={testEndpoint}
+                          style={{
+                            padding: '0.5rem 1rem',
+                            background: colors.blue,
+                            color: colors.white,
+                            border: 'none',
+                            borderRadius: '6px',
+                            fontSize: '0.75rem',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Test Endpoint
+                        </button>
+                        <button
+                          onClick={exportReportCardAlt}
+                          disabled={!filters.reportStudent || !filters.reportSession}
+                          style={{
+                            padding: '0.5rem 1rem',
+                            background: colors.green,
+                            color: colors.white,
+                            border: 'none',
+                            borderRadius: '6px',
+                            fontSize: '0.75rem',
+                            cursor: (!filters.reportStudent || !filters.reportSession) ? 'not-allowed' : 'pointer',
+                            opacity: (!filters.reportStudent || !filters.reportSession) ? 0.6 : 1,
+                          }}
+                        >
+                          Try Alternative Export
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 
                 <div>
@@ -1591,29 +1873,35 @@ const DataExports = () => {
                       ))}
                     </ul>
                     
-                    <button
-                      onClick={exportReportCard}
-                      disabled={exporting || !filters.reportStudent || !filters.reportSession || !filters.reportTerm}
-                      style={{
-                        ...buttonStyle('white', exporting || !filters.reportStudent || !filters.reportSession || !filters.reportTerm),
-                        width: '100%',
-                        color: colors.purple,
-                      }}
-                    >
-                      {exporting ? (
-                        <>
-                          <div style={{ animation: 'spin 1s linear infinite' }}>
-                            <LoaderIcon />
-                          </div>
-                          Generating...
-                        </>
-                      ) : (
-                        <>
-                          <DownloadIcon />
-                          Generate Report Card
-                        </>
-                      )}
-                    </button>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                      <button
+                        onClick={exportReportCard}
+                        disabled={exporting || !filters.reportStudent || !filters.reportSession}
+                        style={{
+                          ...buttonStyle('white', exporting || !filters.reportStudent || !filters.reportSession),
+                          width: '100%',
+                          color: colors.purple,
+                        }}
+                      >
+                        {exporting ? (
+                          <>
+                            <div style={{ animation: 'spin 1s linear infinite' }}>
+                              <LoaderIcon />
+                            </div>
+                            Generating Report Card...
+                          </>
+                        ) : (
+                          <>
+                            <DownloadIcon />
+                            Generate Report Card
+                          </>
+                        )}
+                      </button>
+                      
+                      <p style={{ fontSize: '0.75rem', opacity: 0.8, textAlign: 'center', marginTop: '0.5rem' }}>
+                        Generates a PDF report card for the selected student
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1829,102 +2117,76 @@ const DataExports = () => {
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
           gap: '1.5rem',
+          marginTop: '2rem',
         }}>
           <div style={{
-            background: colors.white,
+            background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.primaryDark} 100%)`,
             borderRadius: '12px',
             padding: '1.5rem',
-            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+            color: colors.white,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <div style={{
-                padding: '0.75rem',
-                background: 'rgba(59, 130, 246, 0.1)',
-                borderRadius: '8px',
-                marginRight: '1rem',
-              }}>
-                <UsersIcon style={{ color: colors.blue }} />
-              </div>
-              <div>
-                <p style={{ fontSize: '0.875rem', color: colors.gray600 }}>
-                  Total Students
-                </p>
-                <p style={{ fontSize: '1.5rem', fontWeight: '700', color: colors.gray900 }}>
-                  {users.filter(u => u.role === 'student').length}
-                </p>
-              </div>
-            </div>
+            <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '0.5rem' }}>
+              Total Students
+            </h3>
+            <p style={{ fontSize: '2rem', fontWeight: '700' }}>
+              {users.filter(u => u.role === 'student').length}
+            </p>
           </div>
           
           <div style={{
-            background: colors.white,
+            background: `linear-gradient(135deg, ${colors.blue} 0%, #2563eb 100%)`,
             borderRadius: '12px',
             padding: '1.5rem',
-            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+            color: colors.white,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <div style={{
-                padding: '0.75rem',
-                background: 'rgba(56, 161, 105, 0.1)',
-                borderRadius: '8px',
-                marginRight: '1rem',
-              }}>
-                <FileTextIcon style={{ color: colors.green }} />
-              </div>
-              <div>
-                <p style={{ fontSize: '0.875rem', color: colors.gray600 }}>
-                  Available Classes
-                </p>
-                <p style={{ fontSize: '1.5rem', fontWeight: '700', color: colors.gray900 }}>
-                  {classes.length}
-                </p>
-              </div>
-            </div>
+            <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '0.5rem' }}>
+              Total Classes
+            </h3>
+            <p style={{ fontSize: '2rem', fontWeight: '700' }}>
+              {classes.length}
+            </p>
           </div>
           
           <div style={{
-            background: colors.white,
+            background: `linear-gradient(135deg, ${colors.green} 0%, #059669 100%)`,
             borderRadius: '12px',
             padding: '1.5rem',
-            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+            color: colors.white,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <div style={{
-                padding: '0.75rem',
-                background: 'rgba(139, 92, 246, 0.1)',
-                borderRadius: '8px',
-                marginRight: '1rem',
-              }}>
-                <AwardIcon style={{ color: colors.purple }} />
-              </div>
-              <div>
-                <p style={{ fontSize: '0.875rem', color: colors.gray600 }}>
-                  Available Terms
-                </p>
-                <p style={{ fontSize: '1.5rem', fontWeight: '700', color: colors.gray900 }}>
-                  {terms.length}
-                </p>
-              </div>
-            </div>
+            <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '0.5rem' }}>
+              Active Sessions
+            </h3>
+            <p style={{ fontSize: '2rem', fontWeight: '700' }}>
+              {sessions.length}
+            </p>
           </div>
         </div>
       </div>
-      
-      {/* Add CSS animation for spinner */}
+
       <style>
         {`
           @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
           }
           
-          @media (min-width: 768px) {
-            .grid-md-2 {
-              grid-template-columns: repeat(2, 1fr);
-            }
-            .grid-md-3 {
-              grid-template-columns: repeat(3, 1fr);
-            }
+          select:focus, input:focus {
+            outline: none;
+            border-color: ${colors.primary};
+            box-shadow: 0 0 0 3px rgba(75, 83, 32, 0.1);
+          }
+          
+          button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+          }
+          
+          button:active:not(:disabled) {
+            transform: translateY(0);
+          }
+          
+          .file-upload:hover {
+            border-color: ${colors.primary};
           }
         `}
       </style>

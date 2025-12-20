@@ -31,6 +31,9 @@ const scheduleRoutes = require('./routes/scheduleRoutes');
 // TEACHER QUESTION ROUTES - CRITICAL: This must be mounted BEFORE other routes
 const teacherQuestionsRoutes = require('./routes/teacherQuestionsRoutes');
 
+// REPORT CARD ROUTE - FIXED: Changed from reportcards to reportcard
+const reportCardsRoutes = require('./routes/reportcard'); // CORRECTED
+
 const app = express();
 
 // Set timezone to West Africa Time
@@ -154,6 +157,10 @@ app.get('/', (req, res) => {
       questions: '/api/teacher/questions',
       bulkQuestions: '/api/teacher/questions/bulk',
       test: '/api/teacher/questions-test'
+    },
+    reportEndpoints: {
+      reports: '/api/reports/export/report/:studentId/:session',
+      results: '/api/results/export/report/:studentId/:session/:term'
     }
   });
 });
@@ -224,6 +231,7 @@ app.get('/api/debug-routes', (req, res) => {
     totalRoutes: routes.length,
     routes: routes.filter(r => r.path.includes('/api/')),
     teacherRoutes: routes.filter(r => r.path.includes('/api/teacher')),
+    reportRoutes: routes.filter(r => r.path.includes('/api/reports')),
     timestamp: new Date().toISOString()
   });
 });
@@ -293,6 +301,10 @@ app.get('/api/debug/user-info', auth, (req, res) => {
         schedule: '/api/teacher/schedule',
         questions: '/api/teacher/questions',
         bulkQuestions: '/api/teacher/questions/bulk'
+      },
+      reports: {
+        export: `/api/reports/export/report/:studentId/:session`,
+        results: `/api/results/export/report/:studentId/:session/:term`
       }
     }
   });
@@ -459,6 +471,7 @@ try {
   console.log('   ✅ analyticsRoutes:', !!analyticsRoutes);
   console.log('   ✅ testRoutes:', !!testRoutes);
   console.log('   ✅ teacherQuestionsRoutes:', !!teacherQuestionsRoutes);
+  console.log('   ✅ reportCardsRoutes:', !!reportCardsRoutes); // Added this line
 } catch (error) {
   console.log('❌ Error checking routes:', error.message);
 }
@@ -488,12 +501,15 @@ app.use('/api/promotion', promotionRoutes);
 app.use('/api/transcript', transcriptRoutes);
 app.use('/api/class-setup', classSetupRoutes);
 app.use('/api/class-subjects', classSubjectsRoutes);
+app.use('/api/reports', reportCardsRoutes); // ADD THIS LINE - Mount reportcard route
 
 console.log('✅ All routes mounted successfully');
 console.log('🎯 IMPORTANT: Teacher routes are now accessible at:');
 console.log('   📍 /api/teacher/questions-test');
 console.log('   📍 /api/teacher/questions');
 console.log('   📍 /api/teacher/questions/bulk');
+console.log('🎯 IMPORTANT: Report routes are now accessible at:');
+console.log('   📍 /api/reports/export/report/:studentId/:session');
 
 // ================================
 // TEMPORARY SUBJECTS ROUTE FOR TESTING
@@ -574,6 +590,10 @@ app.get('/api/test', (req, res) => {
       simpleTest: '/api/teacher/questions/simple-test (POST)',
       questions: '/api/teacher/questions',
       bulkQuestions: '/api/teacher/questions/bulk'
+    },
+    reportEndpoints: {
+      reports: '/api/reports/export/report/:studentId/:session?term=First Term',
+      results: '/api/results/export/report/:studentId/:session/:term'
     }
   });
 });
@@ -599,6 +619,13 @@ app.get('/api/health', (req, res) => {
           '/api/teacher/questions',
           '/api/teacher/questions/bulk',
           '/api/teacher/questions/simple-test'
+        ]
+      },
+      reportRoutes: {
+        working: true,
+        endpoints: [
+          '/api/reports/export/report/:studentId/:session',
+          '/api/results/export/report/:studentId/:session/:term'
         ]
       }
     };
@@ -751,6 +778,10 @@ app.use('/api/*', (req, res) => {
         '/api/teacher/questions',
         '/api/teacher/questions/bulk',
         '/api/teacher/questions/simple-test (POST)'
+      ],
+      reports: [
+        '/api/reports/export/report/:studentId/:session',
+        '/api/results/export/report/:studentId/:session/:term'
       ],
       auth: '/api/auth/*',
       users: '/api/users/*',
@@ -927,12 +958,17 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`   📍 Teacher Simple Test (POST): http://localhost:${PORT}/api/teacher/questions/simple-test`);
   console.log(`   📍 Teacher Classes: http://localhost:${PORT}/api/users/teachers/6931b8ec77ceafcb4e65b2f9/classes`);
   console.log(`   📍 Teacher Assignments: http://localhost:${PORT}/api/users/teachers/6931b8ec77ceafcb4e65b2f9/assignments`);
+  console.log('');
+  console.log('📊 REPORT ENDPOINTS:');
+  console.log(`   📍 Reports Export: http://localhost:${PORT}/api/reports/export/report/:studentId/:session`);
+  console.log(`   📍 Results Export: http://localhost:${PORT}/api/results/export/report/:studentId/:session/:term`);
   console.log('🎉 ================================');
   console.log('');
   console.log('⚠️  IMPORTANT: Test endpoints in this order:');
   console.log(`   1. 📍 http://localhost:${PORT}/api/teacher/questions-test`);
   console.log(`   2. 📍 http://localhost:${PORT}/api/debug-teacher-routes`);
   console.log(`   3. Use POST to: http://localhost:${PORT}/api/teacher/questions/simple-test`);
+  console.log(`   4. Test reports: http://localhost:${PORT}/api/reports/export/report/69340bb643e15fa3f5b42a6e/2025/2026?term=First Term`);
   console.log('🎉 ================================');
 });
 

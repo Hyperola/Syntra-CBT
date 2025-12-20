@@ -47,7 +47,7 @@ const AdminLayout = ({ children }) => {
             />
             <div>
               <h1 style={styles.headerTitle}>
-                Sanniville Academy
+                Syntra
                 <span style={styles.headerSubtitle}>
                   Empowering Education Through Seamless Administration
                   {user.role === 'super_admin' && ' (Super Admin)'}
@@ -106,7 +106,7 @@ const AdminLayout = ({ children }) => {
 
       <footer style={styles.footer}>
         <p style={styles.footerText}>
-          © {new Date().getFullYear()} Sanniville Academy. All rights reserved.
+          © {new Date().getFullYear()} Syntra Software Solution. All rights reserved.
         </p>
       </footer>
     </div>

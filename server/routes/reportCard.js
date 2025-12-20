@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Result = require('../models/Result');
 const User = require('../models/User');
+const Class = require('../models/Class');
 const Signature = require('../models/Signature');
 const { auth, adminOnly } = require('../middleware/auth');
 const PDFDocument = require('pdfkit');
@@ -34,7 +35,7 @@ const LAYOUT = {
   tableRowHeight: 22,
   headerHeight: 100,
   footerHeight: 20,
-  maxTableY: 700, // Trigger page break
+  maxTableY: 700,
 };
 
 const getGradeInfo = percentage => {
@@ -55,7 +56,6 @@ const addWatermark = doc => {
        .image(watermarkImage, doc.page.width / 2 - 150, doc.page.height / 2 - 150, { width: 300, height: 300 })
        .restore();
   } else {
-    console.warn('ReportCard - Watermark image not found:', watermarkImage);
     doc.save()
        .opacity(0.05)
        .font(TYPOGRAPHY.fonts.heading)
@@ -67,7 +67,7 @@ const addWatermark = doc => {
   }
 };
 
-const addHeader = (doc, session) => {
+const addHeader = (doc, session, term) => {
   const logoSize = 50;
   const watermarkImage = path.join(__dirname, '../../public/images/sanniville-logo.png');
   doc.rect(0, 0, doc.page.width, LAYOUT.headerHeight).fill(COLORS.primary);
@@ -76,7 +76,6 @@ const addHeader = (doc, session) => {
   if (fs.existsSync(watermarkImage)) {
     doc.image(watermarkImage, logoX, logoY, { width: logoSize, height: logoSize });
   } else {
-    console.warn('ReportCard - Header logo not found:', watermarkImage);
     doc.rect(logoX, logoY, logoSize, logoSize)
        .fillAndStroke(COLORS.background, COLORS.secondary)
        .lineWidth(1);
@@ -96,7 +95,14 @@ const addHeader = (doc, session) => {
      .text('TERM REPORT CARD', LAYOUT.margin, logoY + 50, { width: doc.page.width - (LAYOUT.margin * 2), align: 'center' })
      .font(TYPOGRAPHY.fonts.body)
      .fontSize(TYPOGRAPHY.sizes.small)
-     .text(`Session: ${session}`, LAYOUT.margin, logoY + 75, { width: doc.page.width - (LAYOUT.margin * 2), align: 'center' });
+     .text(`Session: ${session}`, LAYOUT.margin, logoY + 70, { width: doc.page.width - (LAYOUT.margin * 2), align: 'center' });
+  
+  if (term) {
+    doc.font(TYPOGRAPHY.fonts.body)
+       .fontSize(TYPOGRAPHY.sizes.small)
+       .text(`Term: ${term.charAt(0).toUpperCase() + term.slice(1)}`, LAYOUT.margin, logoY + 85, { width: doc.page.width - (LAYOUT.margin * 2), align: 'center' });
+  }
+  
   return LAYOUT.headerHeight + LAYOUT.sectionGap;
 };
 
@@ -236,7 +242,7 @@ const addSummary = (doc, y, reportData, average, results) => {
        .text(item.value, col2, itemY, { width: 200 });
   });
   const commentY = contentY + (summary.length * 12) + 10;
-  const teacherComment = results[0]?.remarks || 'Good effort. Focus on weaker subjects to improve.'; // TODO: Aggregate remarks
+  const teacherComment = results[0]?.remarks || 'Good effort. Focus on weaker subjects to improve.';
   const principalComment = averageNum >= 80 ? 'Excellent performance. Keep it up!' :
                           averageNum >= 60 ? 'Good progress. Aim higher.' :
                           averageNum >= 50 ? 'Pass. More effort needed.' :
@@ -296,89 +302,94 @@ const addFooter = doc => {
            LAYOUT.margin, footerY + 6, { width: doc.page.width - (LAYOUT.margin * 2), align: 'center' });
 };
 
-router.post('/signatures', auth, adminOnly, async (req, res) => {
+// Main report card endpoint with term parameter
+router.get('/export/report/:studentId/:session', auth, async (req, res) => {
   try {
-    console.log('POST /api/reports/signatures - Request:', { body: req.body, user: req.user.username });
-    const { className, teacherSignature, principalSignature } = req.body;
-    if (!className && !principalSignature) {
-      return res.status(400).json({ error: 'Class name or principal signature required' });
-    }
-    // TODO: Validate file types (e.g., PNG/JPG) and sizes
-    const signature = await Signature.findOneAndUpdate(
-      { class: className || 'global' },
-      {
-        class: className || 'global',
-        teacherSignature,
-        principalSignature,
-        updatedBy: req.user.userId,
-        updatedAt: new Date(),
-      },
-      { upsert: true, new: true }
-    );
-    res.status(201).json({ message: 'Signatures updated', signature });
-  } catch (error) {
-    console.error('POST /api/reports/signatures - Error:', { message: error.message, stack: error.stack });
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-router.get('/export/report/:studentId/:sessionName', auth, async (req, res) => {
-  try {
-    console.log('GET /api/reports/export/report/:studentId/:sessionName - Request:', {
+    console.log('GET /api/reports/export/report/:studentId/:session - Request:', {
       params: req.params,
+      query: req.query,
       user: req.user.username,
-      timestamp: new Date().toLocaleString('en-GB', { timeZone: 'Africa/Lagos' })
+      timestamp: new Date().toISOString()
     });
-    const { studentId, sessionName } = req.params;
+    
+    const { studentId, session: sessionName } = req.params;
+    const { term } = req.query;
+    
+    // Validate student ID
     if (!mongoose.isValidObjectId(studentId)) {
-      console.log('GET /api/reports/export/report/:studentId/:sessionName - Invalid student ID:', { studentId });
       return res.status(400).json({ error: 'Invalid student ID' });
     }
-    const normalizedSession = decodeURIComponent(sessionName)
-      .replace(/[-:]/g, '/')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (!normalizedSession.match(/^\d{4}\/\d{4} (First|Second|Third) Term$/)) {
-      console.log('GET /api/reports/export/report/:studentId/:sessionName - Invalid session format:', { sessionName });
-      return res.status(400).json({ error: 'Invalid session format. Use YYYY/YYYY First/Second/Third Term' });
-    }
-    const student = await User.findById(studentId).lean();
-    if (!student) {
-      console.log('GET /api/reports/export/report/:studentId/:sessionName - Student not found:', { studentId });
-      return res.status(404).json({ error: 'Student not found' });
-    }
-    const sessionExists = await Result.findOne({ session: normalizedSession });
-    if (!sessionExists) {
-      console.log('GET /api/reports/export/report/:studentId/:sessionName - Session not found:', { sessionName: normalizedSession });
-      return res.status(404).json({ error: `Session "${normalizedSession}" not found` });
-    }
-    let query = { userId: studentId, session: normalizedSession };
-    if (req.user.role === 'teacher') {
-      const subjects = req.user.subjects.map(sub => sub.subject);
-      const classes = req.user.subjects.map(sub => sub.class);
-      query = { ...query, subject: { $in: subjects }, class: { $in: classes } };
-    } else if (req.user.role !== 'admin') {
-      console.log('GET /api/reports/export/report/:studentId/:sessionName - Unauthorized access:', { userId: req.user.userId });
-      return res.status(403).json({ error: 'Unauthorized access' });
-    }
-    const results = await Result.find(query)
-      .populate('testId', 'title subject class type totalScore')
-      .populate('userId', 'name surname class picture dateOfBirth sex age')
-      .lean();
-    if (!results.length) {
-      console.log('GET /api/reports/export/report/:studentId/:sessionName - No results found:', { studentId, sessionName: normalizedSession });
-      return res.status(404).json({
-        error: `No results found for ${student.name} ${student.surname} (${student.class}) in session ${normalizedSession}`,
+    
+    // Validate session format
+    if (!sessionName.match(/^\d{4}\/\d{4}$/)) {
+      return res.status(400).json({ 
+        error: 'Invalid session format. Use YYYY/YYYY format (e.g., 2025/2026)' 
       });
     }
+    
+    // Use provided term or default to First Term
+    const termName = term || 'First Term';
+    const fullSession = `${sessionName} ${termName}`;
+    
+    console.log('🔍 Report card request details:', {
+      studentId,
+      session: sessionName,
+      term: termName,
+      fullSession,
+      user: req.user.username
+    });
+    
+    // Get student with class populated
+    const student = await User.findById(studentId)
+      .populate('class', 'name level')
+      .populate('enrolledSubjects.subject', 'name')
+      .populate('enrolledSubjects.class', 'name')
+      .lean();
+    
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+    
+    // Check permissions
+    if (req.user.role === 'student' && req.user._id.toString() !== studentId) {
+      return res.status(403).json({ error: 'Students can only view their own report cards' });
+    }
+    
+    // Query results
+    const query = {
+      userId: studentId,
+      session: fullSession,
+      isActive: true
+    };
+    
+    console.log('🔍 Querying results with:', query);
+    
+    const results = await Result.find(query)
+      .populate('testId', 'title type subject totalMarks')
+      .populate('class', 'name')
+      .sort({ subject: 1, submittedAt: -1 })
+      .lean();
+    
+    if (results.length === 0) {
+      return res.status(404).json({ 
+        error: `No results found for ${student.name || 'Student'} in ${fullSession}` 
+      });
+    }
+    
+    console.log('✅ Found results:', results.length);
+    
+    // Process results
     const reportData = results.reduce((acc, result) => {
       const subject = result.subject || result.testId?.subject || 'Unknown Subject';
       const type = result.testId?.type || 'test';
+      
       if (!acc.subjects[subject]) {
         acc.subjects[subject] = { firstCA: 0, secondCA: 0, exam: 0, total: 0, totalPossible: 100 };
         acc.numSubjects += 1;
       }
+      
       const score = Math.min(result.score || 0, 100);
+      
       if (type === 'test' || type === 'midterm' || type === 'revision') {
         if (!acc.subjects[subject].firstCA) {
           acc.subjects[subject].firstCA = Math.min(score, 20);
@@ -388,16 +399,20 @@ router.get('/export/report/:studentId/:sessionName', auth, async (req, res) => {
       } else if (type === 'examination') {
         acc.subjects[subject].exam = Math.min(score, 60);
       }
+      
       acc.subjects[subject].total = acc.subjects[subject].firstCA + acc.subjects[subject].secondCA + acc.subjects[subject].exam;
       acc.totalScore += acc.subjects[subject].total;
       acc.totalPossible += 100;
+      
       if (acc.subjects[subject].total >= 50) acc.numPasses += 1;
       else acc.numFailures += 1;
+      
       return acc;
     }, {
       student: `${student.name || ''} ${student.surname || ''}`.trim() || 'Unknown Student',
-      class: student.class || 'N/A',
-      session: normalizedSession,
+      class: student.class?.name || 'N/A',
+      session: fullSession,
+      term: termName,
       subjects: {},
       totalScore: 0,
       totalPossible: 0,
@@ -405,62 +420,131 @@ router.get('/export/report/:studentId/:sessionName', auth, async (req, res) => {
       numPasses: 0,
       numFailures: 0,
     });
-    const classResults = await Result.find({ class: reportData.class, session: normalizedSession })
+    
+    // Get class results for position calculation
+    const classQuery = { 
+      session: fullSession,
+      isActive: true 
+    };
+    
+    // Get student's class ID
+    const studentClassId = student.class?._id || student.class;
+    if (studentClassId) {
+      classQuery.class = studentClassId;
+    }
+    
+    const classResults = await Result.find(classQuery)
       .populate('userId', 'name surname')
       .lean();
-    const classScores = classResults.reduce((acc, r) => {
+    
+    // Calculate position
+    const classScores = {};
+    classResults.forEach(r => {
       const studentKey = r.userId?._id.toString();
-      if (!acc[studentKey]) acc[studentKey] = { totalScore: 0, totalPossible: 0 };
-      acc[studentKey].totalScore += r.score || 0;
-      acc[studentKey].totalPossible += r.testId?.totalScore || 100;
-      return acc;
-    }, {});
+      if (!classScores[studentKey]) {
+        classScores[studentKey] = { totalScore: 0, totalPossible: 0 };
+      }
+      classScores[studentKey].totalScore += r.score || 0;
+      classScores[studentKey].totalPossible += r.totalMarks || 100;
+    });
+    
     const students = Object.keys(classScores).map(id => ({
       id,
-      average: classScores[id].totalPossible > 0 ? (classScores[id].totalScore / classScores[id].totalPossible) * 100 : 0,
+      average: classScores[id].totalPossible > 0 ? 
+        (classScores[id].totalScore / classScores[id].totalPossible) * 100 : 0,
     }));
+    
     students.sort((a, b) => b.average - a.average);
     const position = students.findIndex(s => s.id === studentId) + 1;
     const classSize = students.length;
-    const average = reportData.totalPossible > 0 ? (reportData.totalScore / reportData.totalPossible * 100).toFixed(1) : 0;
-    const attendance = { totalDays: 90, present: 85, absent: 5 }; // TODO: Replace with dynamic data
+    const average = reportData.totalPossible > 0 ? 
+      (reportData.totalScore / reportData.totalPossible * 100).toFixed(1) : 0;
+    
+    // Mock attendance data (replace with actual data)
+    const attendance = { totalDays: 90, present: 85, absent: 5 };
+    
+    // Generate PDF
     const doc = new PDFDocument({
       size: 'A4',
       margin: LAYOUT.margin,
       info: {
         Title: `Report Card - ${reportData.student}`,
         Author: 'Sanniville Academy',
-        Subject: `Academic Report - ${normalizedSession}`,
+        Subject: `Academic Report - ${fullSession}`,
       },
     });
+    
+    // Set response headers
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=report_${studentId}_${normalizedSession.replace(/[/\s]/g, '-')}.pdf`);
+    const filename = `report_${studentId}_${sessionName.replace(/\//g, '_')}_${termName.replace(/\s/g, '_')}.pdf`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    
     doc.pipe(res);
+    
+    // Add content to PDF
     addWatermark(doc);
-    let currentY = addHeader(doc, normalizedSession);
+    let currentY = addHeader(doc, sessionName, termName);
     currentY = addStudentInfo(doc, currentY, student, reportData, position, classSize, attendance);
     currentY = addPerformanceTable(doc, currentY, reportData);
     currentY = addSummary(doc, currentY, reportData, average, results);
-    currentY = await addSignatures(doc, currentY, student.class);
+    currentY = await addSignatures(doc, currentY, student.class?.name);
     addFooter(doc);
+    
     doc.end();
-    console.log('GET /api/reports/export/report/:studentId/:sessionName - Generated:', {
+    
+    console.log('✅ Report card generated successfully:', {
       studentId,
-      session: normalizedSession,
-      student: reportData.student,
-      timestamp: new Date().toLocaleString('en-GB', { timeZone: 'Africa/Lagos' })
+      session: fullSession,
+      filename
     });
+    
   } catch (error) {
-    console.error('GET /api/reports/export/report/:studentId/:sessionName - Error:', {
+    console.error('❌ Report card generation error:', {
       message: error.message,
       stack: error.stack,
       params: req.params,
-      user: req.user.username,
-      timestamp: new Date().toLocaleString('en-GB', { timeZone: 'Africa/Lagos' })
+      query: req.query,
+      user: req.user?.username
     });
+    
     if (!res.headersSent) {
-      res.status(500).json({ error: 'Server error', details: error.message });
+      res.status(500).json({ 
+        error: 'Failed to generate report card',
+        details: error.message 
+      });
     }
+  }
+});
+
+// Alternative endpoint with combined session/term parameter
+router.get('/export/report/combined/:studentId/:fullSession', auth, async (req, res) => {
+  try {
+    const { studentId, fullSession } = req.params;
+    
+    console.log('GET /api/reports/export/report/combined/:studentId/:fullSession - Request:', {
+      studentId,
+      fullSession,
+      user: req.user.username
+    });
+    
+    // Parse session and term from fullSession (format: "2025/2026 First Term")
+    const sessionMatch = fullSession.match(/^(\d{4}\/\d{4})\s+(First|Second|Third) Term$/);
+    
+    if (!sessionMatch) {
+      return res.status(400).json({ 
+        error: 'Invalid session format. Use "YYYY/YYYY First/Second/Third Term" format' 
+      });
+    }
+    
+    const sessionName = sessionMatch[1];
+    const termName = `${sessionMatch[2]} Term`;
+    
+    // Redirect to main endpoint
+    return res.redirect(`/api/reports/export/report/${studentId}/${sessionName}?term=${encodeURIComponent(termName)}`);
+    
+  } catch (error) {
+    console.error('Combined endpoint error:', error);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 

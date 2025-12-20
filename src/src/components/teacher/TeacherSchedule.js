@@ -1,6 +1,5 @@
 // components/teacher/TeacherSchedule.js
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
 import { 
   FiCalendar, 
   FiClock, 
@@ -20,7 +19,7 @@ import {
 
 const TeacherSchedule = () => {
   const [schedule, setSchedule] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [viewMode, setViewMode] = useState('week');
   const [showModal, setShowModal] = useState(false);
@@ -64,6 +63,25 @@ const TeacherSchedule = () => {
 
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+  // Get teacher ID for local storage key
+  const getTeacherId = () => {
+    try {
+      const userStr = localStorage.getItem('user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        return user.id || user._id || 'default-teacher';
+      }
+    } catch (err) {
+      console.error('Error getting teacher ID:', err);
+    }
+    return 'default-teacher';
+  };
+
+  const getStorageKey = () => {
+    const teacherId = getTeacherId();
+    return `teacher_schedule_${teacherId}`;
+  };
+
   useEffect(() => {
     fetchSchedule();
   }, []);
@@ -71,68 +89,81 @@ const TeacherSchedule = () => {
   const fetchSchedule = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
-      const response = await axios.get('/api/teacher/schedule', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const storageKey = getStorageKey();
+      const savedSchedule = localStorage.getItem(storageKey);
       
-      if (response.data.success) {
-        setSchedule(response.data.schedule || []);
+      if (savedSchedule) {
+        const parsedSchedule = JSON.parse(savedSchedule);
+        setSchedule(parsedSchedule);
+        console.log('✅ Loaded schedule from localStorage:', parsedSchedule);
       } else {
-        throw new Error(response.data.message || 'Failed to load schedule');
+        // Load default mock data for first-time users
+        const defaultSchedule = [
+          {
+            id: '1',
+            title: 'Mathematics - JSS2',
+            day: 'Monday',
+            startTime: '09:00',
+            endTime: '10:30',
+            type: 'lecture',
+            location: 'Room 201',
+            classId: 'JSS2',
+            description: 'Algebra basics'
+          },
+          {
+            id: '2',
+            title: 'English - JSS2',
+            day: 'Monday',
+            startTime: '11:00',
+            endTime: '12:30',
+            type: 'lecture',
+            location: 'Room 105',
+            classId: 'JSS2',
+            description: 'Grammar and composition'
+          },
+          {
+            id: '3',
+            title: 'Staff Meeting',
+            day: 'Tuesday',
+            startTime: '14:00',
+            endTime: '15:30',
+            type: 'meeting',
+            location: 'Conference Room',
+            description: 'Weekly staff meeting'
+          },
+          {
+            id: '4',
+            title: 'Science Lab',
+            day: 'Wednesday',
+            startTime: '10:00',
+            endTime: '12:00',
+            type: 'lab',
+            location: 'Science Lab',
+            classId: 'JSS2',
+            description: 'Chemistry experiments'
+          }
+        ];
+        
+        setSchedule(defaultSchedule);
+        saveScheduleToStorage(defaultSchedule);
+        console.log('✅ Created default schedule');
       }
     } catch (err) {
-      console.error('Error fetching schedule:', err);
-      setError(err.message);
-      
-      // Fallback mock data
-      setSchedule([
-        {
-          id: '1',
-          title: 'Mathematics - JSS2',
-          day: 'Monday',
-          startTime: '09:00',
-          endTime: '10:30',
-          type: 'lecture',
-          location: 'Room 201',
-          classId: 'JSS2',
-          description: 'Algebra basics'
-        },
-        {
-          id: '2',
-          title: 'English - JSS2',
-          day: 'Monday',
-          startTime: '11:00',
-          endTime: '12:30',
-          type: 'lecture',
-          location: 'Room 105',
-          classId: 'JSS2',
-          description: 'Grammar and composition'
-        },
-        {
-          id: '3',
-          title: 'Staff Meeting',
-          day: 'Tuesday',
-          startTime: '14:00',
-          endTime: '15:30',
-          type: 'meeting',
-          location: 'Conference Room',
-          description: 'Weekly staff meeting'
-        },
-        {
-          id: '4',
-          title: 'Science Lab',
-          day: 'Wednesday',
-          startTime: '10:00',
-          endTime: '12:00',
-          type: 'lab',
-          location: 'Science Lab',
-          classId: 'JSS2',
-          description: 'Chemistry experiments'
-        }
-      ]);
+      console.error('Error loading schedule:', err);
+      setError('Failed to load schedule from local storage');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const saveScheduleToStorage = (scheduleData) => {
+    try {
+      const storageKey = getStorageKey();
+      localStorage.setItem(storageKey, JSON.stringify(scheduleData));
+      console.log('💾 Saved schedule to localStorage:', scheduleData);
+    } catch (err) {
+      console.error('Error saving to localStorage:', err);
+      throw new Error('Failed to save schedule');
     }
   };
 
@@ -145,32 +176,35 @@ const TeacherSchedule = () => {
     e.preventDefault();
     
     try {
-      const token = localStorage.getItem('token');
       const eventData = {
         ...formData,
-        id: editingEvent ? editingEvent.id : Date.now().toString()
+        id: editingEvent ? editingEvent.id : Date.now().toString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       };
 
-      let response;
+      let updatedSchedule;
       if (editingEvent) {
-        response = await axios.put(`/api/teacher/schedule/${editingEvent.id}`, eventData, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        setSchedule(prev => prev.map(event => 
+        // Update existing event
+        updatedSchedule = schedule.map(event => 
           event.id === editingEvent.id ? eventData : event
-        ));
+        );
+        console.log('✏️ Updated event:', eventData);
       } else {
-        response = await axios.post('/api/teacher/schedule', eventData, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        setSchedule(prev => [...prev, eventData]);
+        // Add new event
+        updatedSchedule = [...schedule, eventData];
+        console.log('➕ Added new event:', eventData);
       }
 
-      if (response.data.success) {
-        resetForm();
-        setShowModal(false);
-        setEditingEvent(null);
-      }
+      // Save to localStorage
+      saveScheduleToStorage(updatedSchedule);
+      
+      // Update state
+      setSchedule(updatedSchedule);
+      resetForm();
+      setShowModal(false);
+      setEditingEvent(null);
+      
     } catch (err) {
       console.error('Error saving schedule:', err);
       alert('Failed to save schedule. Please try again.');
@@ -196,14 +230,15 @@ const TeacherSchedule = () => {
     if (!window.confirm('Are you sure you want to delete this event?')) return;
     
     try {
-      const token = localStorage.getItem('token');
-      const response = await axios.delete(`/api/teacher/schedule/${eventId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const updatedSchedule = schedule.filter(event => event.id !== eventId);
       
-      if (response.data.success) {
-        setSchedule(prev => prev.filter(event => event.id !== eventId));
-      }
+      // Save to localStorage
+      saveScheduleToStorage(updatedSchedule);
+      
+      // Update state
+      setSchedule(updatedSchedule);
+      console.log('🗑️ Deleted event:', eventId);
+      
     } catch (err) {
       console.error('Error deleting event:', err);
       alert('Failed to delete event.');
@@ -221,6 +256,68 @@ const TeacherSchedule = () => {
       classId: '',
       description: ''
     });
+  };
+
+  const exportSchedule = () => {
+    try {
+      const dataStr = JSON.stringify(schedule, null, 2);
+      const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+      const exportFileDefaultName = `teacher-schedule-${new Date().toISOString().split('T')[0]}.json`;
+      
+      const linkElement = document.createElement('a');
+      linkElement.setAttribute('href', dataUri);
+      linkElement.setAttribute('download', exportFileDefaultName);
+      linkElement.click();
+      
+      alert('Schedule exported successfully!');
+    } catch (err) {
+      console.error('Error exporting schedule:', err);
+      alert('Failed to export schedule.');
+    }
+  };
+
+  const importSchedule = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const importedSchedule = JSON.parse(e.target.result);
+        if (Array.isArray(importedSchedule)) {
+          // Add unique IDs to imported items if they don't have them
+          const validatedSchedule = importedSchedule.map(item => ({
+            ...item,
+            id: item.id || Date.now().toString() + Math.random().toString(36).substr(2, 9),
+            updatedAt: new Date().toISOString()
+          }));
+          
+          saveScheduleToStorage(validatedSchedule);
+          setSchedule(validatedSchedule);
+          alert('Schedule imported successfully!');
+        } else {
+          alert('Invalid schedule file format.');
+        }
+      } catch (err) {
+        console.error('Error importing schedule:', err);
+        alert('Failed to import schedule. Invalid file format.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const clearAllEvents = () => {
+    if (window.confirm('Are you sure you want to clear ALL events? This cannot be undone.')) {
+      try {
+        const storageKey = getStorageKey();
+        localStorage.removeItem(storageKey);
+        setSchedule([]);
+        alert('All events cleared.');
+      } catch (err) {
+        console.error('Error clearing events:', err);
+        alert('Failed to clear events.');
+      }
+    }
   };
 
   const getEventsForDay = (day) => {
@@ -543,7 +640,7 @@ const TeacherSchedule = () => {
       <div style={styles.header}>
         <div>
           <h1 style={styles.title}>Teaching Schedule</h1>
-          <p style={styles.subtitle}>Manage your weekly timetable</p>
+          <p style={styles.subtitle}>Manage your weekly timetable (Locally stored)</p>
         </div>
         
         <div style={styles.controls}>
@@ -576,11 +673,32 @@ const TeacherSchedule = () => {
           
           <div style={styles.actionButtons}>
             <button 
-              onClick={fetchSchedule}
-              style={styles.refreshButton}
-              title="Refresh schedule"
+              onClick={exportSchedule}
+              style={styles.exportButton}
+              title="Export schedule"
             >
-              <FiRefreshCw size={20} />
+              Export
+            </button>
+            <input
+              type="file"
+              accept=".json"
+              onChange={importSchedule}
+              style={{ display: 'none' }}
+              id="import-schedule"
+            />
+            <button 
+              onClick={() => document.getElementById('import-schedule').click()}
+              style={styles.importButton}
+              title="Import schedule"
+            >
+              Import
+            </button>
+            <button 
+              onClick={clearAllEvents}
+              style={styles.clearButton}
+              title="Clear all events"
+            >
+              Clear All
             </button>
             <button 
               onClick={() => setShowModal(true)}
@@ -592,20 +710,6 @@ const TeacherSchedule = () => {
           </div>
         </div>
       </div>
-
-      {/* Error Message */}
-      {error && !schedule.length && (
-        <div style={styles.errorCard}>
-          <div style={styles.errorIcon}>⚠️</div>
-          <div>
-            <h3 style={styles.errorTitle}>Unable to Load Schedule</h3>
-            <p style={styles.errorMessage}>{error}</p>
-          </div>
-          <button onClick={fetchSchedule} style={styles.retryButton}>
-            Try Again
-          </button>
-        </div>
-      )}
 
       {/* Main Content */}
       <div style={styles.content}>
@@ -632,7 +736,8 @@ const TeacherSchedule = () => {
           <li>Click "Add Event" to schedule your teaching sessions</li>
           <li>Click on any event to edit or delete it</li>
           <li>Switch between Week View and List View</li>
-          <li>Your schedule is automatically saved</li>
+          <li>Use Export/Import to backup your schedule</li>
+          <li>⚠️ Data is stored locally in your browser</li>
         </ul>
       </div>
 
@@ -690,20 +795,50 @@ const styles = {
   },
   actionButtons: {
     display: 'flex',
-    gap: '12px',
-    alignItems: 'center'
+    gap: '8px',
+    alignItems: 'center',
+    flexWrap: 'wrap'
   },
-  refreshButton: {
-    padding: '10px',
+  exportButton: {
+    padding: '8px 16px',
     backgroundColor: 'transparent',
-    border: '2px solid #E2E8F0',
-    borderRadius: '8px',
-    color: '#64748B',
+    border: '1px solid #4B5320',
+    color: '#4B5320',
+    borderRadius: '6px',
+    fontSize: '14px',
+    fontWeight: '500',
     cursor: 'pointer',
     transition: 'all 0.2s ease',
     ':hover': {
-      backgroundColor: '#F1F5F9',
-      transform: 'rotate(90deg)'
+      backgroundColor: 'rgba(75, 83, 32, 0.1)'
+    }
+  },
+  importButton: {
+    padding: '8px 16px',
+    backgroundColor: 'transparent',
+    border: '1px solid #3B82F6',
+    color: '#3B82F6',
+    borderRadius: '6px',
+    fontSize: '14px',
+    fontWeight: '500',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    ':hover': {
+      backgroundColor: 'rgba(59, 130, 246, 0.1)'
+    }
+  },
+  clearButton: {
+    padding: '8px 16px',
+    backgroundColor: 'transparent',
+    border: '1px solid #EF4444',
+    color: '#EF4444',
+    borderRadius: '6px',
+    fontSize: '14px',
+    fontWeight: '500',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    ':hover': {
+      backgroundColor: 'rgba(239, 68, 68, 0.1)'
     }
   },
   addButton: {
@@ -721,45 +856,6 @@ const styles = {
     ':hover': {
       backgroundColor: '#3A4219',
       transform: 'translateY(-2px)'
-    }
-  },
-  errorCard: {
-    backgroundColor: '#FEF2F2',
-    border: '1px solid #FECACA',
-    borderRadius: '12px',
-    padding: '24px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '16px',
-    marginBottom: '24px',
-    flexWrap: 'wrap'
-  },
-  errorIcon: {
-    fontSize: '24px'
-  },
-  errorTitle: {
-    fontSize: '18px',
-    fontWeight: '600',
-    color: '#DC2626',
-    margin: '0 0 4px 0'
-  },
-  errorMessage: {
-    fontSize: '14px',
-    color: '#991B1B',
-    margin: 0
-  },
-  retryButton: {
-    padding: '8px 16px',
-    backgroundColor: '#DC2626',
-    color: 'white',
-    border: 'none',
-    borderRadius: '6px',
-    fontSize: '14px',
-    fontWeight: '500',
-    cursor: 'pointer',
-    marginLeft: 'auto',
-    ':hover': {
-      backgroundColor: '#B91C1C'
     }
   },
   content: {
@@ -1244,12 +1340,14 @@ const styles = {
 };
 
 // Add CSS animation
-const styleSheet = document.styleSheets[0];
-styleSheet.insertRule(`
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
-`, styleSheet.cssRules.length);
+if (typeof document !== 'undefined' && document.styleSheets.length > 0) {
+  const styleSheet = document.styleSheets[0];
+  styleSheet.insertRule(`
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  `, styleSheet.cssRules.length);
+}
 
 export default TeacherSchedule;

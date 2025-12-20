@@ -8,7 +8,7 @@ import {
   FiBookOpen, FiRefreshCw, FiSearch, FiPlus, FiTrash2, FiEye,
   FiChevronRight, FiChevronLeft, FiGrid, FiList,
   FiUserPlus, FiExternalLink, FiDownload, FiShare2, FiEdit,
-  FiDatabase
+  FiShuffle
 } from 'react-icons/fi';
 import {
   FaUserGraduate, FaChalkboardTeacher, FaRegCalendarAlt,
@@ -266,228 +266,6 @@ const AdminScheduling = () => {
     setRefreshingStudents(false);
   };
 
-  // Debug function with normalized class comparison
-  const debugClassMatching = () => {
-    if (!selectedTestDetails || eligibleStudents.length === 0) {
-      setError('Please select a test with eligible students first.');
-      return;
-    }
-
-    const student = eligibleStudents[0];
-    
-    console.log('🔍 CLASS MATCHING DEBUG:');
-    console.log('=== STUDENT DATA ===');
-    console.log('Student class property:', {
-      'student.class': student.class,
-      'typeof student.class': typeof student.class,
-      'student.class?._id': student.class?._id,
-      'student.class?._id string': student.class?._id?.toString(),
-      'student.className': student.className,
-      'student.enrolledSubjects': student.enrolledSubjects
-    });
-    
-    console.log('=== TEST DATA ===');
-    console.log('Test class property:', {
-      'test.class': selectedTestDetails.class,
-      'typeof test.class': typeof selectedTestDetails.class,
-      'test.className': selectedTestDetails.className,
-      'test.classId': selectedTestDetails.classId
-    });
-    
-    console.log('=== NORMALIZED CLASS IDs ===');
-    const studentClassId = normalizeClassId(student.class);
-    const testClassId = normalizeClassId(selectedTestDetails.class) || normalizeClassId(selectedTestDetails.classId);
-    console.log('Normalized student class ID:', studentClassId);
-    console.log('Normalized test class ID:', testClassId);
-    console.log('Match:', studentClassId === testClassId);
-    
-    console.log('=== DIRECT COMPARISON ===');
-    console.log('student.class === test.class:', student.class === selectedTestDetails.class);
-    console.log('student.class?.toString() === test.class?.toString():', 
-      student.class?.toString() === selectedTestDetails.class?.toString());
-    console.log('student.class?._id?.toString() === test.class:', 
-      student.class?._id?.toString() === selectedTestDetails.class);
-    console.log('student.className === test.className:', student.className === selectedTestDetails.className);
-    
-    // Check through enrolledSubjects
-    student.enrolledSubjects?.forEach((sub, idx) => {
-      const subClassId = normalizeClassId(sub.class);
-      console.log(`Enrolled Subject ${idx + 1} class check:`, {
-        'sub.class': sub.class,
-        'sub.class?._id': sub.class?._id,
-        'sub.className': sub.className,
-        'normalized sub class ID': subClassId,
-        'test class ID': testClassId,
-        'matches test.class': subClassId === testClassId
-      });
-    });
-    
-    alert(`CLASS MATCHING DEBUG:
-    
-Student: ${student.name} (${student.username})
-Student Class ID: ${studentClassId}
-Test Class ID: ${testClassId}
-Match: ${studentClassId === testClassId ? '✅ YES' : '❌ NO'}
-
-Check browser console for full details.`);
-  };
-
-  // Verify test status on server
-  const verifyTestStatus = async () => {
-    if (!selectedTestId) {
-      setError('Please select a test first.');
-      return;
-    }
-
-    const token = localStorage.getItem('token');
-    
-    try {
-      const response = await axios.get(
-        `http://localhost:5000/api/tests/${selectedTestId}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      const testData = response.data.test || response.data;
-      
-      console.log('✅ TEST DETAILS FROM SERVER:', testData);
-      
-      // Check if test is actually approved
-      if (testData.status !== 'approved') {
-        alert(`⚠️ TEST STATUS ISSUE:
-        
-Test: ${testData.title}
-Current Status: ${testData.status}
-Required Status: approved
-
-The test must be in "approved" status to schedule it.`);
-        return;
-      }
-      
-      // Check if test is active
-      if (!testData.isActive) {
-        alert(`⚠️ TEST ACTIVE STATUS ISSUE:
-        
-Test: ${testData.title}
-isActive: ${testData.isActive}
-
-The test must be active to schedule it.`);
-        return;
-      }
-      
-      // Check existing batches
-      if (testData.batches?.length > 0) {
-        alert(`⚠️ TEST ALREADY HAS BATCHES:
-        
-Test: ${testData.title}
-Existing Batches: ${testData.batches.length}
-
-Batch names: ${testData.batches.map(b => b.name).join(', ')}`);
-      }
-      
-      alert(`✅ TEST READY FOR SCHEDULING:
-      
-Title: ${testData.title}
-Status: ${testData.status} ✅
-Active: ${testData.isActive ? 'Yes ✅' : 'No ❌'}
-Existing Batches: ${testData.batches?.length || 0}
-Class: ${testData.class}
-Subject: ${testData.subject}`);
-      
-    } catch (error) {
-      console.error('Test verification error:', error);
-      setError('Failed to verify test status.');
-    }
-  };
-
-  // Capture network error details
-  const captureNetworkError = async () => {
-    if (!selectedTestId) {
-      setError('Please select a test first.');
-      return;
-    }
-
-    const token = localStorage.getItem('token');
-    const student = eligibleStudents[0];
-    
-    try {
-      // First, let's check the test status from server
-      const testResponse = await axios.get(
-        `http://localhost:5000/api/tests/${selectedTestId}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      const testData = testResponse.data.test || testResponse.data;
-      
-      console.log('🔍 TEST STATUS FROM SERVER:', {
-        id: testData._id,
-        title: testData.title,
-        status: testData.status,
-        isActive: testData.isActive,
-        batches: testData.batches?.length || 0,
-        currentBatches: testData.batches
-      });
-      
-      // Now try a direct fetch to see the exact error
-      const now = new Date();
-      const oneHourLater = new Date(now.getTime() + 3600000);
-      const twoHoursLater = new Date(now.getTime() + 7200000);
-      
-      const testPayload = {
-        status: 'scheduled',
-        batches: [{
-          name: 'Network Test Batch',
-          students: [student._id],
-          schedule: {
-            start: oneHourLater.toISOString(),
-            end: twoHoursLater.toISOString(),
-          },
-        }],
-      };
-      
-      console.log('📡 Sending direct fetch request...');
-      
-      // Use fetch instead of axios to see raw response
-      const response = await fetch(
-        `http://localhost:5000/api/tests/${selectedTestId}/schedule`, 
-        {
-          method: 'PUT',
-          headers: { 
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(testPayload)
-        }
-      );
-      
-      const responseText = await response.text();
-      
-      console.log('📡 RAW RESPONSE:', {
-        status: response.status,
-        statusText: response.statusText,
-        ok: response.ok,
-        headers: Object.fromEntries(response.headers.entries()),
-        body: responseText
-      });
-      
-      try {
-        const data = JSON.parse(responseText);
-        console.log('📡 PARSED RESPONSE:', data);
-      } catch (e) {
-        console.log('📡 Response is not JSON:', responseText);
-      }
-      
-      alert(`Network Response:
-Status: ${response.status} ${response.statusText}
-OK: ${response.ok}
-
-Raw Response: ${responseText.substring(0, 500)}...`);
-      
-    } catch (error) {
-      console.error('Network capture error:', error);
-      alert(`Error: ${error.message}`);
-    }
-  };
-
   // FIXED: isStudentEnrolled function with normalized class comparison
   const isStudentEnrolled = (student) => {
     if (!selectedTestDetails) return false;
@@ -697,72 +475,45 @@ Raw Response: ${responseText.substring(0, 500)}...`);
     }
   };
 
-  // Test API endpoint without students
-  const testScheduleEndpointMinimal = async () => {
-    if (!selectedTestId) {
-      setError('Please select a test first.');
+  // Function to randomly distribute students into batches
+  const randomlyDistributeStudents = () => {
+    if (!eligibleStudents.length) {
+      setError('No eligible students to distribute.');
       return;
     }
-
-    const token = localStorage.getItem('token');
     
-    try {
-      // Get the test details first
-      const testResponse = await axios.get(
-        `http://localhost:5000/api/tests/${selectedTestId}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      const testData = testResponse.data.test || testResponse.data;
-      
-      // Create minimal test payload
-      const now = new Date();
-      const oneHourLater = new Date(now.getTime() + 3600000);
-      const twoHoursLater = new Date(now.getTime() + 7200000);
-      
-      const minimalPayload = {
-        status: 'scheduled',
-        batches: [{
-          name: 'Test Batch',
-          students: [],
-          schedule: {
-            start: oneHourLater.toISOString(),
-            end: twoHoursLater.toISOString(),
-          },
-        }],
-      };
-      
-      console.log('🧪 TESTING SCHEDULE ENDPOINT (NO STUDENTS):', {
-        testId: selectedTestId,
-        testTitle: testData.title,
-        payload: minimalPayload
-      });
-      
-      const response = await axios.put(
-        `http://localhost:5000/api/tests/${selectedTestId}/schedule`, 
-        minimalPayload,
-        {
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-        }
-      );
-      
-      console.log('✅ Test successful (no students):', response.data);
-      alert('Test successful! Endpoint works without students.');
-      
-    } catch (error) {
-      console.error('❌ Test failed:', {
-        status: error.response?.status,
-        data: error.response?.data,
-        message: error.message
-      });
-      
-      if (error.response?.data) {
-        alert(`Test failed:\n\nStatus: ${error.response.status}\n\nError: ${JSON.stringify(error.response.data, null, 2)}`);
-      }
+    if (batches.length === 0) {
+      setError('Please create at least one batch first.');
+      return;
     }
+    
+    // Get only enrolled students
+    const enrolledStudents = eligibleStudents.filter(student => 
+      isStudentEnrolled(student)
+    );
+    
+    if (enrolledStudents.length === 0) {
+      setError('No students are properly enrolled in this test. Please enroll students first.');
+      return;
+    }
+    
+    // Shuffle the enrolled students array
+    const shuffledStudents = [...enrolledStudents].sort(() => Math.random() - 0.5);
+    
+    // Create new batches with empty student arrays
+    const newBatches = batches.map(batch => ({
+      ...batch,
+      students: []
+    }));
+    
+    // Distribute students evenly across batches
+    shuffledStudents.forEach((student, index) => {
+      const batchIndex = index % newBatches.length;
+      newBatches[batchIndex].students.push(student._id);
+    });
+    
+    setBatches(newBatches);
+    setSuccess(`Randomly distributed ${enrolledStudents.length} students across ${batches.length} batches.`);
   };
 
   // FIXED: handleSubmit with proper error handling
@@ -1028,80 +779,6 @@ Raw Response: ${responseText.substring(0, 500)}...`);
     const start = new Date(batch.schedule.start);
     const end = new Date(batch.schedule.end);
     return Math.round((end - start) / (1000 * 60)); // minutes
-  };
-
-  // Debug function to fix enrollment issues
-  const debugStudentEnrollmentInDB = async () => {
-    if (!selectedTestDetails || eligibleStudents.length === 0) {
-      setError('Please select a test with eligible students first.');
-      return;
-    }
-
-    const token = localStorage.getItem('token');
-    
-    try {
-      // Get the first student's full data from the API
-      const student = eligibleStudents[0];
-      const response = await axios.get(
-        `http://localhost:5000/api/users/${student._id}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      const studentData = response.data.user || response.data;
-      const testClassId = normalizeClassId(selectedTestDetails.class) || normalizeClassId(selectedTestDetails.classId);
-      
-      console.log('🔍 DATABASE ENROLLMENT DATA FOR STUDENT:', {
-        username: studentData.username,
-        name: studentData.name,
-        class: studentData.class,
-        className: studentData.className,
-        enrolledSubjects: studentData.enrolledSubjects,
-        testSubject: selectedTestDetails.subject,
-        testClassId: testClassId
-      });
-      
-      // Check if enrolled in the test subject
-      const isEnrolled = studentData.enrolledSubjects?.some(sub => {
-        const subjectMatch = 
-          sub.subject === selectedTestDetails.subject ||
-          sub.subjectName === selectedTestDetails.subject ||
-          (sub.subject?._id && sub.subject._id.toString() === selectedTestDetails.subject);
-        
-        const subClassId = normalizeClassId(sub.class);
-        const classMatch = subClassId === testClassId;
-        
-        return subjectMatch && classMatch;
-      });
-      
-      console.log('📊 ENROLLMENT CHECK RESULT:', {
-        isEnrolled,
-        studentHasEnrollment: studentData.enrolledSubjects?.length > 0,
-        totalEnrolledSubjects: studentData.enrolledSubjects?.length || 0
-      });
-      
-      // Show alert with results
-      alert(`STUDENT ENROLLMENT VERIFICATION:
-      
-Student: ${studentData.name} (${studentData.username})
-Class: ${studentData.className || studentData.class || 'No class data'}
-Test Subject: ${selectedTestDetails.subject}
-Test Class: ${selectedTestDetails.className}
-      
-ENROLLED SUBJECTS IN DATABASE:
-${JSON.stringify(studentData.enrolledSubjects || [], null, 2)}
-      
-IS ENROLLED IN TEST SUBJECT? ${isEnrolled ? '✅ YES' : '❌ NO'}
-      
-${!isEnrolled ? 
-`ACTION NEEDED:
-The student needs to be enrolled in "${selectedTestDetails.subject}" 
-for class "${selectedTestDetails.className}"` : 
-'Ready for scheduling!'}`);
-      
-    } catch (error) {
-      console.error('Debug error:', error);
-      setError('Failed to fetch student enrollment data from database.');
-    }
   };
 
   // Manual enrollment function
@@ -1380,66 +1057,6 @@ for class "${selectedTestDetails.className}"` :
                   </div>
                 </div>
                 
-                {/* Debug Buttons */}
-                <div style={{ 
-                  display: 'flex', 
-                  gap: '10px', 
-                  marginBottom: '15px',
-                  flexWrap: 'wrap' 
-                }}>
-                  <button 
-                    onClick={debugClassMatching}
-                    style={{
-                      ...styles.debugButton,
-                      backgroundColor: '#7c3aed'
-                    }}
-                    title="Debug class matching issues"
-                  >
-                    <FiDatabase /> Debug Class Match
-                  </button>
-                  
-                  <button 
-                    onClick={debugStudentEnrollmentInDB}
-                    style={styles.debugButton}
-                    title="Check actual enrollment in database"
-                  >
-                    <FiDatabase /> Check Enrollment
-                  </button>
-                  
-                  <button 
-                    onClick={testScheduleEndpointMinimal}
-                    style={{
-                      ...styles.debugButton,
-                      backgroundColor: '#059669'
-                    }}
-                    title="Test API endpoint without students"
-                  >
-                    <FiCheckCircle /> Test API (No Students)
-                  </button>
-                  
-                  <button 
-                    onClick={verifyTestStatus}
-                    style={{
-                      ...styles.debugButton,
-                      backgroundColor: '#3b82f6'
-                    }}
-                    title="Verify test status on server"
-                  >
-                    <FiCheckCircle /> Verify Test Status
-                  </button>
-                  
-                  <button 
-                    onClick={captureNetworkError}
-                    style={{
-                      ...styles.debugButton,
-                      backgroundColor: '#dc2626'
-                    }}
-                    title="Capture network error details"
-                  >
-                    <FiAlertTriangle /> Capture Network Error
-                  </button>
-                </div>
-                
                 <div style={styles.searchContainer}>
                   <FiSearch style={styles.searchIcon} />
                   <input
@@ -1498,6 +1115,15 @@ for class "${selectedTestDetails.className}"` :
                   <FaClipboardList style={styles.cardIcon} />
                   <h3 style={styles.cardTitle}>Batch Management</h3>
                   <div style={styles.cardActions}>
+                    <button
+                      onClick={randomlyDistributeStudents}
+                      style={styles.randomDistributeButton}
+                      disabled={eligibleStudents.length === 0}
+                      title="Randomly distribute students into batches"
+                    >
+                      <FiShuffle style={{ marginRight: '8px' }} />
+                      Randomly Distribute
+                    </button>
                     <button
                       onClick={handleAddBatch}
                       style={styles.addBatchButton}
@@ -1840,7 +1466,7 @@ for class "${selectedTestDetails.className}"` :
   );
 };
 
-// Styles object remains exactly the same as before
+// Styles object with added styles for the random distribute button
 const styles = {
   container: {
     fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
@@ -2237,19 +1863,33 @@ const styles = {
     cursor: 'pointer',
   },
   
-  // Debug Button
-  debugButton: {
-    backgroundColor: '#6b7280',
-    color: 'white',
-    border: 'none',
-    padding: '8px 12px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '12px',
+  // Random Distribute Button
+  randomDistributeButton: {
     display: 'flex',
     alignItems: 'center',
-    gap: '5px',
+    backgroundColor: '#7c3aed',
+    color: '#FFFFFF',
+    border: 'none',
+    padding: '0.625rem 1rem',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontWeight: '500',
+    fontSize: '0.875rem',
     transition: 'background-color 0.2s',
+  },
+  
+  // Add Batch Button
+  addBatchButton: {
+    display: 'flex',
+    alignItems: 'center',
+    backgroundColor: '#4B5320',
+    color: '#FFFFFF',
+    border: 'none',
+    padding: '0.625rem 1rem',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontWeight: '500',
+    fontSize: '0.875rem',
   },
   
   // Search
@@ -2350,18 +1990,6 @@ const styles = {
   },
   
   // Batch Management
-  addBatchButton: {
-    display: 'flex',
-    alignItems: 'center',
-    backgroundColor: '#4B5320',
-    color: '#FFFFFF',
-    border: 'none',
-    padding: '0.625rem 1rem',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontWeight: '500',
-    fontSize: '0.875rem',
-  },
   batchesContainer: {
     display: 'flex',
     flexDirection: 'column',

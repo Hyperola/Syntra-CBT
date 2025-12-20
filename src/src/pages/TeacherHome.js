@@ -358,8 +358,8 @@ const TeacherHome = () => {
           
           <div style={styles.headerContent}>
             <img 
-              src="/uploads/sanni.png" 
-              alt="Sanniville Academy" 
+              src="/uploads/syntra.jpeg" 
+              alt="Syntra Software Solution" 
               style={styles.logo}
               onError={(e) => {
                 e.target.onerror = null;

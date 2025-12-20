@@ -1,3 +1,4 @@
+// routes/analytics.js - COMPLETE WORKING VERSION
 const express = require('express');
 const mongoose = require('mongoose');
 const router = express.Router();
@@ -8,49 +9,159 @@ const Class = require('../models/Class');
 const { auth } = require('../middleware/auth');
 const { teacherOnly } = require('../middleware/permissions');
 
-// ==================== TEACHER-SPECIFIC ANALYTICS ====================
-
-// GET teacher analytics
-router.get('/teacher', auth, teacherOnly, async (req, res) => {
+// Helper function to get class name from ID or name
+const getClassName = async (classValue) => {
+  if (!classValue) return 'Unknown Class';
+  
   try {
-    console.log('📊 Teacher analytics request:', {
-      teacherId: req.user.id,
+    if (mongoose.Types.ObjectId.isValid(classValue)) {
+      const classDoc = await Class.findById(classValue).select('name shortName level').lean();
+      if (classDoc) {
+        return classDoc.name || classDoc.shortName || classDoc.level || 'Unknown Class';
+      }
+    } else if (typeof classValue === 'object' && classValue !== null) {
+      // If classValue is a populated object
+      return classValue.name || classValue.shortName || classValue.level || 'Unknown Class';
+    }
+    return String(classValue);
+  } catch (error) {
+    console.error('Error getting class name:', error);
+    return String(classValue);
+  }
+};
+
+// Helper to get teacher's assigned subjects and classes (from your tests.js)
+const getTeacherAssignments = async (teacherId) => {
+  try {
+    const teacher = await User.findById(teacherId).select('subjects teacherAssignments').lean();
+    
+    if (!teacher) return [];
+    
+    const assignments = [];
+    
+    // Old format: subjects array (from your tests.js)
+    if (teacher.subjects && Array.isArray(teacher.subjects)) {
+      teacher.subjects.forEach(sub => {
+        if (sub.subject) {
+          assignments.push({
+            subject: sub.subject,
+            class: sub.class || sub.className || sub.classId
+          });
+        }
+      });
+    }
+    
+    // New format: teacherAssignments
+    if (teacher.teacherAssignments && Array.isArray(teacher.teacherAssignments)) {
+      teacher.teacherAssignments.forEach(assignment => {
+        if (assignment.class && assignment.subjects && Array.isArray(assignment.subjects)) {
+          assignment.subjects.forEach(sub => {
+            if (sub.subject) {
+              assignments.push({
+                subject: sub.subject,
+                class: assignment.class
+              });
+            }
+          });
+        }
+      });
+    }
+    
+    return assignments;
+  } catch (error) {
+    console.error('Error getting teacher assignments:', error);
+    return [];
+  }
+};
+
+// ==================== MAIN ANALYTICS ENDPOINT ====================
+
+// Get teacher analytics - MAIN ENDPOINT
+router.get('/teacher', auth, async (req, res) => {
+  try {
+    console.log('📊 TEACHER ANALYTICS REQUEST:', {
+      userId: req.user.id,
       username: req.user.username,
-      subjects: req.user.subjects
+      role: req.user.role
     });
 
-    // Get teacher's assigned subjects
-    const teacherSubjects = req.user.subjects || [];
-    if (teacherSubjects.length === 0) {
+    if (req.user.role !== 'teacher') {
+      return res.status(403).json({
+        success: false,
+        error: 'Only teachers can access teacher analytics'
+      });
+    }
+
+    // Get teacher's assignments
+    const teacherAssignments = await getTeacherAssignments(req.user.id);
+    
+    if (teacherAssignments.length === 0) {
       return res.json({
         success: true,
         analytics: [],
         summary: {
-          totalStudents: 0,
           totalTests: 0,
-          averageScore: 0
-        }
+          totalResults: 0,
+          averageScore: 0,
+          totalStudents: 0,
+          passRate: 0,
+          avgTimeSpent: 0,
+          improvement: 0
+        },
+        message: 'No subjects/classes assigned to teacher'
       });
     }
 
-    // Build query for teacher's subjects
-    const subjectConditions = teacherSubjects.map(sub => ({
-      subject: sub.subject,
-      class: sub.class
-    }));
+    // Extract unique classes and subjects
+    const assignedClasses = [...new Set(teacherAssignments.map(a => a.class).filter(Boolean))];
+    const assignedSubjects = [...new Set(teacherAssignments.map(a => a.subject).filter(Boolean))];
 
-    // Fetch data in parallel
+    console.log('📊 Teacher assignments:', {
+      classes: assignedClasses,
+      subjects: assignedSubjects,
+      totalAssignments: teacherAssignments.length
+    });
+
+    // Build query for tests
+    const testsQuery = {
+      $or: teacherAssignments.map(assignment => ({
+        subject: assignment.subject,
+        class: assignment.class
+      })),
+      isActive: true
+    };
+
+    // Build query for results
+    const resultsQuery = {
+      $or: teacherAssignments.map(assignment => ({
+        subject: assignment.subject,
+        class: assignment.class
+      })),
+      isActive: true
+    };
+
+    console.log('🔍 Query for tests:', JSON.stringify(testsQuery, null, 2));
+    console.log('🔍 Query for results:', JSON.stringify(resultsQuery, null, 2));
+
+    // Fetch tests and results
     const [tests, results] = await Promise.all([
-      Test.find({ $or: subjectConditions })
+      Test.find(testsQuery)
+        .populate('createdBy', 'username name')
+        .populate('class', 'name shortName')
         .sort({ createdAt: -1 })
         .lean(),
-      Result.find({ $or: subjectConditions })
-        .populate('userId', 'name surname')
-        .populate('testId', 'title subject class')
+      Result.find(resultsQuery)
+        .populate('userId', 'name surname studentId')
+        .populate('testId', 'title subject class totalMarks passingMarks')
+        .populate('class', 'name shortName')
         .lean()
     ]);
 
-    // If no data found
+    console.log('📊 Data fetched:', {
+      testsCount: tests.length,
+      resultsCount: results.length
+    });
+
     if (tests.length === 0 && results.length === 0) {
       return res.json({
         success: true,
@@ -58,407 +169,391 @@ router.get('/teacher', auth, teacherOnly, async (req, res) => {
         summary: {
           totalTests: 0,
           totalResults: 0,
-          averageScore: 0
-        }
+          averageScore: 0,
+          totalStudents: 0,
+          passRate: 0,
+          avgTimeSpent: 0,
+          improvement: 0
+        },
+        message: 'No data found for your assignments'
       });
     }
 
-    // Calculate test analytics for teacher
-    const testAnalytics = tests.map(test => {
-      const testResults = results.filter(r => 
-        r.testId && r.testId._id.toString() === test._id.toString()
-      );
+    // Process analytics data
+    const testAnalytics = [];
+    const classMap = {};
+
+    // First, fetch class names for all unique classes
+    const uniqueClasses = [...new Set([
+      ...tests.map(t => t.class),
+      ...results.map(r => r.class)
+    ].filter(Boolean))];
+
+    for (const classValue of uniqueClasses) {
+      const className = await getClassName(classValue);
+      const classId = typeof classValue === 'object' ? classValue._id?.toString() : classValue.toString();
+      classMap[classId] = className;
+    }
+
+    // Process each test
+    for (const test of tests) {
+      const testId = test._id.toString();
       
-      const totalStudentsInTest = testResults.length;
-      const scores = testResults.map(r => r.score || 0);
+      // Get class name
+      let className = 'Unknown Class';
+      if (test.class) {
+        const classId = typeof test.class === 'object' ? test.class._id?.toString() : test.class.toString();
+        className = classMap[classId] || await getClassName(test.class);
+      }
+
+      // Get results for this test
+      const testResults = results.filter(r => {
+        if (!r.testId) return false;
+        const resultTestId = r.testId._id ? r.testId._id.toString() : r.testId.toString();
+        return resultTestId === testId;
+      });
+
+      // Calculate metrics
+      const scores = testResults.map(r => r.score || 0).filter(score => !isNaN(score));
       const averageScore = scores.length > 0 ? 
-        (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2) : 0;
+        scores.reduce((sum, score) => sum + score, 0) / scores.length : 0;
+
+      // Calculate completion rate
+      const totalStudentsForTest = testResults.length;
+      const completedStudents = testResults.filter(r => r.submittedAt).length;
+      const completionRate = totalStudentsForTest > 0 ? 
+        (completedStudents / totalStudentsForTest) * 100 : 0;
+
+      // Find top performer
+      let topStudent = 'N/A';
+      let topScore = 0;
+      if (testResults.length > 0) {
+        testResults.forEach(result => {
+          const score = result.score || 0;
+          if (score > topScore) {
+            topScore = score;
+            if (result.userId) {
+              topStudent = `${result.userId.name || ''} ${result.userId.surname || ''}`.trim() || 
+                          result.userId.studentId || 'Unknown Student';
+            }
+          }
+        });
+      }
+
+      // Get test status
+      const now = new Date();
+      const startDate = test.startDate ? new Date(test.startDate) : null;
+      const endDate = test.endDate ? new Date(test.endDate) : null;
       
-      return {
-        testId: test._id,
+      let status = test.status || 'unknown';
+      if (!test.status && startDate && endDate) {
+        if (now < startDate) status = 'scheduled';
+        else if (now >= startDate && now <= endDate) status = 'active';
+        else if (now > endDate) status = 'completed';
+      }
+
+      testAnalytics.push({
+        testId: testId,
         testTitle: test.title || 'Untitled Test',
         subject: test.subject || 'Unknown Subject',
-        class: test.class || 'Unknown Class',
-        averageScore: parseFloat(averageScore),
-        totalStudents: totalStudentsInTest,
-        createdAt: test.createdAt
-      };
+        class: className, // This will show "JSS 1", not ObjectId
+        className: className,
+        averageScore: parseFloat(averageScore.toFixed(2)),
+        completionRate: parseFloat(completionRate.toFixed(2)),
+        totalStudents: totalStudentsForTest,
+        completedStudents: completedStudents,
+        topStudent: topStudent,
+        createdAt: test.createdAt,
+        updatedAt: test.updatedAt || test.createdAt,
+        session: test.session || 'Unknown',
+        term: test.term || 'Unknown',
+        status: status,
+        totalMarks: test.totalMarks || 100,
+        passingMarks: test.passingMarks || 50,
+        type: test.type || 'test',
+        hasResults: testResults.length > 0
+      });
+    }
+
+    console.log('📊 Processed analytics:', testAnalytics.length, 'tests');
+
+    // Calculate overall statistics
+    const allScores = results.map(r => r.score || 0).filter(score => !isNaN(score) && score > 0);
+    const overallAverageScore = allScores.length > 0 ? 
+      allScores.reduce((sum, score) => sum + score, 0) / allScores.length : 0;
+
+    // Calculate pass rate
+    const passingResults = results.filter(result => {
+      const score = result.score || 0;
+      const test = tests.find(t => t._id.toString() === result.testId?._id?.toString());
+      if (!test) return false;
+      const totalMarks = test.totalMarks || 100;
+      const passingMarks = test.passingMarks || totalMarks * 0.5;
+      return score >= passingMarks;
     });
 
-    // Calculate overall metrics
-    const allScores = results.map(r => r.score || 0).filter(score => score > 0);
-    const overallAverageScore = allScores.length > 0 ? 
-      (allScores.reduce((a, b) => a + b, 0) / allScores.length).toFixed(2) : 0;
+    const passRate = results.length > 0 ? 
+      (passingResults.length / results.length) * 100 : 0;
 
-    // Subject performance
+    // Calculate average time spent
+    const validTimeResults = results.filter(r => r.timeSpent && r.timeSpent > 0);
+    const avgTimeSpent = validTimeResults.length > 0 ? 
+      validTimeResults.reduce((sum, r) => sum + (r.timeSpent || 0), 0) / validTimeResults.length : 0;
+
+    // Get unique students
+    const uniqueStudentIds = [...new Set(
+      results.map(r => r.userId?._id?.toString()).filter(id => id)
+    )];
+
+    // Subject performance analysis
     const subjectPerformance = {};
     results.forEach(result => {
-      const subject = result.testId?.subject || 'Unknown';
+      const subject = result.testId?.subject || result.subject || 'Unknown';
+      const score = result.score || 0;
+      
       if (!subjectPerformance[subject]) {
-        subjectPerformance[subject] = { total: 0, count: 0 };
+        subjectPerformance[subject] = {
+          totalScore: 0, 
+          count: 0,
+          students: new Set()
+        };
       }
-      subjectPerformance[subject].total += result.score || 0;
+      subjectPerformance[subject].totalScore += score;
       subjectPerformance[subject].count += 1;
+      if (result.userId?._id) {
+        subjectPerformance[subject].students.add(result.userId._id.toString());
+      }
     });
 
     const subjectRanking = Object.entries(subjectPerformance)
       .map(([subject, data]) => ({
         subject,
-        averageScore: (data.total / data.count).toFixed(2),
-        totalTests: data.count
+        averageScore: parseFloat((data.totalScore / data.count).toFixed(2)),
+        totalTests: data.count,
+        totalStudents: data.students.size
       }))
-      .sort((a, b) => parseFloat(b.averageScore) - parseFloat(a.averageScore));
+      .sort((a, b) => b.averageScore - a.averageScore);
 
-    // Class performance
-    const classPerformance = {};
-    results.forEach(result => {
-      const className = result.testId?.class || 'Unknown';
-      if (!classPerformance[className]) {
-        classPerformance[className] = { total: 0, count: 0 };
+    // Student performance distribution
+    const studentDistribution = {
+      excellent: results.filter(r => {
+        const score = r.score || 0;
+        const test = tests.find(t => t._id.toString() === r.testId?._id?.toString());
+        const totalMarks = test?.totalMarks || 100;
+        return (score / totalMarks) * 100 >= 90;
+      }).length,
+      good: results.filter(r => {
+        const score = r.score || 0;
+        const test = tests.find(t => t._id.toString() === r.testId?._id?.toString());
+        const totalMarks = test?.totalMarks || 100;
+        const percentage = (score / totalMarks) * 100;
+        return percentage >= 75 && percentage < 90;
+      }).length,
+      average: results.filter(r => {
+        const score = r.score || 0;
+        const test = tests.find(t => t._id.toString() === r.testId?._id?.toString());
+        const totalMarks = test?.totalMarks || 100;
+        const percentage = (score / totalMarks) * 100;
+        return percentage >= 50 && percentage < 75;
+      }).length,
+      poor: results.filter(r => {
+        const score = r.score || 0;
+        const test = tests.find(t => t._id.toString() === r.testId?._id?.toString());
+        const totalMarks = test?.totalMarks || 100;
+        return (score / totalMarks) * 100 < 50;
+      }).length
+    };
+
+    // Calculate improvement trend
+    let improvement = 0;
+    const testsWithResults = testAnalytics.filter(a => a.hasResults && a.averageScore > 0);
+    if (testsWithResults.length >= 6) {
+      const sortedByDate = [...testsWithResults].sort((a, b) => 
+        new Date(a.createdAt) - new Date(b.createdAt)
+      );
+      
+      const firstThree = sortedByDate.slice(0, 3);
+      const lastThree = sortedByDate.slice(-3);
+      
+      if (firstThree.length > 0 && lastThree.length > 0) {
+        const firstAvg = firstThree.reduce((sum, t) => sum + (t.averageScore || 0), 0) / firstThree.length;
+        const lastAvg = lastThree.reduce((sum, t) => sum + (t.averageScore || 0), 0) / lastThree.length;
+        
+        if (firstAvg > 0) {
+          improvement = parseFloat(((lastAvg - firstAvg) / firstAvg * 100).toFixed(2));
+        }
       }
-      classPerformance[className].total += result.score || 0;
-      classPerformance[className].count += 1;
-    });
+    }
 
-    const classRanking = Object.entries(classPerformance)
-      .map(([className, data]) => ({
-        className,
-        averageScore: (data.total / data.count).toFixed(2),
-        totalTests: data.count
-      }))
-      .sort((a, b) => parseFloat(b.averageScore) - parseFloat(a.averageScore));
-
+    // Prepare response in the format your frontend expects
     const response = {
       success: true,
       analytics: testAnalytics,
       summary: {
         totalTests: tests.length,
         totalResults: results.length,
-        overallAverageScore: parseFloat(overallAverageScore)
+        totalStudents: uniqueStudentIds.length,
+        overallAverageScore: parseFloat(overallAverageScore.toFixed(2)),
+        passRate: parseFloat(passRate.toFixed(2)),
+        avgTimeSpent: parseFloat(avgTimeSpent.toFixed(0)),
+        improvement: improvement
       },
       rankings: {
         bySubject: subjectRanking,
-        byClass: classRanking
+        topPerformers: testAnalytics
+          .filter(a => a.averageScore > 0)
+          .sort((a, b) => b.averageScore - a.averageScore)
+          .slice(0, 5)
+          .map(test => ({
+            testId: test.testId,
+            testTitle: test.testTitle,
+            subject: test.subject,
+            class: test.class,
+            averageScore: test.averageScore,
+            topStudent: test.topStudent
+          }))
       },
-      generatedAt: new Date().toISOString()
+      distribution: studentDistribution,
+      generatedAt: new Date().toISOString(),
+      teacherInfo: {
+        name: req.user.name || req.user.username,
+        assignedSubjects: assignedSubjects,
+        assignedClasses: assignedClasses.map(id => classMap[id] || id)
+      }
     };
 
-    res.json(response);
-
-  } catch (error) {
-    console.error('❌ Teacher analytics error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Server error generating teacher analytics'
-    });
-  }
-});
-
-// GET comprehensive analytics dashboard for teachers AND admins
-router.get('/dashboard', auth, async (req, res) => {
-  try {
-    console.log('📊 Analytics Dashboard Request for:', req.user.username);
-    
-    // Only teachers and admins can access analytics
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied. Only teachers and admins can view analytics.'
-      });
-    }
-
-    // Build base query for teacher's subjects and classes
-    const teacherQuery = {};
-    
-    // If user is a teacher, filter by their assigned subjects
-    if (req.user.role === 'teacher' && req.user.subjects && req.user.subjects.length > 0) {
-      const subjectConditions = req.user.subjects.map(sub => ({
-        subject: sub.subject,
-        class: sub.class
-      }));
-      
-      if (subjectConditions.length > 0) {
-        teacherQuery.$or = subjectConditions;
-      }
-    }
-
-    // Fetch data in parallel
-    const [tests, results, questions, totalStudents] = await Promise.all([
-      Test.find(teacherQuery)
-        .sort({ createdAt: -1 })
-        .lean(),
-      Result.find(teacherQuery)
-        .populate('userId', 'name surname')
-        .populate('testId', 'title subject class')
-        .lean(),
-      // Assuming you have a Question model
-      // Question.countDocuments(teacherQuery).catch(() => 0),
-      Promise.resolve(0), // Placeholder if you don't have questions
-      User.countDocuments({ role: 'student' }).catch(() => 0)
-    ]);
-
-    console.log('📊 Analytics Data:', {
-      testsCount: tests.length,
-      resultsCount: results.length,
-      questionsCount: questions,
-      totalStudents
-    });
-
-    // If no data found
-    if (tests.length === 0 && results.length === 0) {
-      return res.json({
-        success: true,
-        analytics: [],
-        summary: {
-          totalStudents: 0,
-          totalTests: 0,
-          totalQuestions: questions,
-          overallAverageScore: 0
-        }
-      });
-    }
-
-    // Calculate test analytics
-    const testAnalytics = tests.map(test => {
-      const testResults = results.filter(r => 
-        r.testId && r.testId._id.toString() === test._id.toString()
-      );
-      
-      const totalStudentsInTest = testResults.length;
-      const completed = testResults.filter(r => r.submittedAt).length;
-      const completionRate = totalStudentsInTest > 0 ? 
-        ((completed / totalStudentsInTest) * 100).toFixed(2) : 0;
-      
-      const scores = testResults.map(r => r.score || 0);
-      const averageScore = scores.length > 0 ? 
-        (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2) : 0;
-      
-      // Find top performer
-      let topStudent = 'N/A';
-      let topScore = 0;
-      if (testResults.length > 0) {
-        const sortedResults = [...testResults].sort((a, b) => (b.score || 0) - (a.score || 0));
-        topStudent = `${sortedResults[0].userId?.name || 'N/A'} ${sortedResults[0].userId?.surname || ''}`.trim();
-        topScore = sortedResults[0].score || 0;
-      }
-
-      return {
-        testId: test._id,
-        testTitle: test.title || 'Untitled Test',
-        subject: test.subject || 'Unknown Subject',
-        class: test.class || 'Unknown Class',
-        averageScore: parseFloat(averageScore),
-        completionRate: parseFloat(completionRate),
-        totalStudents: totalStudentsInTest,
-        completedStudents: completed,
-        topStudent,
-        topScore,
-        createdAt: test.createdAt
-      };
-    });
-
-    // Calculate overall metrics
-    const allScores = results.map(r => r.score || 0).filter(score => score > 0);
-    const overallAverageScore = allScores.length > 0 ? 
-      (allScores.reduce((a, b) => a + b, 0) / allScores.length).toFixed(2) : 0;
-
-    // Subject performance
-    const subjectPerformance = {};
-    results.forEach(result => {
-      const subject = result.testId?.subject || 'Unknown';
-      if (!subjectPerformance[subject]) {
-        subjectPerformance[subject] = { total: 0, count: 0, totalStudents: new Set() };
-      }
-      subjectPerformance[subject].total += result.score || 0;
-      subjectPerformance[subject].count += 1;
-      if (result.userId) {
-        subjectPerformance[subject].totalStudents.add(result.userId._id.toString());
-      }
-    });
-
-    const subjectRanking = Object.entries(subjectPerformance)
-      .map(([subject, data]) => ({
-        subject,
-        averageScore: (data.total / data.count).toFixed(2),
-        totalTests: data.count,
-        totalStudents: data.totalStudents.size
-      }))
-      .sort((a, b) => parseFloat(b.averageScore) - parseFloat(a.averageScore));
-
-    // Class performance
-    const classPerformance = {};
-    results.forEach(result => {
-      const className = result.testId?.class || 'Unknown';
-      if (!classPerformance[className]) {
-        classPerformance[className] = { total: 0, count: 0 };
-      }
-      classPerformance[className].total += result.score || 0;
-      classPerformance[className].count += 1;
-    });
-
-    const classRanking = Object.entries(classPerformance)
-      .map(([className, data]) => ({
-        className,
-        averageScore: (data.total / data.count).toFixed(2),
-        totalTests: data.count
-      }))
-      .sort((a, b) => parseFloat(b.averageScore) - parseFloat(a.averageScore));
-
-    // Student performance distribution
-    const studentPerformance = {
-      excellent: results.filter(r => (r.score || 0) >= 90).length,
-      good: results.filter(r => (r.score || 0) >= 75 && (r.score || 0) < 90).length,
-      average: results.filter(r => (r.score || 0) >= 50 && (r.score || 0) < 75).length,
-      poor: results.filter(r => (r.score || 0) < 50).length
-    };
-
-    // Recent tests (last 10)
-    const recentTests = tests
-      .slice(0, 10)
-      .map(test => {
-        const testResults = results.filter(r => 
-          r.testId && r.testId._id.toString() === test._id.toString()
-        );
-        const avgScore = testResults.length > 0 ? 
-          (testResults.reduce((sum, r) => sum + (r.score || 0), 0) / testResults.length).toFixed(2) : 0;
-        
-        return {
-          testId: test._id,
-          title: test.title || 'Untitled Test',
-          subject: test.subject,
-          class: test.class,
-          averageScore: parseFloat(avgScore),
-          studentCount: testResults.length,
-          date: test.createdAt
-        };
-      });
-
-    const response = {
-      success: true,
-      analytics: testAnalytics,
-      summary: {
-        totalStudents,
-        totalTests: tests.length,
-        totalQuestions: questions,
-        overallAverageScore: parseFloat(overallAverageScore),
-        totalResults: results.length
-      },
-      rankings: {
-        bySubject: subjectRanking,
-        byClass: classRanking
-      },
-      distribution: studentPerformance,
-      recentTests,
-      generatedAt: new Date().toISOString()
-    };
-
-    console.log('📊 Analytics Response:', {
-      tests: response.summary.totalTests,
-      analyticsCount: response.analytics.length
+    console.log('✅ Analytics response prepared:', {
+      analyticsCount: testAnalytics.length,
+      summary: response.summary
     });
 
     res.json(response);
 
   } catch (error) {
-    console.error('❌ Analytics Error:', error);
+    console.error('❌ ANALYTICS ERROR:', {
+      message: error.message,
+      stack: error.stack,
+      teacherId: req.user?.id,
+      username: req.user?.username
+    });
+    
     res.status(500).json({
       success: false,
       error: 'Server error generating analytics',
-      message: error.message
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
 
-// GET subject-specific analytics
+// ==================== ADDITIONAL ANALYTICS ENDPOINTS ====================
+
+// Get test analytics by subject
 router.get('/subject/:subject', auth, async (req, res) => {
   try {
     const { subject } = req.params;
-    const { className } = req.query;
+    const { class: className, startDate, endDate } = req.query;
+    
+    console.log('📊 Subject analytics for:', { subject, className });
 
-    // Build query
-    const query = { subject };
-    if (className) query.class = className;
-
-    // If teacher, filter by their assigned classes
-    if (req.user.role === 'teacher' && req.user.subjects) {
-      const teacherSubjects = req.user.subjects
-        .filter(s => s.subject === subject)
-        .map(s => s.class);
+    // For teachers, verify they have access to this subject
+    if (req.user.role === 'teacher') {
+      const teacherAssignments = await getTeacherAssignments(req.user.id);
+      const hasAccess = teacherAssignments.some(a => 
+        a.subject === subject && (!className || a.class === className)
+      );
       
-      if (teacherSubjects.length > 0) {
-        query.class = { $in: teacherSubjects };
+      if (!hasAccess) {
+        return res.status(403).json({
+          success: false,
+          error: 'Not authorized to view analytics for this subject'
+        });
       }
     }
 
-    const results = await Result.find(query)
-      .populate('userId', 'name surname studentId')
-      .populate('testId', 'title type session term')
-      .lean();
-
-    if (results.length === 0) {
-      return res.json({
-        success: true,
-        subject,
-        className: className || 'all',
-        analytics: [],
-        summary: {
-          totalStudents: 0,
-          averageScore: 0,
-          totalTests: 0
-        }
-      });
+    // Build query
+    const query = { subject, isActive: true };
+    if (className && className !== 'all') {
+      query.class = className;
+    }
+    
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate);
+      if (endDate) query.createdAt.$lte = new Date(endDate);
     }
 
-    // Calculate statistics
-    const scores = results.map(r => r.score || 0);
-    const averageScore = (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2);
-    
-    // Group by test
-    const tests = {};
+    // Get tests and results
+    const [tests, results] = await Promise.all([
+      Test.find(query)
+        .populate('class', 'name shortName')
+        .sort({ createdAt: -1 })
+        .lean(),
+      Result.find(query)
+        .populate('userId', 'name surname studentId')
+        .populate('testId', 'title subject')
+        .lean()
+    ]);
+
+    // Group results by test
+    const testPerformance = {};
     results.forEach(result => {
       if (result.testId) {
-        const testId = result.testId._id;
-        if (!tests[testId]) {
-          tests[testId] = {
-            testTitle: result.testId.title || 'Unknown Test',
-            testType: result.testId.type || 'test',
+        const testId = result.testId._id.toString();
+        if (!testPerformance[testId]) {
+          testPerformance[testId] = {
+            testTitle: result.testId.title,
             scores: [],
-            totalStudents: 0
+            students: new Set()
           };
         }
-        tests[testId].scores.push(result.score || 0);
-        tests[testId].totalStudents += 1;
+        testPerformance[testId].scores.push(result.score || 0);
+        if (result.userId) {
+          testPerformance[testId].students.add(result.userId._id.toString());
+        }
       }
     });
 
-    // Calculate test averages
-    const testAnalytics = Object.values(tests).map(test => ({
-      testTitle: test.testTitle,
-      testType: test.testType,
-      averageScore: (test.scores.reduce((a, b) => a + b, 0) / test.scores.length).toFixed(2),
-      totalStudents: test.totalStudents
+    // Format analytics
+    const analytics = Object.entries(testPerformance).map(([testId, data]) => ({
+      testId,
+      testTitle: data.testTitle,
+      averageScore: parseFloat((data.scores.reduce((a, b) => a + b, 0) / data.scores.length).toFixed(2)),
+      totalStudents: data.students.size,
+      highestScore: Math.max(...data.scores),
+      lowestScore: Math.min(...data.scores)
     }));
 
-    const response = {
-      success: true,
-      subject,
-      className: className || 'all',
-      analytics: testAnalytics,
-      summary: {
-        totalStudents: new Set(results.map(r => r.userId?._id?.toString())).size,
-        averageScore: parseFloat(averageScore),
-        totalTests: Object.keys(tests).length,
-        scoreRange: {
-          min: Math.min(...scores),
-          max: Math.max(...scores)
-        }
-      }
+    // Calculate subject statistics
+    const allScores = results.map(r => r.score || 0).filter(score => !isNaN(score));
+    const subjectStats = {
+      totalTests: tests.length,
+      totalResults: results.length,
+      uniqueStudents: new Set(results.map(r => r.userId?._id?.toString()).filter(id => id)).size,
+      averageScore: allScores.length > 0 ? 
+        parseFloat((allScores.reduce((a, b) => a + b, 0) / allScores.length).toFixed(2)) : 0,
+      scoreRange: allScores.length > 0 ? {
+        min: Math.min(...allScores),
+        max: Math.max(...allScores)
+      } : { min: 0, max: 0 }
     };
 
-    res.json(response);
+    res.json({
+      success: true,
+      subject,
+      className: className || 'All Classes',
+      analytics,
+      statistics: subjectStats,
+      tests: tests.slice(0, 10).map(test => ({
+        id: test._id,
+        title: test.title,
+        class: test.class?.name || test.class,
+        status: test.status,
+        createdAt: test.createdAt
+      }))
+    });
 
   } catch (error) {
-    console.error('Subject Analytics Error:', error);
+    console.error('Subject analytics error:', error);
     res.status(500).json({
       success: false,
       error: 'Server error generating subject analytics'
@@ -466,68 +561,406 @@ router.get('/subject/:subject', auth, async (req, res) => {
   }
 });
 
-// GET simple analytics for dropdowns/quick view
-router.get('/overview', auth, async (req, res) => {
+// Get class performance analytics
+router.get('/class/:classId', auth, async (req, res) => {
   try {
-    // Only teachers and admins
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.json({
-        success: true,
-        overview: {
-          averageScore: 0,
-          totalTests: 0,
-          totalStudents: 0,
-          completionRate: 0
-        }
+    const { classId } = req.params;
+    const { subject, startDate, endDate } = req.query;
+    
+    console.log('📊 Class analytics for:', { classId, subject });
+
+    // Get class info
+    const classDoc = await Class.findById(classId).select('name shortName level').lean();
+    if (!classDoc) {
+      return res.status(404).json({
+        success: false,
+        error: 'Class not found'
       });
     }
 
-    // Build teacher query
-    const teacherQuery = {};
-    if (req.user.role === 'teacher' && req.user.subjects) {
-      const subjectConditions = req.user.subjects.map(sub => ({
-        subject: sub.subject,
-        class: sub.class
-      }));
+    // Build query
+    const query = { class: classId, isActive: true };
+    if (subject && subject !== 'all') query.subject = subject;
+    
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate);
+      if (endDate) query.createdAt.$lte = new Date(endDate);
+    }
+
+    // Get data
+    const [tests, results, students] = await Promise.all([
+      Test.find(query).lean(),
+      Result.find(query)
+        .populate('userId', 'name surname studentId')
+        .populate('testId', 'title subject')
+        .lean(),
+      User.find({ class: classId, role: 'student', isActive: true })
+        .select('name surname studentId')
+        .lean()
+    ]);
+
+    // Calculate class performance by subject
+    const subjectPerformance = {};
+    results.forEach(result => {
+      const subjectName = result.testId?.subject || result.subject || 'Unknown';
+      const score = result.score || 0;
       
-      if (subjectConditions.length > 0) {
-        teacherQuery.$or = subjectConditions;
+      if (!subjectPerformance[subjectName]) {
+        subjectPerformance[subjectName] = {
+          totalScore: 0,
+          count: 0,
+          students: new Set()
+        };
+      }
+      subjectPerformance[subjectName].totalScore += score;
+      subjectPerformance[subjectName].count += 1;
+      if (result.userId) {
+        subjectPerformance[subjectName].students.add(result.userId._id.toString());
+      }
+    });
+
+    const subjectAnalytics = Object.entries(subjectPerformance).map(([subject, data]) => ({
+      subject,
+      averageScore: parseFloat((data.totalScore / data.count).toFixed(2)),
+      totalTests: data.count,
+      totalStudents: data.students.size,
+      studentParticipation: students.length > 0 ? 
+        parseFloat((data.students.size / students.length * 100).toFixed(2)) : 0
+    }));
+
+    // Student ranking
+    const studentScores = {};
+    results.forEach(result => {
+      if (result.userId) {
+        const studentId = result.userId._id.toString();
+        if (!studentScores[studentId]) {
+          studentScores[studentId] = {
+            name: `${result.userId.name || ''} ${result.userId.surname || ''}`.trim(),
+            studentId: result.userId.studentId,
+            totalScore: 0,
+            count: 0
+          };
+        }
+        studentScores[studentId].totalScore += result.score || 0;
+        studentScores[studentId].count += 1;
+      }
+    });
+
+    const studentRanking = Object.values(studentScores)
+      .map(student => ({
+        ...student,
+        averageScore: student.count > 0 ? 
+          parseFloat((student.totalScore / student.count).toFixed(2)) : 0
+      }))
+      .sort((a, b) => b.averageScore - a.averageScore);
+
+    res.json({
+      success: true,
+      class: {
+        id: classId,
+        name: classDoc.name,
+        shortName: classDoc.shortName,
+        level: classDoc.level
+      },
+      statistics: {
+        totalStudents: students.length,
+        totalTests: tests.length,
+        totalResults: results.length,
+        subjectCount: Object.keys(subjectPerformance).length,
+        participationRate: students.length > 0 ? 
+          parseFloat((Object.keys(studentScores).length / students.length * 100).toFixed(2)) : 0
+      },
+      subjectPerformance: subjectAnalytics,
+      topStudents: studentRanking.slice(0, 10),
+      recentTests: tests
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .slice(0, 5)
+        .map(test => ({
+          id: test._id,
+          title: test.title,
+          subject: test.subject,
+          status: test.status,
+          date: test.createdAt
+        }))
+    });
+
+  } catch (error) {
+    console.error('Class analytics error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error generating class analytics'
+    });
+  }
+});
+
+// Get student performance analytics
+router.get('/student/:studentId', auth, async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const { subject, startDate, endDate } = req.query;
+    
+    console.log('📊 Student analytics for:', studentId);
+
+    // Get student info
+    const student = await User.findById(studentId)
+      .select('name surname studentId class')
+      .populate('class', 'name shortName')
+      .lean();
+    
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        error: 'Student not found'
+      });
+    }
+
+    // Build query
+    const query = { userId: studentId, isActive: true };
+    if (subject && subject !== 'all') query.subject = subject;
+    
+    if (startDate || endDate) {
+      query.submittedAt = {};
+      if (startDate) query.submittedAt.$gte = new Date(startDate);
+      if (endDate) query.submittedAt.$lte = new Date(endDate);
+    }
+
+    // Get student results
+    const results = await Result.find(query)
+      .populate('testId', 'title subject totalMarks passingMarks')
+      .populate('class', 'name shortName')
+      .sort({ submittedAt: -1 })
+      .lean();
+
+    if (results.length === 0) {
+      return res.json({
+        success: true,
+        student,
+        analytics: [],
+        statistics: {
+          totalTests: 0,
+          averageScore: 0,
+          passRate: 0
+        },
+        message: 'No test results found for this student'
+      });
+    }
+
+    // Calculate performance by subject
+    const subjectPerformance = {};
+    results.forEach(result => {
+      const subjectName = result.testId?.subject || result.subject || 'Unknown';
+      const score = result.score || 0;
+      const totalMarks = result.testId?.totalMarks || 100;
+      const passingMarks = result.testId?.passingMarks || totalMarks * 0.5;
+      
+      if (!subjectPerformance[subjectName]) {
+        subjectPerformance[subjectName] = {
+          totalScore: 0,
+          count: 0,
+          passed: 0
+        };
+      }
+      subjectPerformance[subjectName].totalScore += score;
+      subjectPerformance[subjectName].count += 1;
+      
+      if (score >= passingMarks) {
+        subjectPerformance[subjectName].passed += 1;
+      }
+    });
+
+    const subjectAnalytics = Object.entries(subjectPerformance).map(([subject, data]) => ({
+      subject,
+      averageScore: parseFloat((data.totalScore / data.count).toFixed(2)),
+      totalTests: data.count,
+      passRate: data.count > 0 ? 
+        parseFloat((data.passed / data.count * 100).toFixed(2)) : 0
+    }));
+
+    // Overall statistics
+    const allScores = results.map(r => r.score || 0).filter(score => !isNaN(score));
+    const averageScore = allScores.length > 0 ? 
+      allScores.reduce((a, b) => a + b, 0) / allScores.length : 0;
+
+    const passedResults = results.filter(result => {
+      const score = result.score || 0;
+      const totalMarks = result.testId?.totalMarks || 100;
+      const passingMarks = result.testId?.passingMarks || totalMarks * 0.5;
+      return score >= passingMarks;
+    });
+
+    const passRate = results.length > 0 ? 
+      (passedResults.length / results.length) * 100 : 0;
+
+    // Performance over time
+    const performanceOverTime = results
+      .sort((a, b) => new Date(a.submittedAt) - new Date(b.submittedAt))
+      .map((result, index) => ({
+        testNumber: index + 1,
+        testTitle: result.testId?.title || 'Unknown Test',
+        score: result.score || 0,
+        percentage: result.percentage || 0,
+        date: result.submittedAt,
+        passed: (result.score || 0) >= (result.testId?.passingMarks || (result.testId?.totalMarks || 100) * 0.5)
+      }));
+
+    res.json({
+      success: true,
+      student,
+      statistics: {
+        totalTests: results.length,
+        averageScore: parseFloat(averageScore.toFixed(2)),
+        passRate: parseFloat(passRate.toFixed(2)),
+        bestScore: allScores.length > 0 ? Math.max(...allScores) : 0,
+        worstScore: allScores.length > 0 ? Math.min(...allScores) : 0,
+        totalTimeSpent: results.reduce((sum, r) => sum + (r.timeSpent || 0), 0)
+      },
+      subjectPerformance: subjectAnalytics,
+      performanceOverTime: performanceOverTime,
+      recentResults: results.slice(0, 10).map(result => ({
+        testTitle: result.testId?.title || 'Unknown Test',
+        subject: result.testId?.subject || result.subject,
+        score: result.score || 0,
+        totalMarks: result.testId?.totalMarks || result.totalMarks || 100,
+        percentage: result.percentage || 0,
+        passed: (result.score || 0) >= (result.testId?.passingMarks || (result.testId?.totalMarks || 100) * 0.5),
+        date: result.submittedAt
+      }))
+    });
+
+  } catch (error) {
+    console.error('Student analytics error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error generating student analytics'
+    });
+  }
+});
+
+// Get dashboard overview (quick stats)
+router.get('/overview', auth, async (req, res) => {
+  try {
+    console.log('📊 Dashboard overview for:', req.user.username, 'Role:', req.user.role);
+    
+    let query = { isActive: true };
+    
+    // For teachers, filter by their assignments
+    if (req.user.role === 'teacher') {
+      const teacherAssignments = await getTeacherAssignments(req.user.id);
+      if (teacherAssignments.length > 0) {
+        const conditions = teacherAssignments.map(a => ({
+          subject: a.subject,
+          class: a.class
+        }));
+        query.$or = conditions;
       }
     }
 
-    const [tests, results] = await Promise.all([
-      Test.find(teacherQuery).lean(),
-      Result.find(teacherQuery).lean()
+    // Get counts
+    const [totalTests, totalResults, activeTests, recentTests] = await Promise.all([
+      Test.countDocuments(query),
+      Result.countDocuments(query),
+      Test.countDocuments({ ...query, status: 'active' }),
+      Test.find(query)
+        .populate('class', 'name shortName')
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .select('title subject class status createdAt')
+        .lean()
     ]);
 
-    // Calculate quick overview
-    const totalTests = tests.length;
-    const totalResults = results.length;
-    
-    const averageScore = totalResults > 0 ? 
-      (results.reduce((sum, r) => sum + (r.score || 0), 0) / totalResults).toFixed(2) : 0;
-    
-    const completionRate = totalTests > 0 ? 
-      ((totalResults / (totalTests * 10)) * 100).toFixed(2) : 0; // Assuming 10 students per test average
+    // Get average score
+    const results = await Result.find(query).select('score').lean();
+    const scores = results.map(r => r.score || 0).filter(s => !isNaN(s) && s > 0);
+    const averageScore = scores.length > 0 ? 
+      scores.reduce((a, b) => a + b, 0) / scores.length : 0;
 
     res.json({
       success: true,
       overview: {
-        averageScore: parseFloat(averageScore),
         totalTests,
         totalResults,
-        completionRate: parseFloat(completionRate),
-        activeTests: tests.filter(t => t.status === 'active').length
-      }
+        activeTests,
+        averageScore: parseFloat(averageScore.toFixed(2)),
+        completionRate: totalTests > 0 ? 
+          parseFloat((totalResults / (totalTests * 10) * 100).toFixed(2)) : 0
+      },
+      recentTests: recentTests.map(test => ({
+        id: test._id,
+        title: test.title,
+        subject: test.subject,
+        class: test.class?.name || test.class,
+        status: test.status,
+        date: test.createdAt
+      }))
     });
 
   } catch (error) {
-    console.error('Overview Analytics Error:', error);
+    console.error('Dashboard overview error:', error);
     res.status(500).json({
       success: false,
-      error: 'Server error generating overview'
+      error: 'Server error generating dashboard overview'
     });
   }
+});
+
+// Test endpoint for development (mock data)
+router.get('/test', auth, (req, res) => {
+  console.log('📊 Test analytics endpoint hit by:', req.user.username);
+  
+  // Return mock data for testing
+  const mockData = {
+    success: true,
+    analytics: [
+      {
+        testId: 'mock-1',
+        testTitle: 'Mathematics Midterm Test',
+        subject: 'Mathematics',
+        class: 'JSS 1',
+        className: 'JSS 1',
+        averageScore: 78.5,
+        completionRate: 95.2,
+        totalStudents: 42,
+        completedStudents: 40,
+        topStudent: 'John Doe',
+        createdAt: new Date('2024-01-15'),
+        session: '2023/2024',
+        term: 'First Term',
+        status: 'completed',
+        totalMarks: 100,
+        passingMarks: 50
+      },
+      {
+        testId: 'mock-2',
+        testTitle: 'English Language Quiz',
+        subject: 'English',
+        class: 'JSS 2',
+        className: 'JSS 2',
+        averageScore: 82.3,
+        completionRate: 88.7,
+        totalStudents: 38,
+        completedStudents: 34,
+        topStudent: 'Jane Smith',
+        createdAt: new Date('2024-01-20'),
+        session: '2023/2024',
+        term: 'First Term',
+        status: 'completed',
+        totalMarks: 50,
+        passingMarks: 25
+      }
+    ],
+    summary: {
+      totalTests: 2,
+      totalResults: 76,
+      totalStudents: 45,
+      overallAverageScore: 80.4,
+      passRate: 92.1,
+      avgTimeSpent: 45,
+      improvement: 5.2
+    }
+  };
+  
+  res.json(mockData);
 });
 
 module.exports = router;

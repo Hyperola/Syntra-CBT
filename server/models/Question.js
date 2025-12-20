@@ -29,21 +29,30 @@ const questionSchema = new mongoose.Schema({
     default: 'multiple_choice',
     index: true
   },
-  options: [{
-    type: String,
+  options: {
+    type: [String],
     required: function() {
       return this.type === 'multiple_choice';
     },
     validate: {
-      validator: function(options) {
+      validator: function(optionsArray) {
         if (this.type === 'multiple_choice') {
-          return options && options.length >= 2 && options.length <= 6;
+          // Check if optionsArray is an array
+          if (!Array.isArray(optionsArray)) return false;
+          
+          // Filter out empty or whitespace-only options
+          const nonEmptyOptions = optionsArray.filter(opt => 
+            opt && typeof opt === 'string' && opt.trim().length > 0
+          );
+          
+          // Check if we have 2-6 non-empty options
+          return nonEmptyOptions.length >= 2 && nonEmptyOptions.length <= 6;
         }
         return true;
       },
-      message: 'Multiple choice questions must have 2-6 options'
+      message: 'Multiple choice questions must have 2-6 non-empty options'
     }
-  }],
+  },
   correctAnswer: {
     type: mongoose.Schema.Types.Mixed,
     required: function() {
@@ -52,7 +61,15 @@ const questionSchema = new mongoose.Schema({
     validate: {
       validator: function(correctAnswer) {
         if (this.type === 'multiple_choice') {
-          return this.options && this.options.includes(correctAnswer);
+          // Make sure options is an array and includes the correct answer
+          if (!Array.isArray(this.options)) return false;
+          
+          // Filter out empty options for validation
+          const nonEmptyOptions = this.options.filter(opt => 
+            opt && typeof opt === 'string' && opt.trim().length > 0
+          );
+          
+          return nonEmptyOptions.includes(correctAnswer);
         }
         if (this.type === 'true_false') {
           return ['true', 'false', true, false].includes(correctAnswer);
@@ -157,6 +174,13 @@ questionSchema.pre('save', function(next) {
   // Ensure options are only for multiple_choice questions
   if (this.type !== 'multiple_choice') {
     this.options = undefined;
+  }
+  
+  // Clean options array - remove empty strings
+  if (this.type === 'multiple_choice' && Array.isArray(this.options)) {
+    this.options = this.options
+      .map(opt => typeof opt === 'string' ? opt.trim() : opt)
+      .filter(opt => opt && opt.length > 0);
   }
   
   // Update usage tracking

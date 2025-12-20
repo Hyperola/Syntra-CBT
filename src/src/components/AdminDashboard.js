@@ -26,7 +26,6 @@ const AdminDashboard = () => {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [apiStatus, setApiStatus] = useState({});
   const [lastUpdated, setLastUpdated] = useState(null);
 
   const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
@@ -47,20 +46,45 @@ const AdminDashboard = () => {
       return data.users;
     }
     
-    // Handle tests API response
+    // Handle tests API response - FIXED VERSION
     if (key === 'tests') {
+      // First check for success response with tests array
       if (data.success && data.tests && Array.isArray(data.tests)) {
+        console.log('✅ Found tests in data.tests:', data.tests.length);
         return data.tests;
       }
+      
+      // Check if tests is directly an array
       if (data.tests && Array.isArray(data.tests)) {
+        console.log('✅ Found tests array directly:', data.tests.length);
         return data.tests;
       }
+      
+      // Check for data.data array
       if (data.data && Array.isArray(data.data)) {
+        console.log('✅ Found tests in data.data:', data.data.length);
         return data.data;
       }
+      
+      // Check if response is directly an array
       if (Array.isArray(data)) {
+        console.log('✅ Response is directly an array:', data.length);
         return data;
       }
+      
+      // Check for pagination response
+      if (data.data && data.data.tests && Array.isArray(data.data.tests)) {
+        console.log('✅ Found tests in data.data.tests:', data.data.tests.length);
+        return data.data.tests;
+      }
+      
+      // Check for legacy response format
+      if (data[key] && Array.isArray(data[key])) {
+        console.log('✅ Found tests in data[key]:', data[key].length);
+        return data[key];
+      }
+      
+      console.log('⚠️ No tests found in response:', data);
       return [];
     }
     
@@ -89,7 +113,34 @@ const AdminDashboard = () => {
     return [];
   };
 
-  // Fetch dashboard data
+  // Helper function to safely get class name from test
+  const getClassName = (test) => {
+    if (!test) return 'All Classes';
+    
+    // If class is an object with name property
+    if (test.class && typeof test.class === 'object' && test.class.name) {
+      return test.class.name;
+    }
+    
+    // If class is a string
+    if (typeof test.class === 'string') {
+      return test.class;
+    }
+    
+    // If className exists
+    if (test.className) {
+      return test.className;
+    }
+    
+    // If class has _id (object without name)
+    if (test.class && typeof test.class === 'object' && test.class._id) {
+      return 'Class ID: ' + test.class._id.toString().substring(0, 8) + '...';
+    }
+    
+    return 'All Classes';
+  };
+
+  // Fetch dashboard data - FIXED TESTS API CALL
   const fetchDashboardData = useCallback(async () => {
     if (!user || !['admin', 'super_admin'].includes(user.role)) {
       setLoading(false);
@@ -98,7 +149,6 @@ const AdminDashboard = () => {
     
     setLoading(true);
     setError('');
-    setApiStatus({});
 
     try {
       const token = localStorage.getItem('token');
@@ -121,9 +171,9 @@ const AdminDashboard = () => {
           timeout: 10000
         });
         classes = extractDataFromResponse(classesRes, 'classes');
-        setApiStatus(prev => ({ ...prev, classes: 'success' }));
+        console.log('✅ Classes fetched:', classes.length);
       } catch (err) {
-        setApiStatus(prev => ({ ...prev, classes: 'failed' }));
+        console.error('❌ Classes fetch error:', err.message);
       }
 
       // 2. Fetch user statistics
@@ -183,9 +233,9 @@ const AdminDashboard = () => {
           };
         }
         
-        setApiStatus(prev => ({ ...prev, users: 'success' }));
+        console.log('✅ Users fetched:', users.length);
       } catch (err) {
-        setApiStatus(prev => ({ ...prev, users: 'failed' }));
+        console.error('❌ Users fetch error:', err.message);
         // Set default stats
         userStats = {
           total: 0,
@@ -202,36 +252,46 @@ const AdminDashboard = () => {
         };
       }
 
-      // 3. Fetch tests with multiple endpoint fallbacks
+      // 3. Fetch tests - FIXED WITH CORRECT ENDPOINT
       try {
-        let testsRes;
-        const endpoints = [
-          `${API_BASE_URL}/api/tests?limit=20&status=all`,
-          `${API_BASE_URL}/api/tests?limit=20`,
-          `${API_BASE_URL}/api/tests`
-        ];
+        console.log('🔍 Fetching tests from:', `${API_BASE_URL}/api/tests`);
         
-        // Try each endpoint until one succeeds
-        for (const endpoint of endpoints) {
-          try {
-            testsRes = await axios.get(endpoint, { 
-              headers,
-              timeout: 5000 
-            });
-            if (testsRes.data) break; // Exit loop if successful
-          } catch (e) {
-            continue; // Try next endpoint
-          }
+        // Use the correct endpoint from your routes
+        const testsRes = await axios.get(`${API_BASE_URL}/api/tests`, { 
+          headers,
+          timeout: 8000 
+        });
+        
+        console.log('📊 Tests API Response:', {
+          status: testsRes.status,
+          dataKeys: Object.keys(testsRes.data || {}),
+          hasSuccess: testsRes.data?.success,
+          hasTests: testsRes.data?.tests,
+          hasData: testsRes.data?.data,
+          responseSample: testsRes.data
+        });
+        
+        tests = extractDataFromResponse(testsRes, 'tests');
+        
+        console.log('✅ Tests fetched:', tests.length);
+        if (tests.length > 0) {
+          console.log('📝 Sample test:', {
+            id: tests[0]._id,
+            title: tests[0].title,
+            class: tests[0].class,
+            classType: typeof tests[0].class,
+            classKeys: tests[0].class ? Object.keys(tests[0].class) : 'null'
+          });
         }
         
-        if (testsRes && testsRes.data) {
-          tests = extractDataFromResponse(testsRes, 'tests');
-          setApiStatus(prev => ({ ...prev, tests: 'success' }));
-        } else {
-          throw new Error('All test endpoints failed');
-        }
       } catch (err) {
-        setApiStatus(prev => ({ ...prev, tests: 'failed' }));
+        console.error('❌ Tests fetch error:', {
+          message: err.message,
+          response: err.response?.data,
+          status: err.response?.status,
+          config: err.config?.url
+        });
+        tests = [];
       }
 
       // 4. Fetch sessions
@@ -241,9 +301,9 @@ const AdminDashboard = () => {
           timeout: 8000 
         });
         sessions = extractDataFromResponse(sessionsRes, 'sessions');
-        setApiStatus(prev => ({ ...prev, sessions: 'success' }));
+        console.log('✅ Sessions fetched:', sessions.length);
       } catch (err) {
-        setApiStatus(prev => ({ ...prev, sessions: 'failed' }));
+        console.error('❌ Sessions fetch error:', err.message);
       }
 
       // Calculate statistics from fetched data
@@ -275,18 +335,22 @@ const AdminDashboard = () => {
         .slice(0, 5)
         : [];
 
-      // Get recent tests (last 5)
+      // Get recent tests (last 5) - FIXED SORTING
       const recentTests = Array.isArray(tests) ? tests
         .sort((a, b) => {
           try {
-            return new Date(b.createdAt || b.updatedAt || b.date || 0) - 
-                   new Date(a.createdAt || a.updatedAt || a.date || 0);
+            const dateA = a.createdAt || a.updatedAt || a.date || 0;
+            const dateB = b.createdAt || b.updatedAt || b.date || 0;
+            return new Date(dateB).getTime() - new Date(dateA).getTime();
           } catch (e) {
+            console.error('Sort error:', e);
             return 0;
           }
         })
         .slice(0, 5)
         : [];
+
+      console.log('📊 Recent tests:', recentTests.length);
 
       // Update state with calculated data
       setData({
@@ -315,8 +379,10 @@ const AdminDashboard = () => {
       });
 
       setLastUpdated(new Date());
+      console.log('✅ Dashboard data updated successfully');
 
     } catch (err) {
+      console.error('💥 Dashboard fetch error:', err);
       setError('Failed to load dashboard data. Some features may be limited.');
     } finally {
       setLoading(false);
@@ -397,19 +463,6 @@ const AdminDashboard = () => {
         <p style={styles.loadingText}>Loading Dashboard Data...</p>
         <div style={styles.loadingDetails}>
           <p style={styles.loadingSubtext}>Fetching system statistics</p>
-          {Object.keys(apiStatus).length > 0 && (
-            <div style={styles.apiStatus}>
-              {Object.entries(apiStatus).map(([key, status]) => (
-                <span key={key} style={{
-                  ...styles.statusBadge,
-                  backgroundColor: status === 'success' ? '#D1FAE5' : '#FEE2E2',
-                  color: status === 'success' ? '#065F46' : '#991B1B'
-                }}>
-                  {key}: {status === 'success' ? '✓' : '✗'}
-                </span>
-              ))}
-            </div>
-          )}
         </div>
       </div>
     );
@@ -511,37 +564,6 @@ const AdminDashboard = () => {
             </div>
           </div>
         </div>
-
-        {/* API Status */}
-        {Object.keys(apiStatus).length > 0 && (
-          <div style={styles.apiStatusPanel}>
-            <div style={styles.apiStatusHeader}>
-              <FiActivity style={styles.apiStatusIcon} />
-              <span style={styles.apiStatusTitle}>API Status</span>
-            </div>
-            <div style={styles.apiStatusGrid}>
-              {Object.entries(apiStatus).map(([key, status]) => (
-                <div key={key} style={styles.apiStatusItem}>
-                  <span style={styles.apiStatusKey}>{key}:</span>
-                  <span style={{
-                    ...styles.apiStatusValue,
-                    color: status === 'success' ? '#059669' : '#DC2626'
-                  }}>
-                    {status === 'success' ? (
-                      <>
-                        <span style={styles.successDot}>●</span> Connected
-                      </>
-                    ) : (
-                      <>
-                        <span style={styles.errorDot}>●</span> Failed
-                      </>
-                    )}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Stats Cards */}
         <div style={styles.statsGrid}>
@@ -747,6 +769,8 @@ const AdminDashboard = () => {
                 <div style={styles.testList}>
                   {data.recentTests.map(test => {
                     const statusStyle = getStatusStyle(test.status);
+                    const className = getClassName(test);
+                    
                     return (
                       <div key={test._id || test.id} style={styles.testCard}>
                         <div style={styles.testInfo}>
@@ -764,7 +788,7 @@ const AdminDashboard = () => {
                           </div>
                           <p style={styles.testMeta}>
                             <FiBook style={styles.metaIcon} />
-                            {test.subject || 'General'} • {test.class?.name || test.className || 'All Classes'}
+                            {test.subject || 'General'} • {className}
                           </p>
                           <div style={styles.testFooter}>
                             <span style={styles.testDate}>
@@ -774,7 +798,7 @@ const AdminDashboard = () => {
                             {test.questions && (
                               <span style={styles.testQuestions}>
                                 <FiFileText style={styles.footerIcon} />
-                                {test.questions.length} questions
+                                {test.questions.length || 0} questions
                               </span>
                             )}
                           </div>
@@ -834,44 +858,58 @@ const AdminDashboard = () => {
             <div style={styles.columnContent}>
               {data.upcomingSessions.length > 0 ? (
                 <div style={styles.sessionList}>
-                  {data.upcomingSessions.map(session => (
-                    <div key={session._id || session.id} style={styles.sessionCard}>
-                      <div style={styles.sessionInfo}>
-                        <div style={styles.sessionHeader}>
-                          <h4 style={styles.sessionTitle}>
-                            {session.sessionName || session.name || 'Academic Session'}
-                          </h4>
-                          <span style={styles.sessionStatus}>
-                            Upcoming
-                          </span>
-                        </div>
-                        <p style={styles.sessionMeta}>
-                          <FiClock style={styles.metaIcon} />
-                          {formatDate(session.startDate)}
-                          {session.term && ` • Term: ${session.term}`}
-                        </p>
-                        {session.description && (
-                          <p style={styles.sessionDescription}>
-                            {session.description.length > 100 
-                              ? `${session.description.substring(0, 100)}...` 
-                              : session.description}
-                          </p>
-                        )}
-                        {session.class && (
-                          <div style={styles.sessionFooter}>
-                            <span style={styles.sessionClass}>
-                              <FiBook style={styles.footerIcon} />
-                              Class: {session.class.name || session.class}
-                            </span>
-                            <span style={styles.sessionDuration}>
-                              <FiClock style={styles.footerIcon} />
-                              {session.duration || 'Not specified'}
+                  {data.upcomingSessions.map(session => {
+                    // Safely get session class name
+                    let sessionClassName = 'Not specified';
+                    if (session.class) {
+                      if (typeof session.class === 'object' && session.class.name) {
+                        sessionClassName = session.class.name;
+                      } else if (typeof session.class === 'string') {
+                        sessionClassName = session.class;
+                      } else {
+                        sessionClassName = 'Class ID: ' + (session.class._id || session.class).toString().substring(0, 8) + '...';
+                      }
+                    }
+                    
+                    return (
+                      <div key={session._id || session.id} style={styles.sessionCard}>
+                        <div style={styles.sessionInfo}>
+                          <div style={styles.sessionHeader}>
+                            <h4 style={styles.sessionTitle}>
+                              {session.sessionName || session.name || 'Academic Session'}
+                            </h4>
+                            <span style={styles.sessionStatus}>
+                              Upcoming
                             </span>
                           </div>
-                        )}
+                          <p style={styles.sessionMeta}>
+                            <FiClock style={styles.metaIcon} />
+                            {formatDate(session.startDate)}
+                            {session.term && ` • Term: ${session.term}`}
+                          </p>
+                          {session.description && (
+                            <p style={styles.sessionDescription}>
+                              {session.description.length > 100 
+                                ? `${session.description.substring(0, 100)}...` 
+                                : session.description}
+                            </p>
+                          )}
+                          {session.class && (
+                            <div style={styles.sessionFooter}>
+                              <span style={styles.sessionClass}>
+                                <FiBook style={styles.footerIcon} />
+                                Class: {sessionClassName}
+                              </span>
+                              <span style={styles.sessionDuration}>
+                                <FiClock style={styles.footerIcon} />
+                                {session.duration || 'Not specified'}
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div style={styles.emptyState}>
@@ -955,14 +993,9 @@ const AdminDashboard = () => {
               </div>
               <div style={styles.summaryCardContent}>
                 <div style={styles.statusItem}>
-                  <span style={styles.statusLabel}>API Status:</span>
-                  <span style={{
-                    ...styles.statusValue,
-                    color: Object.values(apiStatus).every(s => s === 'success') ? '#059669' : '#D97706'
-                  }}>
-                    {Object.values(apiStatus).every(s => s === 'success') 
-                      ? 'All Systems Operational' 
-                      : 'Partial Data Loaded'}
+                  <span style={styles.statusLabel}>Total Users:</span>
+                  <span style={styles.statusValue}>
+                    {data.userStats.total.toLocaleString()}
                   </span>
                 </div>
                 <div style={styles.statusItem}>
@@ -1041,7 +1074,7 @@ const AdminDashboard = () => {
   );
 };
 
-// Styles (same as before - keep all your existing styles)
+// Styles (same as before)
 const styles = {
   container: {
     minHeight: '100vh',
@@ -1054,7 +1087,7 @@ const styles = {
     padding: '24px'
   },
   
-  // Header
+  // Header styles (same as before)
   header: {
     display: 'flex',
     justifyContent: 'space-between',
@@ -1191,66 +1224,7 @@ const styles = {
     }
   },
   
-  // API Status
-  apiStatusPanel: {
-    backgroundColor: '#FFFFFF',
-    padding: '20px',
-    borderRadius: '12px',
-    marginBottom: '32px',
-    border: '1px solid #E5E7EB',
-    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.04)'
-  },
-  apiStatusHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    marginBottom: '16px'
-  },
-  apiStatusIcon: {
-    fontSize: '20px',
-    color: '#4B5320'
-  },
-  apiStatusTitle: {
-    fontSize: '16px',
-    fontWeight: '600',
-    color: '#1F2937'
-  },
-  apiStatusGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-    gap: '12px'
-  },
-  apiStatusItem: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '8px 12px',
-    backgroundColor: '#F9FAFB',
-    borderRadius: '8px',
-    border: '1px solid #E5E7EB'
-  },
-  apiStatusKey: {
-    fontSize: '14px',
-    color: '#6B7280',
-    fontWeight: '500'
-  },
-  apiStatusValue: {
-    fontSize: '14px',
-    fontWeight: '600',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px'
-  },
-  successDot: {
-    color: '#10B981',
-    fontSize: '20px'
-  },
-  errorDot: {
-    color: '#EF4444',
-    fontSize: '20px'
-  },
-  
-  // Stats Cards
+  // Stats Cards styles (same as before)
   statsGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
@@ -1352,7 +1326,7 @@ const styles = {
     }
   },
   
-  // Sections
+  // Sections styles (same as before)
   section: {
     marginBottom: '48px'
   },
@@ -1381,7 +1355,7 @@ const styles = {
     margin: 0
   },
   
-  // Quick Actions
+  // Quick Actions styles (same as before)
   actionsGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
@@ -1473,7 +1447,7 @@ const styles = {
     transition: 'transform 0.2s ease'
   },
   
-  // Columns
+  // Columns styles (same as before)
   columns: {
     display: 'grid',
     gridTemplateColumns: '1fr 1fr',
@@ -1523,7 +1497,7 @@ const styles = {
     padding: '24px'
   },
   
-  // Test Cards
+  // Test Cards styles (same as before)
   testList: {
     display: 'flex',
     flexDirection: 'column',
@@ -1661,7 +1635,7 @@ const styles = {
     }
   },
   
-  // Session Cards
+  // Session Cards styles (same as before)
   sessionList: {
     display: 'flex',
     flexDirection: 'column',
@@ -1745,7 +1719,7 @@ const styles = {
     gap: '4px'
   },
   
-  // Buttons
+  // Buttons styles (same as before)
   manageButton: {
     width: '100%',
     marginTop: '20px',
@@ -1770,7 +1744,7 @@ const styles = {
     }
   },
   
-  // Empty States
+  // Empty States styles (same as before)
   emptyState: {
     textAlign: 'center',
     padding: '48px 24px',
@@ -1793,7 +1767,7 @@ const styles = {
     color: '#9CA3AF'
   },
   
-  // Summary
+  // Summary styles (same as before)
   summary: {
     backgroundColor: '#FFFFFF',
     padding: '32px',
@@ -1859,7 +1833,7 @@ const styles = {
     gap: '16px'
   },
   
-  // Distribution Items
+  // Distribution Items styles (same as before)
   distributionItem: {
     display: 'grid',
     gridTemplateColumns: '1fr auto',
@@ -1890,7 +1864,7 @@ const styles = {
     transition: 'width 0.3s ease'
   },
   
-  // Status Items
+  // Status Items styles (same as before)
   statusItem: {
     display: 'flex',
     justifyContent: 'space-between',
@@ -1912,7 +1886,7 @@ const styles = {
     color: '#1F2937'
   },
   
-  // Quick Stats
+  // Quick Stats styles (same as before)
   quickStat: {
     display: 'flex',
     alignItems: 'center',
@@ -1954,7 +1928,7 @@ const styles = {
     letterSpacing: '0.5px'
   },
   
-  // Footer
+  // Footer styles (same as before)
   footer: {
     textAlign: 'center',
     padding: '24px',
@@ -1973,7 +1947,7 @@ const styles = {
     color: '#9CA3AF'
   },
   
-  // Error States
+  // Error States styles (same as before)
   errorBanner: {
     marginBottom: '24px',
     padding: '16px 20px',
@@ -2033,7 +2007,7 @@ const styles = {
     }
   },
   
-  // Loading State
+  // Loading State styles (same as before)
   loadingContainer: {
     display: 'flex',
     flexDirection: 'column',
@@ -2073,7 +2047,7 @@ const styles = {
     margin: '0 0 20px 0'
   },
   
-  // Access Denied
+  // Access Denied styles (same as before)
   accessDenied: {
     display: 'flex',
     alignItems: 'center',
