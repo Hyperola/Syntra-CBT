@@ -6,7 +6,8 @@ import {
   FiAlertTriangle, FiCheckCircle, FiEye, FiCalendar, FiBarChart, 
   FiSearch, FiTrash2, FiClock, FiUsers, FiEdit, FiCheck, FiX, 
   FiRefreshCw, FiCheckSquare, FiChevronDown, FiChevronUp, 
-  FiUser, FiList, FiFileText, FiSend, FiArchive, FiExternalLink
+  FiUser, FiList, FiFileText, FiSend, FiArchive, FiExternalLink,
+  FiBookOpen, FiFilter
 } from 'react-icons/fi';
 
 const ManageTests = () => {
@@ -20,6 +21,8 @@ const ManageTests = () => {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterClass, setFilterClass] = useState('all');
+  const [filterSession, setFilterSession] = useState('');
+  const [filterTerm, setFilterTerm] = useState('');
   const [classes, setClasses] = useState([]);
   const [approvingId, setApprovingId] = useState(null);
   const [expandedTestId, setExpandedTestId] = useState(null);
@@ -27,6 +30,24 @@ const ManageTests = () => {
   const [loadingBatches, setLoadingBatches] = useState({});
   const [testStatuses, setTestStatuses] = useState({});
   const [submissions, setSubmissions] = useState({});
+
+  // Get current academic year and term for default filtering
+  const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth() + 1; // 1-12
+  const getCurrentSession = () => `${currentYear}/${currentYear + 1}`;
+  const getCurrentTerm = () => {
+    if (currentMonth >= 1 && currentMonth <= 4) return 'First Term';
+    if (currentMonth >= 5 && currentMonth <= 8) return 'Second Term';
+    return 'Third Term';
+  };
+
+  // Available sessions and terms for filtering
+  const availableSessions = Array.from({ length: 5 }, (_, i) => {
+    const year = currentYear - 2 + i;
+    return `${year}/${year + 1}`;
+  }).reverse();
+
+  const availableTerms = ['First Term', 'Second Term', 'Third Term'];
 
   useEffect(() => {
     if (user && (user.role === 'admin' || user.role === 'super_admin' || user.role === 'teacher')) {
@@ -447,6 +468,16 @@ const ManageTests = () => {
     return 'Unknown Class';
   };
 
+  const getClassId = (test) => {
+    if (!test.class) return null;
+    
+    if (typeof test.class === 'object' && test.class !== null) {
+      return test.class._id || test.class;
+    }
+    
+    return test.class;
+  };
+
   const getDisplayStatus = (test) => {
     const computed = testStatuses[test._id];
     return computed ? computed.status : test.status;
@@ -705,10 +736,24 @@ const ManageTests = () => {
       matchesClass = className === filterClass || classId === filterClass;
     }
     
-    return matchesSearch && matchesStatus && matchesClass;
+    // Session filtering
+    let matchesSession = true;
+    if (filterSession) {
+      matchesSession = test.session === filterSession;
+    }
+    
+    // Term filtering
+    let matchesTerm = true;
+    if (filterTerm) {
+      matchesTerm = test.term === filterTerm;
+    }
+    
+    return matchesSearch && matchesStatus && matchesClass && matchesSession && matchesTerm;
   });
 
   const uniqueClasses = [...new Set(tests.map(test => getClassName(test)).filter(Boolean))];
+  const uniqueSessions = [...new Set(tests.map(test => test.session).filter(Boolean))];
+  const uniqueTerms = [...new Set(tests.map(test => test.term).filter(Boolean))];
 
   const canManageTests = () => {
     if (!user) return false;
@@ -797,16 +842,6 @@ const ManageTests = () => {
       hour: '2-digit',
       minute: '2-digit'
     });
-  };
-
-  const getClassId = (test) => {
-    if (!test.class) return null;
-    
-    if (typeof test.class === 'object' && test.class !== null) {
-      return test.class._id || test.class;
-    }
-    
-    return test.class;
   };
 
   const getSubmissionStats = (test) => {
@@ -954,6 +989,33 @@ const ManageTests = () => {
                 ? 'Create and manage your tests' 
                 : 'Approve, schedule, and monitor tests'}
             </p>
+            <div style={{
+              display: 'flex',
+              gap: '8px',
+              marginTop: '8px',
+              fontSize: '14px',
+              color: '#6B7280'
+            }}>
+              <span>Default filter: Current Session ({getCurrentSession()})</span>
+              {filterSession && (
+                <button
+                  onClick={() => {
+                    setFilterSession('');
+                    setFilterTerm('');
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#D4A017',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    textDecoration: 'underline'
+                  }}
+                >
+                  Clear Filters
+                </button>
+              )}
+            </div>
           </div>
           
           <div style={{ display: 'flex', gap: '12px' }}>
@@ -1211,6 +1273,70 @@ const ManageTests = () => {
               <option key={cls} value={cls}>{cls}</option>
             ))}
           </select>
+
+          {/* Session Filter */}
+          <div style={{ position: 'relative' }}>
+            <FiBookOpen style={{
+              position: 'absolute',
+              left: '12px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              color: '#6B7280',
+              fontSize: '16px',
+              zIndex: 1
+            }} />
+            <select
+              value={filterSession}
+              onChange={e => setFilterSession(e.target.value)}
+              style={{
+                padding: '12px 16px 12px 40px',
+                border: '1px solid #D3D3D3',
+                borderRadius: '6px',
+                fontSize: '14px',
+                outline: 'none',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                minWidth: '150px',
+                backgroundColor: 'white',
+                appearance: 'none'
+              }}
+            >
+              <option value="">All Sessions</option>
+              {availableSessions.map(session => (
+                <option key={session} value={session}>{session}</option>
+              ))}
+              {uniqueSessions
+                .filter(session => !availableSessions.includes(session))
+                .map(session => (
+                  <option key={session} value={session}>{session}</option>
+                ))}
+            </select>
+          </div>
+
+          {/* Term Filter */}
+          <select
+            value={filterTerm}
+            onChange={e => setFilterTerm(e.target.value)}
+            style={{
+              padding: '12px 16px',
+              border: '1px solid #D3D3D3',
+              borderRadius: '6px',
+              fontSize: '14px',
+              outline: 'none',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+              minWidth: '150px',
+              backgroundColor: 'white'
+            }}
+          >
+            <option value="">All Terms</option>
+            {availableTerms.map(term => (
+              <option key={term} value={term}>{term}</option>
+            ))}
+            {uniqueTerms
+              .filter(term => !availableTerms.includes(term))
+              .map(term => (
+                <option key={term} value={term}>{term}</option>
+              ))}
+          </select>
         </div>
 
         {/* Tests List */}
@@ -1244,6 +1370,28 @@ const ManageTests = () => {
                 }}
               >
                 Create Your First Test
+              </button>
+            )}
+            {filterSession && (
+              <button
+                onClick={() => {
+                  setFilterSession('');
+                  setFilterTerm('');
+                }}
+                style={{
+                  marginTop: '16px',
+                  marginLeft: '8px',
+                  padding: '10px 20px',
+                  backgroundColor: '#6B7280',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '500'
+                }}
+              >
+                Clear Session/Term Filters
               </button>
             )}
           </div>
@@ -1318,6 +1466,44 @@ const ManageTests = () => {
                           </div>
                         </div>
                         
+                        {/* Session and Term Badges */}
+                        <div style={{
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          gap: '8px',
+                          alignItems: 'center',
+                          marginBottom: '12px'
+                        }}>
+                          {test.session && (
+                            <span style={{
+                              color: '#D4A017',
+                              fontSize: '13px',
+                              backgroundColor: '#FFF8E1',
+                              padding: '4px 8px',
+                              borderRadius: '4px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              fontWeight: '500'
+                            }}>
+                              <FiBookOpen size={12} />
+                              {test.session}
+                            </span>
+                          )}
+                          {test.term && (
+                            <span style={{
+                              color: '#4B5320',
+                              fontSize: '13px',
+                              backgroundColor: '#E8F5E9',
+                              padding: '4px 8px',
+                              borderRadius: '4px',
+                              fontWeight: '500'
+                            }}>
+                              {test.term}
+                            </span>
+                          )}
+                        </div>
+
                         {/* Submission progress for active/completed tests */}
                         {(displayStatus === 'active' || displayStatus === 'completed') && submissionStats.total > 0 && (
                           <div style={{

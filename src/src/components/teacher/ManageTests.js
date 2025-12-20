@@ -19,22 +19,41 @@ import {
   FiPlayCircle,
   FiCheck,
   FiEye,
-  FiLock
+  FiLock,
+  FiFilter,
+  FiChevronDown,
+  FiChevronUp,
+  FiCalendar as FiCalendarIcon
 } from 'react-icons/fi';
 
 const ManageTests = () => {
   const { tests: initialTests, fetchTests, error, success, setError, setSuccess, navigate } = useTeacherData();
   const [tests, setTests] = useState([]);
+  const [filteredTests, setFilteredTests] = useState([]);
   const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [classes, setClasses] = useState({});
   const [subjects, setSubjects] = useState({});
   const [assignments, setAssignments] = useState([]);
   const [isFetchingDetails, setIsFetchingDetails] = useState(false);
+  
+  // Session and Term Filtering State
+  const [sessions, setSessions] = useState([]);
+  const [terms, setTerms] = useState([]);
+  const [currentSession, setCurrentSession] = useState('');
+  const [currentTerm, setCurrentTerm] = useState('');
+  const [selectedSession, setSelectedSession] = useState('');
+  const [selectedTerm, setSelectedTerm] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [isFetchingCurrentTerm, setIsFetchingCurrentTerm] = useState(false);
 
   // Sync with hook data
   useEffect(() => {
     setTests(initialTests);
+    // Extract unique sessions and terms from tests
+    extractSessionsAndTerms(initialTests);
+    // Fetch current active session and term
+    fetchCurrentSessionAndTerm();
     // Fetch assignments and class/subject names when tests are loaded
     if (initialTests.length > 0) {
       fetchAssignments();
@@ -42,14 +61,191 @@ const ManageTests = () => {
     }
   }, [initialTests]);
 
-  // Debug: Log test data structure
+  // Filter tests based on selected session and term
   useEffect(() => {
-    if (initialTests.length > 0) {
-      console.log('Test data sample:', initialTests[0]);
-      console.log('Class value:', initialTests[0].class, 'Type:', typeof initialTests[0].class, 'Is ObjectId?', initialTests[0].class && /^[0-9a-fA-F]{24}$/.test(initialTests[0].class));
-      console.log('Subject value:', initialTests[0].subject, 'Type:', typeof initialTests[0].subject, 'Is ObjectId?', initialTests[0].subject && /^[0-9a-fA-F]{24}$/.test(initialTests[0].subject));
+    if (!selectedSession && !selectedTerm) {
+      // If no filters selected, show tests from current term
+      const filtered = tests.filter(test => 
+        test.session === currentSession && test.term === currentTerm
+      );
+      console.log('Filtering for current term:', { 
+        currentSession, 
+        currentTerm, 
+        filteredCount: filtered.length,
+        totalTests: tests.length 
+      });
+      setFilteredTests(filtered);
+    } else {
+      // Apply selected filters
+      const filtered = tests.filter(test => {
+        const sessionMatch = selectedSession ? test.session === selectedSession : true;
+        const termMatch = selectedTerm ? test.term === selectedTerm : true;
+        return sessionMatch && termMatch;
+      });
+      console.log('Filtering with selections:', { 
+        selectedSession, 
+        selectedTerm, 
+        filteredCount: filtered.length 
+      });
+      setFilteredTests(filtered);
     }
-  }, [initialTests]);
+  }, [tests, selectedSession, selectedTerm, currentSession, currentTerm]);
+
+  // Extract unique sessions and terms from tests
+  const extractSessionsAndTerms = (testList) => {
+    if (!testList || testList.length === 0) return;
+    
+    // Get all sessions from tests
+    const uniqueSessions = [...new Set(testList
+      .filter(test => test.session && test.session.trim() !== '')
+      .map(test => test.session)
+      .sort((a, b) => b.localeCompare(a)))]; // Sort descending (newest first)
+    
+    // Get terms for the selected session or all terms
+    let uniqueTerms = [];
+    if (selectedSession) {
+      uniqueTerms = [...new Set(testList
+        .filter(test => test.session === selectedSession && test.term && test.term.trim() !== '')
+        .map(test => test.term))];
+    } else {
+      uniqueTerms = [...new Set(testList
+        .filter(test => test.term && test.term.trim() !== '')
+        .map(test => test.term))];
+    }
+    
+    // Sort terms in logical order: First Term, Second Term, Third Term
+    const termOrder = ['First Term', 'Second Term', 'Third Term'];
+    uniqueTerms.sort((a, b) => {
+      const indexA = termOrder.indexOf(a);
+      const indexB = termOrder.indexOf(b);
+      if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+      if (indexA !== -1) return -1;
+      if (indexB !== -1) return 1;
+      return a.localeCompare(b);
+    });
+    
+    console.log('Extracted sessions:', uniqueSessions);
+    console.log('Extracted terms:', uniqueTerms);
+    
+    setSessions(uniqueSessions);
+    setTerms(uniqueTerms);
+  };
+
+  // Update terms when session changes
+  useEffect(() => {
+    if (tests.length > 0) {
+      extractSessionsAndTerms(tests);
+    }
+  }, [selectedSession, tests]);
+
+  // Fetch current active session and term from backend
+  const fetchCurrentSessionAndTerm = async () => {
+    setIsFetchingCurrentTerm(true);
+    try {
+      console.log('Fetching current active session and term...');
+      
+      // Use your sessions/active endpoint
+      const response = await api.get('/api/sessions/active');
+      console.log('Current session/term response:', response.data);
+      
+      if (response.data && response.data.session) {
+        const sessionName = response.data.session.sessionName || response.data.session;
+        const activeTerm = response.data.activeTerm;
+        
+        console.log('Parsed session data:', { 
+          sessionName, 
+          activeTerm,
+          fullResponse: response.data 
+        });
+        
+        if (sessionName) {
+          setCurrentSession(sessionName);
+          
+          // Set current term - handle both object and string formats
+          if (activeTerm) {
+            if (typeof activeTerm === 'object' && activeTerm.name) {
+              setCurrentTerm(activeTerm.name);
+            } else if (typeof activeTerm === 'string') {
+              setCurrentTerm(activeTerm);
+            } else if (response.data.session.activeTerm) {
+              setCurrentTerm(response.data.session.activeTerm);
+            } else {
+              // Default to First Term if not specified
+              setCurrentTerm('First Term');
+            }
+          } else {
+            // Default to First Term if no active term
+            setCurrentTerm('First Term');
+          }
+        }
+      } else {
+        console.warn('No active session found, using fallback calculation');
+        determineCurrentSessionAndTerm();
+      }
+    } catch (err) {
+      console.error('Error fetching current session/term:', err.response?.data || err.message);
+      
+      // Try alternative endpoints
+      try {
+        console.log('Trying alternative endpoints...');
+        
+        // Try getting all sessions and find active one
+        const sessionsResponse = await api.get('/api/sessions');
+        if (sessionsResponse.data && sessionsResponse.data.sessions) {
+          const activeSession = sessionsResponse.data.sessions.find(s => s.isActive);
+          if (activeSession) {
+            setCurrentSession(activeSession.sessionName);
+            // Check for active term
+            const activeTerm = activeSession.terms?.find(t => t.isActive);
+            if (activeTerm) {
+              setCurrentTerm(activeTerm.name);
+            } else {
+              setCurrentTerm('First Term');
+            }
+            console.log('Found active session via sessions list:', activeSession.sessionName);
+            return;
+          }
+        }
+        
+        // Fallback to date-based calculation
+        determineCurrentSessionAndTerm();
+      } catch (fallbackErr) {
+        console.error('Fallback also failed:', fallbackErr);
+        determineCurrentSessionAndTerm();
+      }
+    } finally {
+      setIsFetchingCurrentTerm(false);
+    }
+  };
+
+  // Fallback: Determine current session and term based on date
+  const determineCurrentSessionAndTerm = () => {
+    const currentDate = new Date();
+    const month = currentDate.getMonth() + 1; // January is 0
+    const year = currentDate.getFullYear();
+    
+    // Example session format: 2024/2025
+    // Adjust this based on your school's session structure
+    const calculatedSession = `${year}/${year + 1}`;
+    
+    // Determine term based on month - adjust based on your school calendar
+    let calculatedTerm = '';
+    if (month >= 9 && month <= 12) { // Sept-Dec: First Term
+      calculatedTerm = 'First Term';
+    } else if (month >= 1 && month <= 4) { // Jan-Apr: Second Term
+      calculatedTerm = 'Second Term';
+    } else { // May-Aug: Third Term
+      calculatedTerm = 'Third Term';
+    }
+    
+    console.log('Calculated current session/term:', { 
+      calculatedSession, 
+      calculatedTerm,
+      month 
+    });
+    setCurrentSession(calculatedSession);
+    setCurrentTerm(calculatedTerm);
+  };
 
   // Fetch teacher's assignments
   const fetchAssignments = async () => {
@@ -87,55 +283,37 @@ const ManageTests = () => {
         .filter(test => test.subject)
         .map(test => test.subject))];
 
-      console.log('=== DEBUG: Fetching class/subject names ===');
-      console.log('Unique classes:', uniqueClasses);
-      console.log('Unique subjects:', uniqueSubjects);
-
       // Try multiple approaches to get class names
       for (const classId of uniqueClasses) {
         // Check if it's an ObjectId
         const isObjectId = typeof classId === 'string' && /^[0-9a-fA-F]{24}$/.test(classId);
         
         if (isObjectId) {
-          console.log(`Fetching class name for ObjectId: ${classId}`);
-          
           // APPROACH 1: Try standard API endpoint
           try {
             const response = await api.get(`/api/classes/${classId}`);
-            console.log(`API response for class ${classId}:`, response.data);
             if (response.data) {
               // Try different possible response structures
               if (response.data.name) {
                 classMap[classId] = response.data.name;
-                console.log(`Found class name via /api/classes/: ${response.data.name}`);
               } else if (response.data.className) {
                 classMap[classId] = response.data.className;
-                console.log(`Found class name via className: ${response.data.className}`);
               } else if (response.data.class) {
                 classMap[classId] = response.data.class.name || response.data.class;
-                console.log(`Found class name via class object: ${classMap[classId]}`);
               } else if (response.data.data?.name) {
                 classMap[classId] = response.data.data.name;
-                console.log(`Found class name via data.name: ${response.data.data.name}`);
               } else {
-                console.log(`No name found in response for class ${classId}`);
                 classMap[classId] = 'Unknown Class';
               }
             }
           } catch (err) {
-            console.error(`Error with /api/classes/${classId}:`, err.response?.data || err.message);
-            
             // APPROACH 2: Try alternative endpoint
             try {
               const response2 = await api.get(`/api/class/${classId}`);
-              console.log(`Alternative API response for class ${classId}:`, response2.data);
               if (response2.data && response2.data.name) {
                 classMap[classId] = response2.data.name;
-                console.log(`Found via alternative endpoint: ${response2.data.name}`);
               }
             } catch (err2) {
-              console.error(`Error with /api/class/${classId}:`, err2.message);
-              
               // APPROACH 3: Check assignments for this class
               const assignmentWithClass = assignments.find(a => 
                 (a.class && a.class._id === classId) || 
@@ -146,24 +324,20 @@ const ManageTests = () => {
               if (assignmentWithClass) {
                 if (assignmentWithClass.class && typeof assignmentWithClass.class === 'object') {
                   classMap[classId] = assignmentWithClass.class.name || 'Class from Assignment';
-                  console.log(`Found in assignments: ${classMap[classId]}`);
                 } else if (assignmentWithClass.className) {
                   classMap[classId] = assignmentWithClass.className;
-                  console.log(`Found via className in assignments: ${assignmentWithClass.className}`);
                 }
               }
               
               // If still not found, mark as unknown
               if (!classMap[classId]) {
                 classMap[classId] = 'Unknown Class';
-                console.log(`Could not find name for class ${classId}`);
               }
             }
           }
         } else {
           // Not an ObjectId, use string directly
           classMap[classId] = String(classId);
-          console.log(`Using string class directly: ${classId}`);
         }
       }
 
@@ -173,45 +347,31 @@ const ManageTests = () => {
         const isObjectId = typeof subjectId === 'string' && /^[0-9a-fA-F]{24}$/.test(subjectId);
         
         if (isObjectId) {
-          console.log(`Fetching subject name for ObjectId: ${subjectId}`);
-          
           // APPROACH 1: Try standard API endpoint
           try {
             const response = await api.get(`/api/subjects/${subjectId}`);
-            console.log(`API response for subject ${subjectId}:`, response.data);
             if (response.data) {
               // Try different possible response structures
               if (response.data.name) {
                 subjectMap[subjectId] = response.data.name;
-                console.log(`Found subject name via /api/subjects/: ${response.data.name}`);
               } else if (response.data.subjectName) {
                 subjectMap[subjectId] = response.data.subjectName;
-                console.log(`Found subject name via subjectName: ${response.data.subjectName}`);
               } else if (response.data.subject) {
                 subjectMap[subjectId] = response.data.subject.name || response.data.subject;
-                console.log(`Found subject name via subject object: ${subjectMap[subjectId]}`);
               } else if (response.data.data?.name) {
                 subjectMap[subjectId] = response.data.data.name;
-                console.log(`Found subject name via data.name: ${response.data.data.name}`);
               } else {
-                console.log(`No name found in response for subject ${subjectId}`);
                 subjectMap[subjectId] = 'Unknown Subject';
               }
             }
           } catch (err) {
-            console.error(`Error with /api/subjects/${subjectId}:`, err.response?.data || err.message);
-            
             // APPROACH 2: Try alternative endpoint
             try {
               const response2 = await api.get(`/api/subject/${subjectId}`);
-              console.log(`Alternative API response for subject ${subjectId}:`, response2.data);
               if (response2.data && response2.data.name) {
                 subjectMap[subjectId] = response2.data.name;
-                console.log(`Found via alternative endpoint: ${response2.data.name}`);
               }
             } catch (err2) {
-              console.error(`Error with /api/subject/${subjectId}:`, err2.message);
-              
               // APPROACH 3: Check assignments for this subject
               for (const assignment of assignments) {
                 if (assignment.subjects && Array.isArray(assignment.subjects)) {
@@ -224,11 +384,9 @@ const ManageTests = () => {
                   if (subjectInAssignment) {
                     if (typeof subjectInAssignment === 'object') {
                       subjectMap[subjectId] = subjectInAssignment.name || 'Subject from Assignment';
-                      console.log(`Found in assignments: ${subjectMap[subjectId]}`);
                       break;
                     } else if (typeof subjectInAssignment === 'string') {
                       subjectMap[subjectId] = subjectInAssignment;
-                      console.log(`Found string subject in assignments: ${subjectInAssignment}`);
                       break;
                     }
                   }
@@ -238,19 +396,14 @@ const ManageTests = () => {
               // If still not found, mark as unknown
               if (!subjectMap[subjectId]) {
                 subjectMap[subjectId] = 'Unknown Subject';
-                console.log(`Could not find name for subject ${subjectId}`);
               }
             }
           }
         } else {
           // Not an ObjectId, use string directly
           subjectMap[subjectId] = String(subjectId);
-          console.log(`Using string subject directly: ${subjectId}`);
         }
       }
-
-      console.log('=== DEBUG: Final class map ===', classMap);
-      console.log('=== DEBUG: Final subject map ===', subjectMap);
 
       setClasses(classMap);
       setSubjects(subjectMap);
@@ -266,11 +419,8 @@ const ManageTests = () => {
   const getClassName = (classId) => {
     if (!classId) return 'No Class';
     
-    console.log('getClassName called with:', classId, 'Type:', typeof classId);
-    
     // Check if we have it cached
     if (classes[classId]) {
-      console.log('Found in cache:', classes[classId]);
       return classes[classId];
     }
     
@@ -280,7 +430,6 @@ const ManageTests = () => {
     if (isObjectId) {
       // Trigger fetch if not already fetching
       if (!isFetchingDetails) {
-        console.log('Triggering fetch for class:', classId);
         setTimeout(() => fetchClassAndSubjectNames(), 100);
       }
       return 'Loading...';
@@ -294,11 +443,8 @@ const ManageTests = () => {
   const getSubjectName = (subjectId) => {
     if (!subjectId) return 'No Subject';
     
-    console.log('getSubjectName called with:', subjectId, 'Type:', typeof subjectId);
-    
     // Check if we have it cached
     if (subjects[subjectId]) {
-      console.log('Found in cache:', subjects[subjectId]);
       return subjects[subjectId];
     }
     
@@ -308,7 +454,6 @@ const ManageTests = () => {
     if (isObjectId) {
       // Trigger fetch if not already fetching
       if (!isFetchingDetails) {
-        console.log('Triggering fetch for subject:', subjectId);
         setTimeout(() => fetchClassAndSubjectNames(), 100);
       }
       return 'Loading...';
@@ -318,7 +463,46 @@ const ManageTests = () => {
     }
   };
 
-  // ... rest of your component remains the same (checkTestRequirements, handleEditTest, etc.)
+  // Session and Term Filter Functions
+  const handleSessionChange = (e) => {
+    const value = e.target.value;
+    setSelectedSession(value);
+    if (value === '') {
+      setSelectedTerm(''); // Reset term if session is cleared
+    }
+  };
+
+  const handleTermChange = (e) => {
+    setSelectedTerm(e.target.value);
+  };
+
+  const clearFilters = () => {
+    setSelectedSession('');
+    setSelectedTerm('');
+    setShowFilters(false);
+  };
+
+  const getCurrentTermLabel = () => {
+    if (isFetchingCurrentTerm) return 'Loading...';
+    return currentSession && currentTerm 
+      ? `${currentSession} - ${currentTerm}`
+      : 'Not set';
+  };
+
+  const getFilterLabel = () => {
+    if (!selectedSession && !selectedTerm) {
+      return `Current: ${getCurrentTermLabel()}`;
+    }
+    
+    if (selectedSession && selectedTerm) {
+      return `${selectedSession} - ${selectedTerm}`;
+    } else if (selectedSession) {
+      return `Session: ${selectedSession}`;
+    } else if (selectedTerm) {
+      return `Term: ${selectedTerm}`;
+    }
+    return 'All Tests';
+  };
 
   // Check test validation before navigation
   const checkTestRequirements = (test) => {
@@ -422,6 +606,7 @@ const ManageTests = () => {
     fetchTests();
     fetchAssignments();
     fetchClassAndSubjectNames();
+    fetchCurrentSessionAndTerm(); // Also refresh current session/term
   };
 
   // Enhanced status badge that includes approved status
@@ -529,11 +714,12 @@ const ManageTests = () => {
 
   // Calculate statistics including approved tests
   const calculateStats = () => {
-    const total = tests.length;
-    const approved = tests.filter(t => t.status === 'approved').length;
-    const scheduled = tests.filter(t => getStatusBadge(t.batches, t.status).text === 'Scheduled').length;
-    const active = tests.filter(t => getStatusBadge(t.batches, t.status).text === 'Active').length;
-    const completed = tests.filter(t => getStatusBadge(t.batches, t.status).text === 'Completed').length;
+    const filtered = filteredTests; // Use filtered tests for stats
+    const total = filtered.length;
+    const approved = filtered.filter(t => t.status === 'approved').length;
+    const scheduled = filtered.filter(t => getStatusBadge(t.batches, t.status).text === 'Scheduled').length;
+    const active = filtered.filter(t => getStatusBadge(t.batches, t.status).text === 'Active').length;
+    const completed = filtered.filter(t => getStatusBadge(t.batches, t.status).text === 'Completed').length;
     const draft = total - approved - scheduled - active - completed;
     
     return { total, approved, scheduled, active, completed, draft };
@@ -547,6 +733,27 @@ const ManageTests = () => {
         <div>
           <h2 style={styles.headerTitle}>Manage Tests</h2>
           <p style={styles.headerSubtitle}>View and manage all your created tests</p>
+          
+          {/* Session and Term Display */}
+          <div style={styles.sessionTermInfo}>
+            <div style={styles.currentTermBadge}>
+              <FiCalendarIcon style={styles.sessionTermIcon} />
+              <span>{getCurrentTermLabel()}</span>
+              {isFetchingCurrentTerm && (
+                <span style={styles.loadingSpinner}>⌛</span>
+              )}
+            </div>
+            <div style={styles.filterIndicator}>
+              <FiFilter style={styles.filterIcon} />
+              <span>{getFilterLabel()}</span>
+              <button 
+                onClick={() => setShowFilters(!showFilters)} 
+                style={styles.toggleFiltersButton}
+              >
+                {showFilters ? <FiChevronUp /> : <FiChevronDown />}
+              </button>
+            </div>
+          </div>
         </div>
         <div style={styles.headerActions}>
           <button 
@@ -562,6 +769,61 @@ const ManageTests = () => {
           </button>
         </div>
       </div>
+
+      {/* Session and Term Filters */}
+      {showFilters && (
+        <div style={styles.filterSection}>
+          <div style={styles.filterHeader}>
+            <h3 style={styles.filterTitle}>Filter Tests</h3>
+            <button onClick={clearFilters} style={styles.clearFiltersButton}>
+              Clear Filters
+            </button>
+          </div>
+          <div style={styles.filterControls}>
+            <div style={styles.filterGroup}>
+              <label style={styles.filterLabel}>Session:</label>
+              <select 
+                value={selectedSession} 
+                onChange={handleSessionChange}
+                style={styles.filterSelect}
+              >
+                <option value="">All Sessions</option>
+                {sessions.map(session => (
+                  <option key={session} value={session}>
+                    {session}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            <div style={styles.filterGroup}>
+              <label style={styles.filterLabel}>Term:</label>
+              <select 
+                value={selectedTerm} 
+                onChange={handleTermChange}
+                style={styles.filterSelect}
+                disabled={!selectedSession && sessions.length > 0}
+              >
+                <option value="">All Terms</option>
+                {terms.map(term => (
+                  <option key={term} value={term}>
+                    {term}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div style={styles.filterInfo}>
+            <small style={styles.filterInfoText}>
+              {!selectedSession && !selectedTerm 
+                ? `Showing tests from current term: ${getCurrentTermLabel()}`
+                : selectedSession && selectedTerm
+                ? `Showing tests from ${selectedSession} - ${selectedTerm}`
+                : `Showing all tests from ${selectedSession || selectedTerm}`}
+            </small>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div style={styles.alertError}>
@@ -583,6 +845,7 @@ const ManageTests = () => {
           <div style={styles.statContent}>
             <div style={styles.statNumber}>{stats.total}</div>
             <div style={styles.statLabel}>Total Tests</div>
+            <small style={styles.statSubtitle}>{getFilterLabel()}</small>
           </div>
         </div>
         <div style={styles.statCard}>
@@ -617,15 +880,25 @@ const ManageTests = () => {
       <div style={styles.section}>
         {loading && !deletingId ? (
           <div style={styles.loading}>Loading Tests...</div>
-        ) : tests.length === 0 ? (
+        ) : filteredTests.length === 0 ? (
           <div style={styles.emptyState}>
             <FiBook style={styles.emptyIcon} />
             <h3 style={styles.emptyTitle}>No Tests Found</h3>
-            <p style={styles.emptyText}>Create your first test to get started</p>
-            <button onClick={() => navigate('/teacher/test-creation')} style={styles.createButton}>
-              <FiPlusCircle style={styles.buttonIcon} />
-              Create New Test
-            </button>
+            <p style={styles.emptyText}>
+              {selectedSession || selectedTerm 
+                ? `No tests found for ${selectedSession || ''} ${selectedTerm || ''}`
+                : `No tests found for current term (${getCurrentTermLabel()})`}
+            </p>
+            {selectedSession || selectedTerm ? (
+              <button onClick={clearFilters} style={styles.createButton}>
+                Clear Filters
+              </button>
+            ) : (
+              <button onClick={() => navigate('/teacher/test-creation')} style={styles.createButton}>
+                <FiPlusCircle style={styles.buttonIcon} />
+                Create New Test
+              </button>
+            )}
           </div>
         ) : (
           <div style={styles.tableContainer}>
@@ -634,13 +907,14 @@ const ManageTests = () => {
                 <tr>
                   <th style={styles.tableHeader}>Test Title</th>
                   <th style={styles.tableHeader}>Subject & Class</th>
+                  <th style={styles.tableHeader}>Session & Term</th>
                   <th style={styles.tableHeader}>Schedule</th>
                   <th style={styles.tableHeader}>Status</th>
                   <th style={styles.tableHeader}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {tests.map(test => {
+                {filteredTests.map(test => {
                   const status = getStatusBadge(test.batches, test.status);
                   const StatusIcon = status.icon;
                   const isApproved = test.status === 'approved';
@@ -663,9 +937,14 @@ const ManageTests = () => {
                           )}
                         </div>
                         <div style={styles.testMeta}>
-                          <span style={styles.testSession}>{test.session || 'No Session'}</span>
+                          <div style={styles.testSessionTerm}>
+                            <span style={styles.testSession}>{test.session || 'No Session'}</span>
+                            {test.term && (
+                              <span style={styles.testTerm}> • {test.term}</span>
+                            )}
+                          </div>
                           {test.duration && (
-                            <span style={styles.testDuration}> • {test.duration} mins</span>
+                            <span style={styles.testDuration}>{test.duration} mins</span>
                           )}
                           <div style={styles.questionInfo}>
                             <FiFileText style={styles.smallIcon} />
@@ -686,6 +965,21 @@ const ManageTests = () => {
                             {test.questionCount} questions required • {test.totalMarks || 0} marks total
                           </div>
                         )}
+                      </td>
+                      <td style={styles.tableCell}>
+                        <div style={styles.sessionTermDisplay}>
+                          <div style={styles.sessionDisplay}>
+                            <strong>Session:</strong> {test.session || 'Not set'}
+                          </div>
+                          <div style={styles.termDisplay}>
+                            <strong>Term:</strong> {test.term || 'Not set'}
+                          </div>
+                          {test.session === currentSession && test.term === currentTerm && (
+                            <div style={styles.currentTermIndicator}>
+                              <FiCalendarIcon size={12} /> Current Term
+                            </div>
+                          )}
+                        </div>
                       </td>
                       <td style={styles.tableCell}>
                         {firstBatch && firstBatch.schedule ? (
@@ -821,8 +1115,6 @@ const ManageTests = () => {
   );
 };
 
-// ... styles remain the same ...
-
 const styles = {
   container: {
     fontFamily: 'sans-serif',
@@ -849,6 +1141,54 @@ const styles = {
     fontSize: '16px',
     margin: '0',
     color: '#666',
+  },
+  sessionTermInfo: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '15px',
+    marginTop: '10px',
+    flexWrap: 'wrap',
+  },
+  currentTermBadge: {
+    backgroundColor: '#E6F7FF',
+    color: '#1890FF',
+    padding: '6px 12px',
+    borderRadius: '20px',
+    fontSize: '14px',
+    fontWeight: '500',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  filterIndicator: {
+    backgroundColor: '#F6FFED',
+    color: '#52C41A',
+    padding: '6px 12px',
+    borderRadius: '20px',
+    fontSize: '14px',
+    fontWeight: '500',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  sessionTermIcon: {
+    fontSize: '14px',
+  },
+  filterIcon: {
+    fontSize: '14px',
+  },
+  toggleFiltersButton: {
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    color: '#52C41A',
+    padding: '0',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  loadingSpinner: {
+    marginLeft: '5px',
+    fontSize: '12px',
   },
   headerActions: {
     display: 'flex',
@@ -882,6 +1222,67 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     transition: 'all 0.3s ease',
+  },
+  filterSection: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: '8px',
+    padding: '20px',
+    marginBottom: '20px',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+  },
+  filterHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '15px',
+  },
+  filterTitle: {
+    fontSize: '18px',
+    fontWeight: '600',
+    color: '#4B5320',
+    margin: '0',
+  },
+  clearFiltersButton: {
+    backgroundColor: 'transparent',
+    color: '#B22222',
+    border: '1px solid #B22222',
+    padding: '6px 12px',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '14px',
+  },
+  filterControls: {
+    display: 'flex',
+    gap: '20px',
+    flexWrap: 'wrap',
+  },
+  filterGroup: {
+    flex: '1',
+    minWidth: '200px',
+  },
+  filterLabel: {
+    display: 'block',
+    marginBottom: '5px',
+    fontWeight: '500',
+    color: '#4B5320',
+    fontSize: '14px',
+  },
+  filterSelect: {
+    width: '100%',
+    padding: '8px 12px',
+    borderRadius: '4px',
+    border: '1px solid #D9D9D9',
+    fontSize: '14px',
+    backgroundColor: '#FFFFFF',
+  },
+  filterInfo: {
+    marginTop: '15px',
+    paddingTop: '15px',
+    borderTop: '1px solid #F0F0F0',
+  },
+  filterInfoText: {
+    color: '#666',
+    fontSize: '13px',
   },
   alertError: {
     backgroundColor: '#FFF3F3',
@@ -946,6 +1347,11 @@ const styles = {
   statLabel: {
     fontSize: '14px',
     color: '#666',
+  },
+  statSubtitle: {
+    fontSize: '12px',
+    color: '#666',
+    marginTop: '2px',
   },
   section: {
     backgroundColor: '#FFFFFF',
@@ -1041,8 +1447,17 @@ const styles = {
     fontSize: '14px',
     color: '#718096',
   },
+  testSessionTerm: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '5px',
+    marginBottom: '5px',
+  },
   testSession: {
     fontWeight: '500',
+  },
+  testTerm: {
+    color: '#666',
   },
   testDuration: {
     color: '#666',
@@ -1092,6 +1507,29 @@ const styles = {
   questionCount: {
     fontSize: '13px',
     color: '#718096',
+    marginTop: '5px',
+  },
+  sessionTermDisplay: {
+    fontSize: '14px',
+  },
+  sessionDisplay: {
+    marginBottom: '4px',
+    color: '#4B5320',
+  },
+  termDisplay: {
+    marginBottom: '4px',
+    color: '#666',
+  },
+  currentTermIndicator: {
+    backgroundColor: '#F6FFED',
+    color: '#52C41A',
+    padding: '3px 8px',
+    borderRadius: '12px',
+    fontSize: '11px',
+    fontWeight: '500',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
     marginTop: '5px',
   },
   scheduleInfo: {

@@ -250,7 +250,17 @@ const testSchema = new mongoose.Schema({
   }
 }, {
   timestamps: true,
-  toJSON: { virtuals: true, getters: true },
+  toJSON: { 
+    virtuals: true, 
+    getters: true,
+    transform: function(doc, ret) {
+      // Ensure questionMarks is always included in output
+      if (!ret.questionMarks && ret.questions && ret.questions.length > 0) {
+        ret.questionMarks = Array(ret.questions.length).fill(1);
+      }
+      return ret;
+    }
+  },
   toObject: { virtuals: true, getters: true }
 });
 
@@ -315,13 +325,30 @@ testSchema.virtual('className').get(async function() {
   }
 });
 
+// Virtual for questionMarks with defaults
+testSchema.virtual('questionMarksWithDefaults').get(function() {
+  if (this.questionMarks && this.questionMarks.length === this.questions.length) {
+    return this.questionMarks;
+  }
+  
+  // If questionMarks doesn't match question count, create defaults
+  if (this.questions && this.questions.length > 0) {
+    return Array(this.questions.length).fill(1);
+  }
+  
+  return [];
+});
+
 // Pre-save validation - FIXED VERSION
 testSchema.pre('save', function(next) {
   console.log('🔍 Test model pre-save hook:', {
     title: this.title,
     totalMarks: this.totalMarks,
     passingMarks: this.passingMarks,
-    status: this.status
+    status: this.status,
+    questionCount: this.questionCount,
+    questionsLength: this.questions?.length,
+    questionMarksLength: this.questionMarks?.length
   });
 
   // FIXED: Ensure passingMarks doesn't exceed totalMarks
@@ -338,13 +365,22 @@ testSchema.pre('save', function(next) {
   if (this.questionMarks && this.questionMarks.length > 0) {
     const marksSum = this.questionMarks.reduce((sum, mark) => sum + mark, 0);
     if (marksSum !== this.totalMarks) {
+      console.log('❌ Question marks sum mismatch:', {
+        marksSum,
+        totalMarks: this.totalMarks,
+        difference: marksSum - this.totalMarks
+      });
       return next(new Error(`Sum of question marks (${marksSum}) must equal total marks (${this.totalMarks})`));
     }
   }
 
   // Validate questions count matches questionCount (if questions exist)
-  if (this.questions && this.questions.length > this.questionCount) {
-    return next(new Error(`Number of questions (${this.questions.length}) exceeds specified question count (${this.questionCount})`));
+  if (this.questions && this.questions.length > 0 && this.questionCount !== this.questions.length) {
+    console.log('🔄 Adjusting questionCount to match actual questions:', {
+      oldQuestionCount: this.questionCount,
+      newQuestionCount: this.questions.length
+    });
+    this.questionCount = this.questions.length;
   }
 
   console.log('✅ Test model pre-save validation passed');

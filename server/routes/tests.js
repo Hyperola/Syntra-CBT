@@ -1,4 +1,4 @@
-// tests.js - COMPLETE UPDATED FILE WITH ENHANCED SCORING FOR TEXT-BASED ANSWERS
+// tests.js - COMPLETE UPDATED FILE WITH CUSTOM MARKS FIX
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
@@ -190,30 +190,54 @@ const checkTeacherAccess = async (user, subject, classId) => {
   return hasAccess || false;
 };
 
-// ENHANCED SCORING FUNCTION - Handles text-based correct answers
-const calculateScoreWithDebug = (questions, answers) => {
+// ENHANCED SCORING FUNCTION - Uses test's questionMarks array
+const calculateScoreWithDebug = (questions, answers, testTitle, questionMarksArray) => {
   let score = 0;
   let totalPossibleMarks = 0;
   const correctness = {};
   
   console.log('🎯 ENHANCED SCORING - Starting calculation:', {
     questionCount: questions.length,
-    answerCount: Object.keys(answers).length
+    answerCount: Object.keys(answers).length,
+    testTitle: testTitle || 'No title',
+    hasQuestionMarksArray: !!questionMarksArray,
+    questionMarksArrayLength: questionMarksArray?.length || 0
   });
   
-  for (const question of questions) {
+  for (let i = 0; i < questions.length; i++) {
+    const question = questions[i];
     const questionId = question._id.toString();
     const selectedAnswer = answers[questionId];
     
-    console.log(`\n🔍 Question ${questionId}:`);
+    console.log(`\n🔍 Question ${i + 1} (Index ${i}):`);
+    console.log('  Question ID:', questionId);
     console.log('  Text:', question.text?.substring(0, 50) + '...');
     console.log('  Options:', question.options);
     console.log('  User selected index:', selectedAnswer);
     
+    // CRITICAL FIX: Use custom marks from test's questionMarks array if available
+    let questionMarks = 1; // Default
+    
+    if (questionMarksArray && questionMarksArray[i] !== undefined) {
+      // Use the custom mark from test's questionMarks array
+      questionMarks = questionMarksArray[i];
+      console.log(`  📊 Using custom marks from test: ${questionMarks}`);
+    } else if (question.marks) {
+      // Fall back to question's own marks
+      questionMarks = question.marks;
+      console.log(`  📊 Using marks from question model: ${questionMarks}`);
+    } else {
+      // Default to 1
+      questionMarks = 1;
+      console.log(`  📊 Using default marks: ${questionMarks}`);
+    }
+    
+    totalPossibleMarks += questionMarks;
+    console.log('  Final marks for this question:', questionMarks);
+    
     // Skip if no answer provided
     if (selectedAnswer === undefined || selectedAnswer === null) {
       correctness[questionId] = false;
-      totalPossibleMarks += (question.marks || 1);
       console.log('  ❓ No answer provided');
       continue;
     }
@@ -223,7 +247,6 @@ const calculateScoreWithDebug = (questions, answers) => {
     
     if (isNaN(userAnswerIndex) || userAnswerIndex < 0 || userAnswerIndex >= question.options.length) {
       correctness[questionId] = false;
-      totalPossibleMarks += (question.marks || 1);
       console.log('  ⚠️ Invalid answer index:', selectedAnswer);
       continue;
     }
@@ -272,12 +295,12 @@ const calculateScoreWithDebug = (questions, answers) => {
     }
     
     correctness[questionId] = isCorrect;
-    const questionMarks = question.marks || 1;
-    totalPossibleMarks += questionMarks;
     
     if (isCorrect) {
       score += questionMarks;
       console.log(`  💰 Added ${questionMarks} marks. Total: ${score}`);
+    } else {
+      console.log(`  💸 No marks added. Total: ${score}`);
     }
   }
   
@@ -1679,9 +1702,9 @@ router.get('/teacher/:teacherId', auth, async (req, res) => {
   }
 });
 
-// ==================== TEST SUBMISSION ENDPOINT (FIXED WITH ENHANCED SCORING) ====================
+// ==================== TEST SUBMISSION ENDPOINT (FIXED WITH CUSTOM MARKS) ====================
 
-// Submit test answers - UPDATED WITH ENHANCED SCORING FOR TEXT-BASED ANSWERS
+// Submit test answers - UPDATED TO USE CUSTOM MARKS ARRAY
 router.post('/:id/submit', [auth, validateObjectId('id')], async (req, res) => {
   try {
     const { answers, timeSpent } = req.body;
@@ -1694,7 +1717,7 @@ router.post('/:id/submit', [auth, validateObjectId('id')], async (req, res) => {
       timeSpent: timeSpent || 0
     });
 
-    // Fetch test with questions
+    // Fetch test with questions and custom marks
     const test = await Test.findById(req.params.id)
       .populate({
         path: 'questions',
@@ -1840,8 +1863,13 @@ router.post('/:id/submit', [auth, validateObjectId('id')], async (req, res) => {
       });
     }
 
-    // Use the ENHANCED scoring function for text-based answers
-    const { score, correctness, totalPossibleMarks } = calculateScoreWithDebug(test.questions || [], answers);
+    // Use the ENHANCED scoring function WITH CUSTOM MARKS
+    const { score, correctness, totalPossibleMarks } = calculateScoreWithDebug(
+      test.questions || [], 
+      answers, 
+      test.title,
+      test.questionMarks || []  // PASS THE CUSTOM MARKS ARRAY!
+    );
     
     // Use test total marks if available, otherwise calculate from possible marks
     const totalMarks = test.totalMarks || totalPossibleMarks;
@@ -1868,7 +1896,7 @@ router.post('/:id/submit', [auth, validateObjectId('id')], async (req, res) => {
         // Add term to session to create correct format
         if (term && typeof term === 'string') {
           // Remove "Term" if already in term string to avoid duplication
-          const cleanTerm = term.replace(' Term', '').trim();
+          const cleanTerm = term.replace('Term', '').trim();
           session = `${session} ${cleanTerm} Term`;
           console.log('🔄 Formatted session with term:', session);
         } else {
@@ -2216,6 +2244,153 @@ router.get('/:id/can-take', [auth, validateObjectId('id')], async (req, res) => 
       success: false,
       error: 'Server error checking test availability. Please try again.' 
     });
+  }
+});
+
+// ==================== DEBUG ENDPOINTS FOR CUSTOM MARKS ====================
+
+// Verify custom marks are being used correctly
+router.get('/:testId/verify-marks', [auth, validateObjectId('testId')], async (req, res) => {
+  try {
+    console.log('🔍 Verifying custom marks for test:', { 
+      testId: req.params.testId,
+      user: req.user.username 
+    });
+
+    // Fetch test with questions
+    const test = await Test.findById(req.params.testId)
+      .populate({
+        path: 'questions',
+        select: '_id text marks'
+      })
+      .select('title questionMarks totalMarks questionCount');
+
+    if (!test) {
+      return res.status(404).json({ success: false, error: 'Test not found' });
+    }
+
+    // Analyze marks
+    const marksAnalysis = test.questions.map((question, index) => {
+      const customMark = test.questionMarks?.[index];
+      const questionMark = question.marks || 1;
+      
+      return {
+        questionNumber: index + 1,
+        questionId: question._id,
+        questionText: question.text?.substring(0, 50) + '...',
+        marksFromQuestionModel: questionMark,
+        marksFromTestArray: customMark,
+        marksWillBeUsed: customMark !== undefined ? customMark : questionMark,
+        hasCustomMark: customMark !== undefined,
+        customMarkDiffers: customMark !== undefined && customMark !== questionMark
+      };
+    });
+
+    const totalCustomMarks = marksAnalysis.reduce((sum, q) => sum + q.marksWillBeUsed, 0);
+    const totalQuestionModelMarks = marksAnalysis.reduce((sum, q) => sum + q.marksFromQuestionModel, 0);
+
+    console.log('📊 Marks verification results:', {
+      testTitle: test.title,
+      testTotalMarks: test.totalMarks,
+      calculatedFromCustom: totalCustomMarks,
+      calculatedFromQuestionModel: totalQuestionModelMarks,
+      questionCount: test.questionCount
+    });
+
+    res.json({
+      success: true,
+      testTitle: test.title,
+      testTotalMarks: test.totalMarks,
+      calculatedTotalMarks: totalCustomMarks,
+      questionCount: test.questions.length,
+      marksAnalysis,
+      summary: {
+        questionsWithCustomMarks: marksAnalysis.filter(q => q.hasCustomMark).length,
+        questionsWhereMarksDiffer: marksAnalysis.filter(q => q.customMarkDiffers).length,
+        totalCustomMarks,
+        totalQuestionModelMarks,
+        matchesTestTotal: totalCustomMarks === test.totalMarks,
+        testTitle: test.title,
+        isCA: test.title.includes('CA'),
+        isExam: test.title === 'Examination',
+        expectedMarks: test.title.includes('CA') ? 20 : (test.title === 'Examination' ? 60 : 'Custom')
+      }
+    });
+    
+  } catch (error) {
+    console.error('Verify marks error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Simple test to verify custom marks
+router.post('/:testId/test-scoring', [auth, validateObjectId('testId')], async (req, res) => {
+  try {
+    console.log('🧪 Testing scoring with custom marks...');
+    
+    // Get test with questions and custom marks
+    const test = await Test.findById(req.params.testId)
+      .populate({
+        path: 'questions',
+        select: '_id text options correctAnswer marks'
+      });
+    
+    if (!test) {
+      return res.status(404).json({ success: false, error: 'Test not found' });
+    }
+    
+    // Create sample answers (all correct for testing)
+    const answers = {};
+    test.questions.forEach((question, index) => {
+      answers[question._id.toString()] = '0'; // Always select first option
+    });
+    
+    // Test scoring with and without custom marks
+    const withoutCustom = calculateScoreWithDebug(
+      test.questions, 
+      answers, 
+      test.title,
+      [] // No custom marks
+    );
+    
+    const withCustom = calculateScoreWithDebug(
+      test.questions, 
+      answers, 
+      test.title,
+      test.questionMarks || [] // With custom marks
+    );
+    
+    res.json({
+      success: true,
+      testTitle: test.title,
+      questionCount: test.questions.length,
+      customMarksArray: test.questionMarks || [],
+      scoringResults: {
+        withoutCustomMarks: {
+          score: withoutCustom.score,
+          totalPossible: withoutCustom.totalPossibleMarks,
+          percentage: withoutCustom.totalPossibleMarks > 0 ? 
+            ((withoutCustom.score / withoutCustom.totalPossibleMarks) * 100).toFixed(2) + '%' : '0%'
+        },
+        withCustomMarks: {
+          score: withCustom.score,
+          totalPossible: withCustom.totalPossibleMarks,
+          percentage: withCustom.totalPossibleMarks > 0 ? 
+            ((withCustom.score / withCustom.totalPossibleMarks) * 100).toFixed(2) + '%' : '0%'
+        },
+        difference: {
+          score: withCustom.score - withoutCustom.score,
+          totalMarks: withCustom.totalPossibleMarks - withoutCustom.totalPossibleMarks
+        }
+      },
+      expectedTotalMarks: test.totalMarks,
+      actualCustomMarksTotal: test.questionMarks ? 
+        test.questionMarks.reduce((sum, mark) => sum + mark, 0) : 0
+    });
+    
+  } catch (error) {
+    console.error('Test scoring error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

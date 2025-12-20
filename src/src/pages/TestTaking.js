@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import {
@@ -10,57 +10,42 @@ import {
   FiCalendar, FiBarChart2, FiChevronDown, FiChevronUp,
   FiChevronUpCircle, FiChevronDownCircle, FiCheckSquare,
   FiSquare, FiExternalLink, FiCornerDownRight, FiCornerUpLeft,
-  FiMessageSquare, FiUploadCloud, FiShield
+  FiMessageSquare, FiUploadCloud, FiShield, FiInfo
 } from 'react-icons/fi';
 import axios from 'axios';
 
 // Modern Color Palette
 const COLORS = {
-  // Primary Colors
-  primary: '#4B5320', // Army Green
+  primary: '#4B5320',
   primaryLight: '#5D6522',
   primaryLighter: '#ECFDF5',
   primaryDark: '#3A4019',
-  
-  // Secondary Colors
-  secondary: '#10B981', // Emerald Green
+  secondary: '#10B981',
   secondaryLight: '#D1FAE5',
   secondaryDark: '#059669',
-  
-  // Accent Colors
-  accent: '#F59E0B', // Amber
+  accent: '#F59E0B',
   accentLight: '#FEF3C7',
   accentDark: '#D97706',
-  
-  // Status Colors
   success: '#10B981',
   warning: '#F59E0B',
   danger: '#EF4444',
   info: '#3B82F6',
-  
-  // Neutral Colors
   white: '#FFFFFF',
   lightGray: '#F9FAFB',
   gray: '#6B7280',
   darkGray: '#374151',
   dark: '#111827',
-  
-  // UI Colors
   border: '#E5E7EB',
   shadow: 'rgba(0, 0, 0, 0.1)',
   overlay: 'rgba(0, 0, 0, 0.5)',
-  
-  // Gradients
-  gradientPrimary: 'linear-gradient(135deg, #4B5320 0%, #3A4019 100%)',
-  gradientSuccess: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
-  gradientWarning: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
-  gradientDanger: 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
 };
 
 const TestTaking = () => {
   const { testId } = useParams();
   const navigate = useNavigate();
   const { user } = useContext(AuthContext);
+  const instructionsContentRef = useRef(null);
+  const questionBodyRef = useRef(null);
   
   // Main States
   const [loading, setLoading] = useState(true);
@@ -83,8 +68,8 @@ const TestTaking = () => {
   const [elapsedTime, setElapsedTime] = useState(0);
   const [testStarted, setTestStarted] = useState(false);
   const [progressSaved, setProgressSaved] = useState(true);
-  const [showReview, setShowReview] = useState(false);
-  const [navigationMode, setNavigationMode] = useState('standard'); // 'standard', 'review', 'marked'
+  const [navigationMode, setNavigationMode] = useState('standard');
+  const [compactMode, setCompactMode] = useState(false);
 
   // Initialize test
   useEffect(() => {
@@ -132,13 +117,27 @@ const TestTaking = () => {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
+  // Adjust layout based on question size
+  useEffect(() => {
+    const checkLayout = () => {
+      if (questionBodyRef.current) {
+        const questionHeight = questionBodyRef.current.scrollHeight;
+        const containerHeight = window.innerHeight - 180; // Account for header/footer
+        setCompactMode(questionHeight > containerHeight * 0.8);
+      }
+    };
+    
+    checkLayout();
+    window.addEventListener('resize', checkLayout);
+    return () => window.removeEventListener('resize', checkLayout);
+  }, [currentQuestion, questions]);
+
   // API Functions
   const initializeTest = async () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
       
-      // Check test eligibility
       const canTakeRes = await axios.get(`http://localhost:5000/api/tests/${testId}/can-take`, {
         headers: { 
           'Authorization': `Bearer ${token}`,
@@ -150,7 +149,6 @@ const TestTaking = () => {
         throw new Error(canTakeRes.data.reason || 'You cannot take this test at the moment.');
       }
 
-      // Start test session
       await axios.post(`http://localhost:5000/api/tests/${testId}/start`, {}, {
         headers: { 
           'Authorization': `Bearer ${token}`,
@@ -158,7 +156,6 @@ const TestTaking = () => {
         }
       });
 
-      // Load test details
       const testRes = await axios.get(`http://localhost:5000/api/tests/${testId}`, {
         headers: { 
           'Authorization': `Bearer ${token}`,
@@ -167,7 +164,6 @@ const TestTaking = () => {
       });
       setTest(testRes.data.test);
 
-      // Load questions
       const questionsRes = await axios.get(`http://localhost:5000/api/tests/${testId}/questions`, {
         headers: { 
           'Authorization': `Bearer ${token}`,
@@ -176,7 +172,6 @@ const TestTaking = () => {
       });
       setQuestions(questionsRes.data.questions || []);
 
-      // Set timer
       const durationSeconds = (testRes.data.test.duration || 60) * 60;
       setTimeLeft(durationSeconds);
       setTestStarted(true);
@@ -235,7 +230,6 @@ const TestTaking = () => {
       });
       
       if (response.data.success) {
-        // Redirect to dashboard with success message
         navigate('/student/dashboard', {
           state: {
             message: 'Test submitted successfully!',
@@ -338,7 +332,6 @@ const TestTaking = () => {
 
   // Modern Styles
   const styles = {
-    // Main Container
     container: {
       minHeight: '100vh',
       backgroundColor: COLORS.lightGray,
@@ -353,7 +346,7 @@ const TestTaking = () => {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: COLORS.gradientPrimary,
+      background: `linear-gradient(135deg, ${COLORS.primary} 0%, ${COLORS.primaryDark} 100%)`,
     },
     loadingContent: {
       textAlign: 'center',
@@ -369,12 +362,12 @@ const TestTaking = () => {
       margin: '0 auto 24px',
     },
     loadingTitle: {
-      fontSize: '24px',
-      fontWeight: '700',
+      fontSize: '20px',
+      fontWeight: '600',
       marginBottom: '8px',
     },
     loadingText: {
-      fontSize: '16px',
+      fontSize: '14px',
       opacity: 0.9,
     },
 
@@ -399,8 +392,8 @@ const TestTaking = () => {
       color: COLORS.danger,
     },
     errorTitle: {
-      fontSize: '20px',
-      fontWeight: '700',
+      fontSize: '18px',
+      fontWeight: '600',
       color: COLORS.danger,
       marginBottom: '12px',
     },
@@ -408,6 +401,7 @@ const TestTaking = () => {
       color: COLORS.gray,
       marginBottom: '24px',
       lineHeight: 1.5,
+      fontSize: '14px',
     },
     errorActions: {
       display: 'flex',
@@ -415,7 +409,7 @@ const TestTaking = () => {
       justifyContent: 'center',
     },
 
-    // Instructions Modal
+    // Instructions Modal - FIXED SCROLLING
     instructionsModal: {
       position: 'fixed',
       top: 0,
@@ -438,33 +432,38 @@ const TestTaking = () => {
       borderRadius: '20px',
       overflow: 'hidden',
       boxShadow: '0 25px 50px rgba(0,0,0,0.15)',
+      display: 'flex',
+      flexDirection: 'column',
     },
     instructionsHeader: {
-      padding: '32px 32px 24px',
-      background: COLORS.gradientPrimary,
+      padding: '24px 32px',
+      background: `linear-gradient(135deg, ${COLORS.primary} 0%, ${COLORS.primaryDark} 100%)`,
       color: COLORS.white,
+      flexShrink: 0,
     },
     instructionsTitle: {
-      fontSize: '28px',
-      fontWeight: '800',
-      marginBottom: '8px',
+      fontSize: '22px', // Reduced from 28px
+      fontWeight: '700',
+      marginBottom: '6px',
     },
     instructionsSubtitle: {
-      fontSize: '16px',
+      fontSize: '14px', // Reduced from 16px
       opacity: 0.9,
     },
     instructionsBody: {
-      padding: '32px',
+      padding: '24px 32px',
       overflowY: 'auto',
+      flex: 1,
+      maxHeight: 'calc(90vh - 200px)',
     },
     instructionsGrid: {
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-      gap: '20px',
-      marginBottom: '32px',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+      gap: '16px',
+      marginBottom: '24px',
     },
     instructionCard: {
-      padding: '24px',
+      padding: '20px',
       backgroundColor: COLORS.lightGray,
       borderRadius: '12px',
       textAlign: 'center',
@@ -475,76 +474,80 @@ const TestTaking = () => {
       },
     },
     instructionIcon: {
-      width: '56px',
-      height: '56px',
-      margin: '0 auto 16px',
+      width: '48px',
+      height: '48px',
+      margin: '0 auto 12px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       borderRadius: '50%',
-      fontSize: '24px',
+      fontSize: '20px',
     },
     instructionTitle: {
-      fontSize: '16px',
+      fontSize: '14px', // Reduced
       fontWeight: '600',
-      marginBottom: '8px',
+      marginBottom: '6px',
       color: COLORS.dark,
     },
     instructionText: {
-      fontSize: '14px',
+      fontSize: '13px', // Reduced
       color: COLORS.gray,
     },
     guidelinesSection: {
       backgroundColor: COLORS.lightGray,
-      padding: '24px',
+      padding: '20px',
       borderRadius: '12px',
-      marginBottom: '24px',
+      marginBottom: '20px',
     },
     guidelinesTitle: {
-      fontSize: '18px',
-      fontWeight: '700',
+      fontSize: '16px', // Reduced
+      fontWeight: '600',
       color: COLORS.primary,
-      marginBottom: '16px',
+      marginBottom: '12px',
     },
     guidelinesList: {
       display: 'flex',
       flexDirection: 'column',
-      gap: '12px',
+      gap: '10px',
     },
     guidelineItem: {
       display: 'flex',
       alignItems: 'flex-start',
-      gap: '12px',
+      gap: '10px',
       color: COLORS.darkGray,
+      fontSize: '13px', // Reduced
     },
     guidelineIcon: {
       color: COLORS.secondary,
       flexShrink: 0,
       marginTop: '2px',
+      fontSize: '14px',
     },
     warningSection: {
       display: 'flex',
       alignItems: 'flex-start',
-      gap: '16px',
-      padding: '20px',
+      gap: '12px',
+      padding: '16px',
       backgroundColor: `${COLORS.warning}10`,
       border: `1px solid ${COLORS.warning}`,
       borderRadius: '12px',
       color: COLORS.warning,
-      marginTop: '24px',
+      marginTop: '20px',
+      fontSize: '13px',
     },
     instructionsFooter: {
-      padding: '24px 32px',
+      padding: '20px 32px',
       borderTop: `1px solid ${COLORS.border}`,
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
+      flexShrink: 0,
     },
 
     // Header
     header: {
       backgroundColor: COLORS.white,
-      padding: '20px 32px',
+      padding: '16px 24px',
       boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
       position: 'sticky',
       top: 0,
@@ -552,323 +555,325 @@ const TestTaking = () => {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      gap: '24px',
+      gap: '20px',
     },
     headerLeft: {
       display: 'flex',
       alignItems: 'center',
-      gap: '16px',
+      gap: '12px',
       flex: 1,
     },
     backButton: {
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
-      padding: '10px 16px',
+      gap: '6px',
+      padding: '8px 14px',
       backgroundColor: COLORS.lightGray,
       border: `1px solid ${COLORS.border}`,
-      borderRadius: '10px',
+      borderRadius: '8px',
       color: COLORS.primary,
       fontWeight: '600',
       cursor: 'pointer',
       transition: 'all 0.2s',
-      fontSize: '14px',
+      fontSize: '13px',
       '&:hover': {
         backgroundColor: `${COLORS.primary}10`,
-        transform: 'translateX(-2px)',
       },
     },
     testInfo: {
       flex: 1,
     },
     testTitle: {
-      fontSize: '18px',
-      fontWeight: '700',
+      fontSize: '16px',
+      fontWeight: '600',
       color: COLORS.dark,
-      marginBottom: '4px',
+      marginBottom: '2px',
     },
     testMeta: {
       display: 'flex',
       flexWrap: 'wrap',
-      gap: '12px',
-      fontSize: '13px',
+      gap: '8px',
+      fontSize: '12px',
       color: COLORS.gray,
     },
     metaItem: {
       display: 'flex',
       alignItems: 'center',
-      gap: '6px',
-      padding: '4px 10px',
+      gap: '4px',
+      padding: '3px 8px',
       backgroundColor: COLORS.lightGray,
-      borderRadius: '20px',
+      borderRadius: '12px',
     },
     timerSection: {
       display: 'flex',
       alignItems: 'center',
-      gap: '16px',
+      gap: '12px',
     },
     timerCard: {
       display: 'flex',
       alignItems: 'center',
-      gap: '12px',
-      padding: '12px 20px',
-      background: timeWarning ? COLORS.gradientWarning : COLORS.gradientPrimary,
+      gap: '8px',
+      padding: '8px 16px',
+      background: timeWarning ? `linear-gradient(135deg, ${COLORS.warning} 0%, ${COLORS.accentDark} 100%)` : `linear-gradient(135deg, ${COLORS.primary} 0%, ${COLORS.primaryDark} 100%)`,
       color: COLORS.white,
-      borderRadius: '12px',
+      borderRadius: '10px',
       fontWeight: '600',
-      minWidth: '140px',
+      minWidth: '120px',
+      fontSize: '14px',
       position: 'relative',
       overflow: 'hidden',
     },
     timerWarning: {
       position: 'absolute',
-      top: '-8px',
+      top: '-6px',
       left: '50%',
       transform: 'translateX(-50%)',
       backgroundColor: COLORS.warning,
       color: COLORS.white,
-      padding: '4px 12px',
-      borderRadius: '12px',
-      fontSize: '11px',
+      padding: '3px 8px',
+      borderRadius: '8px',
+      fontSize: '10px',
       fontWeight: '600',
       display: 'flex',
       alignItems: 'center',
-      gap: '4px',
+      gap: '3px',
       whiteSpace: 'nowrap',
       animation: 'pulse 1.5s infinite',
     },
     headerControls: {
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
+      gap: '6px',
     },
     controlButton: {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      width: '44px',
-      height: '44px',
+      width: '36px',
+      height: '36px',
       backgroundColor: COLORS.lightGray,
       border: `1px solid ${COLORS.border}`,
-      borderRadius: '10px',
+      borderRadius: '8px',
       color: COLORS.primary,
       cursor: 'pointer',
       transition: 'all 0.2s',
-      fontSize: '18px',
+      fontSize: '16px',
       '&:hover': {
         backgroundColor: `${COLORS.primary}10`,
-        transform: 'translateY(-2px)',
       },
     },
 
-    // Main Content
+    // Main Content - COMPACT LAYOUT
     mainContent: {
       flex: 1,
       display: 'flex',
-      padding: '24px',
-      gap: '24px',
+      padding: '16px',
+      gap: '16px',
       maxWidth: '1400px',
       margin: '0 auto',
       width: '100%',
-      height: 'calc(100vh - 180px)',
+      height: compactMode ? 'calc(100vh - 140px)' : 'auto',
+      minHeight: compactMode ? 'calc(100vh - 140px)' : 'auto',
     },
     questionArea: {
       flex: 1,
       display: 'flex',
       flexDirection: 'column',
-      gap: '20px',
+      gap: '12px',
       minWidth: 0,
+      height: compactMode ? '100%' : 'auto',
     },
     questionCard: {
       flex: 1,
       backgroundColor: COLORS.white,
-      borderRadius: '16px',
-      boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+      borderRadius: '12px',
+      boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
       overflow: 'hidden',
       display: 'flex',
       flexDirection: 'column',
+      height: compactMode ? 'calc(100% - 70px)' : 'auto',
     },
     questionHeader: {
-      padding: '24px',
+      padding: '16px 20px',
       borderBottom: `1px solid ${COLORS.border}`,
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
       backgroundColor: COLORS.lightGray,
+      flexShrink: 0,
     },
     questionNav: {
       display: 'flex',
       alignItems: 'center',
-      gap: '16px',
+      gap: '12px',
     },
     questionNumber: {
-      fontSize: '18px',
-      fontWeight: '700',
+      fontSize: '16px',
+      fontWeight: '600',
       color: COLORS.primary,
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
+      gap: '6px',
     },
     questionTotal: {
-      fontSize: '14px',
+      fontSize: '13px',
       color: COLORS.gray,
       fontWeight: '500',
     },
     questionActions: {
       display: 'flex',
       alignItems: 'center',
-      gap: '12px',
+      gap: '8px',
     },
     actionButton: {
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
-      padding: '10px 16px',
+      gap: '6px',
+      padding: '6px 12px',
       backgroundColor: 'transparent',
       border: `1px solid ${COLORS.border}`,
-      borderRadius: '10px',
+      borderRadius: '8px',
       color: COLORS.darkGray,
       fontWeight: '500',
       cursor: 'pointer',
       transition: 'all 0.2s',
-      fontSize: '14px',
+      fontSize: '13px',
       '&:hover': {
         backgroundColor: COLORS.lightGray,
       },
     },
     questionBody: {
       flex: 1,
-      padding: '32px',
-      overflowY: 'auto',
-    },
-    questionText: {
-      fontSize: '18px',
-      lineHeight: 1.6,
-      color: COLORS.dark,
-      marginBottom: '32px',
-      fontWeight: '500',
-    },
-    optionsGrid: {
+      padding: compactMode ? '20px' : '24px',
+      overflowY: compactMode ? 'auto' : 'visible',
       display: 'flex',
       flexDirection: 'column',
-      gap: '16px',
+    },
+    questionText: {
+      fontSize: compactMode ? '16px' : '17px',
+      lineHeight: 1.5,
+      color: COLORS.dark,
+      marginBottom: '24px',
+      fontWeight: '500',
+      flexShrink: 0,
+    },
+    optionsGrid: {
+      flex: 1,
+      display: 'flex',
+      flexDirection: 'column',
+      gap: compactMode ? '10px' : '12px',
+      maxHeight: compactMode ? 'calc(100% - 60px)' : 'none',
+      overflowY: compactMode ? 'auto' : 'visible',
     },
     optionItem: {
       display: 'flex',
-      alignItems: 'flex-start',
-      padding: '20px',
+      alignItems: 'center',
+      padding: compactMode ? '14px' : '16px',
       border: `2px solid ${COLORS.border}`,
-      borderRadius: '12px',
+      borderRadius: '10px',
       cursor: 'pointer',
       transition: 'all 0.2s',
       backgroundColor: COLORS.white,
+      flexShrink: 0,
+      minHeight: compactMode ? '56px' : '60px',
       '&:hover': {
         borderColor: COLORS.primary,
-        transform: 'translateX(4px)',
       },
     },
     optionLetter: {
-      width: '36px',
-      height: '36px',
+      width: '32px',
+      height: '32px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: '10px',
+      borderRadius: '8px',
       backgroundColor: COLORS.lightGray,
       color: COLORS.darkGray,
-      fontWeight: '700',
-      fontSize: '16px',
-      marginRight: '16px',
+      fontWeight: '600',
+      fontSize: '14px',
+      marginRight: '12px',
       flexShrink: 0,
     },
     optionText: {
       flex: 1,
-      fontSize: '16px',
-      lineHeight: 1.5,
+      fontSize: compactMode ? '14px' : '15px',
+      lineHeight: 1.4,
       color: COLORS.darkGray,
+      wordBreak: 'break-word',
     },
     optionCheck: {
-      marginLeft: '12px',
+      marginLeft: '8px',
       color: COLORS.success,
-      fontSize: '20px',
+      fontSize: '18px',
       flexShrink: 0,
     },
     navigationButtons: {
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
-      padding: '20px 24px',
+      padding: '12px 16px',
       backgroundColor: COLORS.white,
-      borderRadius: '16px',
-      boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
-    },
-    navButton: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '12px',
-      padding: '14px 28px',
       borderRadius: '12px',
-      fontWeight: '600',
-      fontSize: '16px',
-      cursor: 'pointer',
-      transition: 'all 0.2s',
-      border: 'none',
+      boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+      flexShrink: 0,
+      marginTop: 'auto',
     },
     pageIndicator: {
-      fontSize: '15px',
+      fontSize: '14px',
       color: COLORS.gray,
       fontWeight: '500',
     },
 
     // Sidebar
     sidebar: {
-      width: '320px',
+      width: compactMode ? '280px' : '300px',
       backgroundColor: COLORS.white,
-      borderRadius: '16px',
-      boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+      borderRadius: '12px',
+      boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
       flexShrink: 0,
+      height: compactMode ? '100%' : 'auto',
     },
     sidebarHeader: {
-      padding: '24px',
+      padding: '16px 20px',
       borderBottom: `1px solid ${COLORS.border}`,
       backgroundColor: COLORS.lightGray,
     },
     sidebarTitle: {
-      fontSize: '18px',
-      fontWeight: '700',
+      fontSize: '16px',
+      fontWeight: '600',
       color: COLORS.primary,
-      marginBottom: '16px',
+      marginBottom: '12px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
     },
     filterTabs: {
       display: 'flex',
-      gap: '8px',
-      marginBottom: '16px',
+      gap: '6px',
+      marginBottom: '12px',
     },
     filterTab: {
       flex: 1,
-      padding: '10px',
+      padding: '8px',
       textAlign: 'center',
       backgroundColor: COLORS.white,
       border: `1px solid ${COLORS.border}`,
-      borderRadius: '8px',
-      fontSize: '13px',
+      borderRadius: '6px',
+      fontSize: '12px',
       fontWeight: '500',
       cursor: 'pointer',
       transition: 'all 0.2s',
     },
     questionsGrid: {
       flex: 1,
-      padding: '20px',
+      padding: '12px',
       overflowY: 'auto',
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fill, minmax(50px, 1fr))',
-      gap: '12px',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(40px, 1fr))',
+      gap: '8px',
     },
     gridButton: {
       position: 'relative',
@@ -877,12 +882,12 @@ const TestTaking = () => {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: '10px',
+      borderRadius: '8px',
       border: `2px solid ${COLORS.border}`,
       backgroundColor: COLORS.white,
       color: COLORS.darkGray,
       fontWeight: '600',
-      fontSize: '14px',
+      fontSize: '13px',
       cursor: 'pointer',
       transition: 'all 0.2s',
       overflow: 'hidden',
@@ -892,41 +897,44 @@ const TestTaking = () => {
     },
     flagIndicator: {
       position: 'absolute',
-      top: '4px',
-      right: '4px',
-      fontSize: '10px',
+      top: '3px',
+      right: '3px',
+      fontSize: '9px',
       color: COLORS.accent,
     },
     sidebarFooter: {
-      padding: '20px',
+      padding: '16px',
       borderTop: `1px solid ${COLORS.border}`,
       backgroundColor: COLORS.lightGray,
     },
     legend: {
       display: 'flex',
       flexDirection: 'column',
-      gap: '12px',
+      gap: '8px',
     },
     legendItem: {
       display: 'flex',
       alignItems: 'center',
-      gap: '10px',
-      fontSize: '13px',
+      gap: '8px',
+      fontSize: '12px',
       color: COLORS.gray,
     },
     legendDot: {
-      width: '12px',
-      height: '12px',
-      borderRadius: '3px',
+      width: '10px',
+      height: '10px',
+      borderRadius: '2px',
       flexShrink: 0,
     },
 
     // Footer
     footer: {
-      padding: '20px 32px',
+      padding: '12px 24px',
       backgroundColor: COLORS.white,
       borderTop: `1px solid ${COLORS.border}`,
       boxShadow: '0 -2px 10px rgba(0,0,0,0.05)',
+      position: 'sticky',
+      bottom: 0,
+      zIndex: 99,
     },
     footerContent: {
       display: 'flex',
@@ -938,59 +946,58 @@ const TestTaking = () => {
     progressStats: {
       display: 'flex',
       alignItems: 'center',
-      gap: '24px',
+      gap: '16px',
     },
     statItem: {
       display: 'flex',
       alignItems: 'center',
-      gap: '10px',
-      fontSize: '14px',
+      gap: '6px',
+      fontSize: '13px',
       color: COLORS.darkGray,
     },
     statBadge: {
-      width: '32px',
-      height: '32px',
+      width: '28px',
+      height: '28px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: '8px',
-      fontWeight: '700',
-      fontSize: '14px',
+      borderRadius: '6px',
+      fontWeight: '600',
+      fontSize: '13px',
     },
     footerActions: {
       display: 'flex',
       alignItems: 'center',
-      gap: '12px',
+      gap: '8px',
     },
     footerButton: {
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
-      padding: '12px 20px',
+      gap: '6px',
+      padding: '8px 16px',
       backgroundColor: COLORS.lightGray,
       border: `1px solid ${COLORS.border}`,
-      borderRadius: '10px',
+      borderRadius: '8px',
       color: COLORS.primary,
       fontWeight: '600',
       cursor: 'pointer',
       transition: 'all 0.2s',
-      fontSize: '14px',
+      fontSize: '13px',
       '&:hover': {
         backgroundColor: `${COLORS.primary}10`,
-        transform: 'translateY(-2px)',
       },
     },
     submitButton: {
       display: 'flex',
       alignItems: 'center',
-      gap: '10px',
-      padding: '14px 32px',
-      background: COLORS.gradientSuccess,
+      gap: '8px',
+      padding: '10px 24px',
+      background: `linear-gradient(135deg, ${COLORS.success} 0%, ${COLORS.secondaryDark} 100%)`,
       color: COLORS.white,
       border: 'none',
-      borderRadius: '12px',
-      fontWeight: '700',
-      fontSize: '16px',
+      borderRadius: '10px',
+      fontWeight: '600',
+      fontSize: '14px',
       cursor: 'pointer',
       transition: 'all 0.2s',
       '&:hover': {
@@ -1018,60 +1025,60 @@ const TestTaking = () => {
       maxWidth: '500px',
       width: '100%',
       backgroundColor: COLORS.white,
-      borderRadius: '20px',
+      borderRadius: '16px',
       overflow: 'hidden',
       boxShadow: '0 25px 50px rgba(0,0,0,0.15)',
     },
     confirmationHeader: {
-      padding: '32px 32px 24px',
+      padding: '24px 24px 16px',
       textAlign: 'center',
     },
     confirmationIcon: {
-      margin: '0 auto 20px',
+      margin: '0 auto 16px',
       color: COLORS.warning,
     },
     confirmationTitle: {
-      fontSize: '24px',
-      fontWeight: '700',
+      fontSize: '20px',
+      fontWeight: '600',
       color: COLORS.dark,
-      marginBottom: '12px',
+      marginBottom: '8px',
     },
     confirmationText: {
-      fontSize: '16px',
+      fontSize: '14px',
       color: COLORS.gray,
       lineHeight: 1.5,
     },
     confirmationStats: {
-      padding: '20px 32px',
+      padding: '16px 24px',
       backgroundColor: COLORS.lightGray,
     },
     statsGrid: {
       display: 'grid',
       gridTemplateColumns: 'repeat(3, 1fr)',
-      gap: '16px',
+      gap: '12px',
     },
     statCard: {
       backgroundColor: COLORS.white,
-      padding: '20px',
-      borderRadius: '12px',
+      padding: '16px',
+      borderRadius: '10px',
       textAlign: 'center',
       boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
     },
     statValue: {
-      fontSize: '24px',
-      fontWeight: '800',
+      fontSize: '20px',
+      fontWeight: '700',
       color: COLORS.primary,
       marginBottom: '4px',
     },
     statLabel: {
-      fontSize: '12px',
+      fontSize: '11px',
       color: COLORS.gray,
       textTransform: 'uppercase',
       letterSpacing: '0.5px',
       fontWeight: '600',
     },
     confirmationFooter: {
-      padding: '24px 32px',
+      padding: '20px 24px',
       borderTop: `1px solid ${COLORS.border}`,
       display: 'flex',
       justifyContent: 'space-between',
@@ -1093,62 +1100,62 @@ const TestTaking = () => {
       backdropFilter: 'blur(8px)',
     },
     pauseModal: {
-      padding: '40px',
+      padding: '32px',
       backgroundColor: COLORS.white,
-      borderRadius: '20px',
+      borderRadius: '16px',
       textAlign: 'center',
       boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
       maxWidth: '400px',
       width: '100%',
     },
     pauseIcon: {
-      margin: '0 auto 20px',
+      margin: '0 auto 16px',
       color: COLORS.primary,
     },
     pauseTitle: {
-      fontSize: '24px',
-      fontWeight: '700',
+      fontSize: '20px',
+      fontWeight: '600',
       color: COLORS.dark,
-      marginBottom: '12px',
+      marginBottom: '8px',
     },
     pauseText: {
-      fontSize: '16px',
+      fontSize: '14px',
       color: COLORS.gray,
-      marginBottom: '32px',
+      marginBottom: '24px',
     },
 
     // Summary Panel
     summaryPanel: {
-      marginTop: '16px',
+      marginTop: '12px',
       backgroundColor: COLORS.white,
-      borderRadius: '16px',
-      padding: '24px',
-      boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+      borderRadius: '12px',
+      padding: '16px',
+      boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
       border: `1px solid ${COLORS.border}`,
     },
     summaryHeader: {
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: '20px',
+      marginBottom: '16px',
     },
     summaryTitle: {
-      fontSize: '18px',
-      fontWeight: '700',
+      fontSize: '16px',
+      fontWeight: '600',
       color: COLORS.primary,
       display: 'flex',
       alignItems: 'center',
-      gap: '10px',
+      gap: '8px',
     },
     summaryStats: {
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-      gap: '20px',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+      gap: '12px',
     },
     summaryCard: {
       backgroundColor: COLORS.lightGray,
-      padding: '20px',
-      borderRadius: '12px',
+      padding: '12px',
+      borderRadius: '8px',
       textAlign: 'center',
       transition: 'transform 0.2s',
       '&:hover': {
@@ -1156,13 +1163,13 @@ const TestTaking = () => {
       },
     },
     summaryValue: {
-      fontSize: '28px',
-      fontWeight: '800',
+      fontSize: '20px',
+      fontWeight: '700',
       color: COLORS.primary,
-      marginBottom: '8px',
+      marginBottom: '4px',
     },
     summaryLabel: {
-      fontSize: '13px',
+      fontSize: '11px',
       color: COLORS.gray,
       textTransform: 'uppercase',
       letterSpacing: '0.5px',
@@ -1175,14 +1182,14 @@ const TestTaking = () => {
     primary: {
       display: 'flex',
       alignItems: 'center',
-      gap: '12px',
-      padding: '14px 28px',
-      background: COLORS.gradientPrimary,
+      gap: '10px',
+      padding: '12px 24px',
+      background: `linear-gradient(135deg, ${COLORS.primary} 0%, ${COLORS.primaryDark} 100%)`,
       color: COLORS.white,
       border: 'none',
-      borderRadius: '12px',
+      borderRadius: '10px',
       fontWeight: '600',
-      fontSize: '16px',
+      fontSize: '14px',
       cursor: 'pointer',
       transition: 'all 0.2s',
       '&:hover': {
@@ -1201,14 +1208,14 @@ const TestTaking = () => {
     secondary: {
       display: 'flex',
       alignItems: 'center',
-      gap: '12px',
-      padding: '14px 28px',
+      gap: '10px',
+      padding: '12px 24px',
       backgroundColor: COLORS.white,
       border: `2px solid ${COLORS.primary}`,
       color: COLORS.primary,
-      borderRadius: '12px',
+      borderRadius: '10px',
       fontWeight: '600',
-      fontSize: '16px',
+      fontSize: '14px',
       cursor: 'pointer',
       transition: 'all 0.2s',
       '&:hover': {
@@ -1224,14 +1231,14 @@ const TestTaking = () => {
     danger: {
       display: 'flex',
       alignItems: 'center',
-      gap: '12px',
-      padding: '14px 28px',
-      background: COLORS.gradientDanger,
+      gap: '10px',
+      padding: '12px 24px',
+      background: `linear-gradient(135deg, ${COLORS.danger} 0%, #DC2626 100%)`,
       color: COLORS.white,
       border: 'none',
-      borderRadius: '12px',
+      borderRadius: '10px',
       fontWeight: '600',
-      fontSize: '16px',
+      fontSize: '14px',
       cursor: 'pointer',
       transition: 'all 0.2s',
       '&:hover': {
@@ -1255,7 +1262,7 @@ const TestTaking = () => {
   const ErrorScreen = () => (
     <div style={styles.errorScreen}>
       <div style={styles.errorCard}>
-        <FiAlertCircle size={48} style={styles.errorIcon} />
+        <FiAlertCircle size={40} style={styles.errorIcon} />
         <h2 style={styles.errorTitle}>Unable to Load Test</h2>
         <p style={styles.errorMessage}>
           {error || 'An error occurred while loading the test. Please try again.'}
@@ -1307,7 +1314,14 @@ const TestTaking = () => {
             <h2 style={styles.instructionsTitle}>{test?.title}</h2>
             <p style={styles.instructionsSubtitle}>Computer Based Test Instructions</p>
           </div>
-          <div style={styles.instructionsBody}>
+          <div 
+            ref={instructionsContentRef}
+            style={styles.instructionsBody}
+            onScroll={(e) => {
+              // Prevent auto-scroll issue
+              e.stopPropagation();
+            }}
+          >
             <div style={styles.instructionsGrid}>
               {instructionCards.map((card, index) => (
                 <div key={index} style={styles.instructionCard}>
@@ -1349,7 +1363,7 @@ const TestTaking = () => {
               </div>
             </div>
             <div style={styles.warningSection}>
-              <FiAlertTriangle size={20} />
+              <FiAlertTriangle size={16} />
               <div>
                 <strong>Important:</strong> Do not refresh the page or close the browser during the test.
                 Any attempt to cheat will result in disqualification.
@@ -1378,7 +1392,7 @@ const TestTaking = () => {
       <div style={styles.confirmationModal}>
         <div style={styles.confirmationContent}>
           <div style={styles.confirmationHeader}>
-            <FiAlertTriangle size={48} style={styles.confirmationIcon} />
+            <FiAlertTriangle size={40} style={styles.confirmationIcon} />
             <h2 style={styles.confirmationTitle}>Submit Test?</h2>
             <p style={styles.confirmationText}>
               Are you sure you want to submit your test? This action cannot be undone.
@@ -1402,13 +1416,13 @@ const TestTaking = () => {
           </div>
           {submissionError && (
             <div style={{
-              padding: '16px 32px',
+              padding: '12px 24px',
               backgroundColor: `${COLORS.danger}10`,
               color: COLORS.danger,
-              fontSize: '14px',
+              fontSize: '13px',
               display: 'flex',
               alignItems: 'center',
-              gap: '10px',
+              gap: '8px',
             }}>
               <FiAlertCircle /> {submissionError}
             </div>
@@ -1429,8 +1443,8 @@ const TestTaking = () => {
               {isSubmitted ? (
                 <>
                   <div style={{
-                    width: '16px',
-                    height: '16px',
+                    width: '14px',
+                    height: '14px',
                     border: '2px solid rgba(255,255,255,0.3)',
                     borderTopColor: COLORS.white,
                     borderRadius: '50%',
@@ -1467,13 +1481,13 @@ const TestTaking = () => {
               <span style={styles.questionTotal}>/{questions.length}</span>
             </div>
             <div style={{
-              padding: '6px 12px',
+              padding: '4px 8px',
               backgroundColor: status === 'answered' ? `${COLORS.success}15` : 
                              status === 'marked' ? `${COLORS.accent}15` : `${COLORS.gray}15`,
               color: status === 'answered' ? COLORS.success : 
                      status === 'marked' ? COLORS.accent : COLORS.gray,
-              borderRadius: '8px',
-              fontSize: '12px',
+              borderRadius: '6px',
+              fontSize: '11px',
               fontWeight: '600',
               textTransform: 'uppercase',
             }}>
@@ -1498,7 +1512,7 @@ const TestTaking = () => {
             </div>
           </div>
         </div>
-        <div style={styles.questionBody}>
+        <div ref={questionBodyRef} style={styles.questionBody}>
           <div style={styles.questionText}>{question.text}</div>
           <div style={styles.optionsGrid}>
             {question.options.map((option, index) => {
@@ -1540,6 +1554,8 @@ const TestTaking = () => {
           ...buttonStyles.secondary,
           opacity: currentQuestion === 0 ? 0.5 : 1,
           cursor: currentQuestion === 0 ? 'not-allowed' : 'pointer',
+          padding: '10px 20px',
+          fontSize: '13px',
         }}
         disabled={currentQuestion === 0}
         onClick={() => setCurrentQuestion(prev => prev - 1)}
@@ -1550,12 +1566,23 @@ const TestTaking = () => {
         Question {currentQuestion + 1} of {questions.length}
       </div>
       {currentQuestion === questions.length - 1 ? (
-        <button style={buttonStyles.primary} onClick={() => setShowConfirmation(true)}>
+        <button 
+          style={{
+            ...buttonStyles.primary,
+            padding: '10px 20px',
+            fontSize: '13px',
+          }} 
+          onClick={() => setShowConfirmation(true)}
+        >
           <FiSend /> Submit Test
         </button>
       ) : (
         <button
-          style={buttonStyles.primary}
+          style={{
+            ...buttonStyles.primary,
+            padding: '10px 20px',
+            fontSize: '13px',
+          }}
           onClick={() => setCurrentQuestion(prev => prev + 1)}
         >
           Next <FiChevronRight />
@@ -1649,7 +1676,7 @@ const TestTaking = () => {
               >
                 {questionIndex + 1}
                 {isMarked && (
-                  <FiFlag size={10} style={styles.flagIndicator} />
+                  <FiFlag size={8} style={styles.flagIndicator} />
                 )}
               </button>
             );
@@ -1721,9 +1748,11 @@ const TestTaking = () => {
         <button 
           style={{
             ...buttonStyles.secondary,
-            marginTop: '20px',
+            marginTop: '12px',
             width: '100%',
             justifyContent: 'center',
+            padding: '8px',
+            fontSize: '12px',
           }}
           onClick={saveProgress}
         >
@@ -1736,7 +1765,7 @@ const TestTaking = () => {
   const PauseOverlay = () => (
     <div style={styles.pauseOverlay}>
       <div style={styles.pauseModal}>
-        <FiLock size={48} style={styles.pauseIcon} />
+        <FiLock size={40} style={styles.pauseIcon} />
         <h2 style={styles.pauseTitle}>Test Paused</h2>
         <p style={styles.pauseText}>
           Your test timer has been paused. You can resume when ready.
@@ -1757,30 +1786,30 @@ const TestTaking = () => {
       <header style={styles.header}>
         <div style={styles.headerLeft}>
           <button style={styles.backButton} onClick={() => navigate('/student/dashboard')}>
-            <FiArrowLeft /> Exit to Dashboard
+            <FiArrowLeft /> Dashboard
           </button>
           <div style={styles.testInfo}>
             <h1 style={styles.testTitle}>{test?.title}</h1>
             <div style={styles.testMeta}>
               <span style={styles.metaItem}>
-                <FiBook size={12} /> {test?.subject}
+                <FiBook size={10} /> {test?.subject}
               </span>
               <span style={styles.metaItem}>
-                <FiUser size={12} /> {test?.class?.name || 'All Classes'}
+                <FiUser size={10} /> {test?.class?.name || 'All Classes'}
               </span>
               <span style={styles.metaItem}>
-                <FiCalendar size={12} /> CBT
+                <FiCalendar size={10} /> Computer Based Test
               </span>
             </div>
           </div>
         </div>
         <div style={styles.timerSection}>
           <div style={styles.timerCard}>
-            <FiClock />
+            <FiClock size={14} />
             {formatTime(timeLeft)}
             {timeWarning && (
               <div style={styles.timerWarning}>
-                <FiAlertTriangle size={10} /> Time Running Out!
+                <FiAlertTriangle size={8} /> Time Running Out!
               </div>
             )}
           </div>
@@ -1875,19 +1904,19 @@ const TestTaking = () => {
           padding: 0;
         }
         body {
-          overflow: hidden;
+          overflow: ${showInstructions || isPaused || showConfirmation ? 'hidden' : 'auto'};
         }
         ::-webkit-scrollbar {
-          width: 8px;
-          height: 8px;
+          width: 6px;
+          height: 6px;
         }
         ::-webkit-scrollbar-track {
           background: ${COLORS.lightGray};
-          border-radius: 4px;
+          border-radius: 3px;
         }
         ::-webkit-scrollbar-thumb {
           background: ${COLORS.gray};
-          border-radius: 4px;
+          border-radius: 3px;
         }
         ::-webkit-scrollbar-thumb:hover {
           background: ${COLORS.darkGray};
@@ -1895,18 +1924,13 @@ const TestTaking = () => {
         button {
           outline: none;
           font-family: inherit;
+          cursor: pointer;
         }
         button:hover {
           transition: all 0.2s ease;
         }
-        @media (max-width: 1200px) {
-          .mainContent {
-            flex-direction: column;
-          }
-          .sidebar {
-            width: 100%;
-            height: 300px;
-          }
+        button:disabled {
+          cursor: not-allowed;
         }
       `}</style>
     </div>
