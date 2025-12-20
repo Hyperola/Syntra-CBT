@@ -146,40 +146,85 @@ const ManageTests = () => {
       
       // Use your sessions/active endpoint
       const response = await api.get('/api/sessions/active');
-      console.log('Current session/term response:', response.data);
+      console.log('DEBUG - Full API response:', JSON.stringify(response.data, null, 2));
       
       if (response.data && response.data.session) {
-        const sessionName = response.data.session.sessionName || response.data.session;
-        const activeTerm = response.data.activeTerm;
+        const sessionData = response.data.session;
+        const activeTermData = response.data.activeTerm;
         
-        console.log('Parsed session data:', { 
-          sessionName, 
-          activeTerm,
-          fullResponse: response.data 
+        console.log('Parsing session data:', {
+          sessionData,
+          activeTermData,
+          fullResponse: response.data
         });
+        
+        // Extract session name
+        let sessionName = '';
+        if (typeof sessionData === 'string') {
+          sessionName = sessionData;
+        } else if (sessionData && typeof sessionData === 'object') {
+          sessionName = sessionData.sessionName || sessionData.name || sessionData;
+        }
         
         if (sessionName) {
           setCurrentSession(sessionName);
           
-          // Set current term - handle both object and string formats
-          if (activeTerm) {
-            if (typeof activeTerm === 'object' && activeTerm.name) {
-              setCurrentTerm(activeTerm.name);
-            } else if (typeof activeTerm === 'string') {
-              setCurrentTerm(activeTerm);
-            } else if (response.data.session.activeTerm) {
-              setCurrentTerm(response.data.session.activeTerm);
-            } else {
-              // Default to First Term if not specified
-              setCurrentTerm('First Term');
+          // Extract term name - handle multiple possible formats
+          let termName = '';
+          
+          // First try: activeTerm object
+          if (activeTermData) {
+            if (typeof activeTermData === 'object') {
+              // Try different possible property names
+              termName = activeTermData.name || activeTermData.term || activeTermData.activeTerm;
+              console.log('Found term in activeTerm object:', termName);
+            } else if (typeof activeTermData === 'string') {
+              termName = activeTermData;
+              console.log('Found term as string:', termName);
             }
-          } else {
-            // Default to First Term if no active term
-            setCurrentTerm('First Term');
           }
+          
+          // Second try: session object properties
+          if (!termName && typeof sessionData === 'object') {
+            // Check session.activeTerm property
+            termName = sessionData.activeTerm;
+            if (termName) {
+              console.log('Found term in session.activeTerm:', termName);
+            }
+            
+            // Check session.terms array for active term
+            if (!termName && sessionData.terms && Array.isArray(sessionData.terms)) {
+              const activeTermInSession = sessionData.terms.find(t => t.isActive);
+              if (activeTermInSession) {
+                termName = activeTermInSession.name || activeTermInSession.term;
+                console.log('Found active term in session.terms:', termName);
+              }
+            }
+            
+            // Check if session has a direct term property
+            if (!termName && sessionData.term) {
+              termName = sessionData.term;
+              console.log('Found term in session.term property:', termName);
+            }
+          }
+          
+          // Third try: check if activeTerm is actually a string in the main response
+          if (!termName && response.data.activeTerm && typeof response.data.activeTerm === 'string') {
+            termName = response.data.activeTerm;
+            console.log('Found term in response.data.activeTerm:', termName);
+          }
+          
+          // Set the term (default to First Term if still not found)
+          const finalTerm = termName || 'First Term';
+          setCurrentTerm(finalTerm);
+          
+          console.log('Final parsed values:', {
+            session: sessionName,
+            term: finalTerm
+          });
         }
       } else {
-        console.warn('No active session found, using fallback calculation');
+        console.warn('No active session found in response, using fallback calculation');
         determineCurrentSessionAndTerm();
       }
     } catch (err) {
@@ -198,7 +243,7 @@ const ManageTests = () => {
             // Check for active term
             const activeTerm = activeSession.terms?.find(t => t.isActive);
             if (activeTerm) {
-              setCurrentTerm(activeTerm.name);
+              setCurrentTerm(activeTerm.name || activeTerm.term || 'First Term');
             } else {
               setCurrentTerm('First Term');
             }
@@ -484,8 +529,15 @@ const ManageTests = () => {
 
   const getCurrentTermLabel = () => {
     if (isFetchingCurrentTerm) return 'Loading...';
-    return currentSession && currentTerm 
-      ? `${currentSession} - ${currentTerm}`
+    
+    // Ensure currentTerm is displayed as a string
+    let termLabel = currentTerm;
+    if (currentTerm && typeof currentTerm === 'object') {
+      termLabel = currentTerm.name || currentTerm.term || currentTerm.activeTerm || 'Unknown Term';
+    }
+    
+    return currentSession && termLabel 
+      ? `${currentSession} - ${termLabel}`
       : 'Not set';
   };
 
