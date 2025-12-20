@@ -29,7 +29,6 @@ const Dashboard = () => {
   const [stats, setStats] = useState({
     totalTests: 0,
     completedTests: 0,
-    averageScore: 0,
     timeSpent: 0,
     availableTests: 0,
     upcomingTests: 0
@@ -185,10 +184,6 @@ const Dashboard = () => {
               submittedTestIds.add(testId);
               submissionDetails[testId] = {
                 submittedAt: submission.submittedAt,
-                score: submission.score,
-                totalMarks: submission.totalMarks,
-                percentage: submission.percentage,
-                passed: submission.passed,
                 attemptNumber: submission.attemptNumber || 1
               };
             }
@@ -249,10 +244,6 @@ const Dashboard = () => {
                 testTitle: test.title,
                 testSubject: getSubjectName(test.subject),
                 testClass: test.class?.name || test.class,
-                score: submissionDetail?.score || 0,
-                totalMarks: submissionDetail?.totalMarks || test.totalMarks || 0,
-                percentage: submissionDetail?.percentage || 0,
-                passed: submissionDetail?.passed || false,
                 submittedAt: submissionDetail?.submittedAt || (batchEnded ? batchEnd : new Date().toISOString()),
                 attemptNumber: submissionDetail?.attemptNumber || 1,
                 status: hasSubmitted ? 'submitted' : 'missed',
@@ -312,7 +303,6 @@ const Dashboard = () => {
                 action: action,
                 description: description,
                 subject: test.testSubject,
-                score: test.percentage,
                 status: test.status,
                 time: formatTimeAgo(test.submittedAt),
                 icon: icon,
@@ -324,18 +314,14 @@ const Dashboard = () => {
 
           // Calculate stats
           const submittedTests = completedTestsList.filter(t => t.status === 'submitted');
-          const totalScore = submittedTests.reduce((sum, test) => sum + parseFloat(test.score), 0);
-          const totalMarks = submittedTests.reduce((sum, test) => sum + parseFloat(test.totalMarks), 0);
-          const avgScore = submittedTests.length > 0 && totalMarks > 0 ? 
-                          (totalScore / totalMarks) * 100 : 0;
+          const estimatedTimeSpent = submittedTests.length * 60; // Assuming 60 minutes per test
 
           setStats({
             totalTests: studentTests.length,
             completedTests: completedTestsList.length,
             availableTests: availableTestsList.length,
             upcomingTests: upcomingTestsList.length,
-            averageScore: parseFloat(avgScore.toFixed(1)),
-            timeSpent: 0
+            timeSpent: estimatedTimeSpent
           });
 
           // Extract upcoming deadlines from upcoming tests
@@ -397,7 +383,6 @@ const Dashboard = () => {
             completedTests: completedTestsCount,
             availableTests: availableTestsCount,
             upcomingTests: 0,
-            averageScore: 0,
             timeSpent: 0
           });
 
@@ -449,8 +434,8 @@ const Dashboard = () => {
                 const latestTest = submittedTests[0];
                 notificationsList.push({
                   _id: 'notif-latest-result',
-                  title: 'Test Result Available',
-                  message: `You scored ${latestTest.percentage}% on ${latestTest.testTitle}`,
+                  title: 'Test Submitted',
+                  message: `You have submitted "${latestTest.testTitle}"`,
                   type: 'result',
                   read: false,
                   createdAt: latestTest.submittedAt || new Date().toISOString(),
@@ -724,21 +709,21 @@ const Dashboard = () => {
         </div>
 
         <div style={styles.statCard}>
-          <div style={{ ...styles.statIcon, backgroundColor: `${brandColors.secondary}15` }}>
-            <FiBarChart2 size={24} color={brandColors.secondary} />
+          <div style={{ ...styles.statIcon, backgroundColor: `${brandColors.info}15` }}>
+            <FiClock size={24} color={brandColors.info} />
           </div>
           <div style={styles.statContent}>
-            <h3 style={styles.statNumber}>{stats.averageScore?.toFixed(1) || 0}%</h3>
-            <p style={styles.statLabel}>Average Score</p>
+            <h3 style={styles.statNumber}>{formatTime(stats.timeSpent)}</h3>
+            <p style={styles.statLabel}>Total Time Spent</p>
             <p style={{ fontSize: '12px', color: '#6c757d', marginTop: '4px' }}>
-              Based on {completedTests.filter(t => t.status === 'submitted').length} tests
+              On all tests
             </p>
           </div>
         </div>
 
         <div style={styles.statCard}>
-          <div style={{ ...styles.statIcon, backgroundColor: `${brandColors.info}15` }}>
-            <FiClock size={24} color={brandColors.info} />
+          <div style={{ ...styles.statIcon, backgroundColor: `${brandColors.secondary}15` }}>
+            <FiBarChart2 size={24} color={brandColors.secondary} />
           </div>
           <div style={styles.statContent}>
             <h3 style={styles.statNumber}>{stats.availableTests || 0}</h3>
@@ -881,7 +866,7 @@ const Dashboard = () => {
               {user?.role === 'student' && recentActivity.length > 0 && (
                 <button 
                   style={styles.viewAllBtn}
-                  onClick={() => navigate('/results')}
+                  onClick={() => navigate('/activity')}
                 >
                   View All <FiChevronRight />
                 </button>
@@ -907,9 +892,6 @@ const Dashboard = () => {
                     <div style={styles.activityContent}>
                       <p style={styles.activityText}>
                         {activity.description || activity.action}
-                        {activity.score && activity.status === 'submitted' && (
-                          <span style={{...styles.activityScore, color: activity.color}}> ({activity.score}%)</span>
-                        )}
                       </p>
                       <span style={styles.activityTime}>{activity.time}</span>
                     </div>
@@ -1023,10 +1005,10 @@ const Dashboard = () => {
                   </button>
                   <button 
                     style={styles.actionBtn}
-                    onClick={() => navigate('/results')}
+                    onClick={() => navigate('/activity')}
                   >
-                    <FiBarChart2 size={20} />
-                    <span>My Results</span>
+                    <FiActivity size={20} />
+                    <span>My Activity</span>
                   </button>
                   <button 
                     style={styles.actionBtn}
@@ -1037,10 +1019,10 @@ const Dashboard = () => {
                   </button>
                   <button 
                     style={styles.actionBtn}
-                    onClick={() => navigate('/performance')}
+                    onClick={() => navigate('/profile')}
                   >
                     <FiAward size={20} />
-                    <span>Performance</span>
+                    <span>My Profile</span>
                   </button>
                 </>
               ) : user?.role === 'teacher' ? (
@@ -1499,10 +1481,6 @@ const styles = {
     fontSize: '14px',
     color: '#2C3E50',
     margin: '0 0 4px 0'
-  },
-  activityScore: {
-    fontWeight: '600',
-    marginLeft: '4px'
   },
   activityTime: {
     fontSize: '12px',

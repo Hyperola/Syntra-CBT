@@ -1,4 +1,4 @@
-// pages/CreateTeacherWithSubjects.js - FIXED VERSION
+// pages/CreateTeacherWithSubjects.js - UPDATED TO MATCH MANAGEUSERS.JS FORMAT
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -6,7 +6,8 @@ import axios from 'axios';
 import {
   FiUser, FiBook, FiCheck, FiX, FiPlus, FiTrash2,
   FiChevronDown, FiChevronUp, FiAlertCircle, FiCheckCircle,
-  FiLock, FiMail, FiPhone, FiLoader, FiAlertTriangle
+  FiLock, FiMail, FiPhone, FiLoader, FiAlertTriangle,
+  FiXCircle, FiSave
 } from 'react-icons/fi';
 
 const CreateTeacherWithSubjects = () => {
@@ -27,14 +28,24 @@ const CreateTeacherWithSubjects = () => {
     surname: '',
     phoneNumber: '',
     class: '', // Primary class (optional)
-    active: true
+    active: true,
+    dateOfBirth: '',
+    address: '',
+    sex: '',
+    age: ''
   });
   
   // Class and subject assignments
   const [classes, setClasses] = useState([]);
-  const [availableSubjects, setAvailableSubjects] = useState({});
-  const [assignments, setAssignments] = useState([]); // [{ classId, subjectIds: [] }]
-  const [expandedAssignment, setExpandedAssignment] = useState(null);
+  const [teacherAssignments, setTeacherAssignments] = useState([]);
+  const [teacherAssignmentModal, setTeacherAssignmentModal] = useState({
+    open: false,
+    selectedClass: '',
+    selectedSubjects: []
+  });
+  const [availableSubjectsForAssignment, setAvailableSubjectsForAssignment] = useState([]);
+  const [loadingAssignmentSubjects, setLoadingAssignmentSubjects] = useState(false);
+  const [loadingClasses, setLoadingClasses] = useState(false);
   
   // Form validation
   const [errors, setErrors] = useState({});
@@ -44,6 +55,7 @@ const CreateTeacherWithSubjects = () => {
   }, []);
 
   const fetchClasses = async () => {
+    setLoadingClasses(true);
     try {
       const token = localStorage.getItem('token');
       const res = await axios.get('http://localhost:5000/api/users/assignment/classes', {
@@ -79,87 +91,173 @@ const CreateTeacherWithSubjects = () => {
       console.error('Error fetching classes:', err);
       setError('Failed to load classes. Please try again.');
       setClasses([]);
+    } finally {
+      setLoadingClasses(false);
     }
   };
 
-  const fetchClassSubjects = async (classId) => {
+  const fetchAssignmentSubjects = async (classId) => {
+    if (!classId) {
+      setAvailableSubjectsForAssignment([]);
+      return;
+    }
+
+    setLoadingAssignmentSubjects(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get(`http://localhost:5000/api/users/assignment/classes/${classId}/subjects`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
       
-      if (res.data && res.data.subjects) {
-        const subjectsList = res.data.subjects.map(sub => ({
-          id: sub._id || sub.id,
-          _id: sub._id || sub.id,
-          name: sub.name || sub.displayName || 'Unknown Subject',
-          code: sub.code || '',
-          isCore: sub.isCore || false
-        }));
+      let subjectsList = [];
+      
+      try {
+        const res = await axios.get(`http://localhost:5000/api/users/assignment/classes/${classId}/subjects`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
         
-        return subjectsList;
+        if (res.data && res.data.subjects) {
+          subjectsList = res.data.subjects;
+        } else if (res.data && res.data.success && Array.isArray(res.data.data)) {
+          subjectsList = res.data.data;
+        }
+      } catch (firstErr) {
+        console.log('First API attempt failed, trying alternative...', firstErr);
+        
+        // Try alternative endpoint
+        const res = await axios.get(`http://localhost:5000/api/classes/${classId}/subjects`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        if (res.data && Array.isArray(res.data.subjects)) {
+          subjectsList = res.data.subjects;
+        } else if (res.data && res.data.success && Array.isArray(res.data.data)) {
+          subjectsList = res.data.data;
+        }
       }
-      return [];
-    } catch (err) {
-      console.error('Error fetching class subjects:', err);
-      return [];
-    }
-  };
-
-  const addAssignment = () => {
-    setAssignments([...assignments, { classId: '', subjectIds: [] }]);
-  };
-
-  const removeAssignment = (index) => {
-    const newAssignments = [...assignments];
-    const removedClassId = newAssignments[index].classId;
-    newAssignments.splice(index, 1);
-    setAssignments(newAssignments);
-    
-    if (expandedAssignment === index) {
-      setExpandedAssignment(null);
-    }
-    
-    // Clean up available subjects for removed class
-    if (removedClassId) {
-      const newAvailableSubjects = { ...availableSubjects };
-      delete newAvailableSubjects[removedClassId];
-      setAvailableSubjects(newAvailableSubjects);
-    }
-  };
-
-  const updateAssignment = async (index, field, value) => {
-    const newAssignments = [...assignments];
-    newAssignments[index] = { ...newAssignments[index], [field]: value };
-    setAssignments(newAssignments);
-    
-    // If class changed, fetch subjects
-    if (field === 'classId' && value) {
-      const subjects = await fetchClassSubjects(value);
-      setAvailableSubjects(prev => ({
-        ...prev,
-        [value]: subjects
-      }));
       
-      // Clear subject selections when class changes
-      newAssignments[index].subjectIds = [];
-      setAssignments(newAssignments);
+      const formattedSubjects = subjectsList.map(sub => ({
+        id: sub._id || sub.id || sub.subjectId,
+        _id: sub._id || sub.id || sub.subjectId,
+        name: sub.name || sub.displayName || sub.subjectName || 'Unknown Subject',
+        code: sub.code || sub.subjectCode || '',
+        isCore: sub.isCore || false
+      })).filter(Boolean);
+      
+      console.log('📚 Assignment subjects for class', classId, ':', formattedSubjects);
+      setAvailableSubjectsForAssignment(formattedSubjects);
+      
+    } catch (err) {
+      console.error('Error fetching assignment subjects:', err);
+      setError('Failed to load subjects for assignment.');
+      setAvailableSubjectsForAssignment([]);
+    } finally {
+      setLoadingAssignmentSubjects(false);
     }
   };
 
-  const toggleSubjectSelection = (classId, subjectId) => {
-    const assignmentIndex = assignments.findIndex(a => a.classId === classId);
-    if (assignmentIndex === -1) return;
+  const openTeacherAssignmentModal = () => {
+    setTeacherAssignmentModal({
+      open: true,
+      selectedClass: '',
+      selectedSubjects: []
+    });
+  };
+
+  const closeTeacherAssignmentModal = () => {
+    setTeacherAssignmentModal({
+      open: false,
+      selectedClass: '',
+      selectedSubjects: []
+    });
+    setAvailableSubjectsForAssignment([]);
+  };
+
+  const handleAssignmentClassChange = async (classId) => {
+    setTeacherAssignmentModal(prev => ({
+      ...prev,
+      selectedClass: classId,
+      selectedSubjects: []
+    }));
+
+    await fetchAssignmentSubjects(classId);
+  };
+
+  const handleAssignmentSubjectToggle = (subjectId) => {
+    setTeacherAssignmentModal(prev => {
+      const isSelected = prev.selectedSubjects.includes(subjectId);
+      return {
+        ...prev,
+        selectedSubjects: isSelected 
+          ? prev.selectedSubjects.filter(id => id !== subjectId)
+          : [...prev.selectedSubjects, subjectId]
+      };
+    });
+  };
+
+  const addTeacherAssignment = () => {
+    if (!teacherAssignmentModal.selectedClass || teacherAssignmentModal.selectedSubjects.length === 0) {
+      setError('Please select a class and at least one subject');
+      return;
+    }
+
+    const selectedClass = classes.find(c => c._id === teacherAssignmentModal.selectedClass);
+    if (!selectedClass) return;
+
+    const newAssignment = {
+      classId: teacherAssignmentModal.selectedClass,
+      className: selectedClass.name,
+      subjects: teacherAssignmentModal.selectedSubjects.map(subjectId => {
+        const subject = availableSubjectsForAssignment.find(s => s.id === subjectId);
+        return {
+          subjectId: subjectId,
+          subjectName: subject?.name || 'Unknown Subject'
+        };
+      })
+    };
+
+    // Check if this class is already assigned
+    const existingIndex = teacherAssignments.findIndex(
+      assignment => assignment.classId === teacherAssignmentModal.selectedClass
+    );
+
+    if (existingIndex >= 0) {
+      // Update existing assignment
+      const updatedAssignments = [...teacherAssignments];
+      updatedAssignments[existingIndex] = newAssignment;
+      setTeacherAssignments(updatedAssignments);
+    } else {
+      // Add new assignment
+      setTeacherAssignments([...teacherAssignments, newAssignment]);
+    }
+
+    closeTeacherAssignmentModal();
+  };
+
+  const removeTeacherAssignment = (classId) => {
+    setTeacherAssignments(prev => 
+      prev.filter(assignment => assignment.classId !== classId)
+    );
+  };
+
+  const calculateAge = (dateOfBirth) => {
+    if (!dateOfBirth) return '';
+    const today = new Date();
+    const birthDate = new Date(dateOfBirth);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
     
-    const assignment = assignments[assignmentIndex];
-    const isSelected = assignment.subjectIds.includes(subjectId);
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
     
-    const newSubjectIds = isSelected
-      ? assignment.subjectIds.filter(id => id !== subjectId)
-      : [...assignment.subjectIds, subjectId];
-    
-    updateAssignment(assignmentIndex, 'subjectIds', newSubjectIds);
+    return age;
+  };
+
+  const handleDateOfBirthChange = (dateString) => {
+    const age = calculateAge(dateString);
+    setTeacherData(prev => ({
+      ...prev,
+      dateOfBirth: dateString,
+      age: age || ''
+    }));
   };
 
   const cleanUsername = (username) => {
@@ -194,15 +292,10 @@ const CreateTeacherWithSubjects = () => {
       newErrors.email = 'Please enter a valid email address';
     }
     
-    // Assignment validation
-    assignments.forEach((assignment, index) => {
-      if (!assignment.classId) {
-        newErrors[`assignment_${index}_class`] = 'Class is required';
-      }
-      if (!assignment.subjectIds || assignment.subjectIds.length === 0) {
-        newErrors[`assignment_${index}_subjects`] = 'At least one subject is required';
-      }
-    });
+    // Teacher assignments validation
+    if (teacherAssignments.length === 0) {
+      newErrors.teacherAssignments = 'At least one class assignment is required';
+    }
     
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -228,35 +321,17 @@ const CreateTeacherWithSubjects = () => {
       
       const cleanedUsername = cleanUsername(teacherData.username);
       
-      // Format teacherAssignments to match your User model EXACTLY
-      const formattedTeacherAssignments = [];
-
-      for (const assignment of assignments) {
-        if (assignment.classId && assignment.subjectIds.length > 0) {
-          // Find the class object
-          const classObj = classes.find(c => c._id === assignment.classId);
-          const className = classObj ? classObj.name : 'Unknown Class';
-          
-          // Get subject names
-          const classSubjects = availableSubjects[assignment.classId] || [];
-          
-          formattedTeacherAssignments.push({
-            class: assignment.classId,  // Field name should be "class" not "classId"
-            className: className,      // Add className for compatibility
-            subjects: assignment.subjectIds.map(subjectId => {
-              const subject = classSubjects.find(s => s.id === subjectId);
-              return {
-                subject: subjectId,      // Subject ID
-                subjectName: subject ? subject.name : 'Unknown Subject',
-                assignedAt: new Date()
-              };
-            }),
-            assignedAt: new Date()
-          });
-        }
-      }
+      // Format teacher assignments exactly like ManageUsers.js does
+      const formattedAssignments = teacherAssignments.map(assignment => ({
+        class: assignment.classId,
+        className: assignment.className,
+        subjects: assignment.subjects.map(subject => ({
+          subject: subject.subjectId,
+          subjectName: subject.subjectName
+        }))
+      }));
       
-      // Build teacher data according to your backend format
+      // Build teacher data according to your backend POST /users format
       const teacherDataToSend = {
         username: cleanedUsername,
         password: teacherData.password,
@@ -267,18 +342,11 @@ const CreateTeacherWithSubjects = () => {
         class: teacherData.class || undefined,
         phoneNumber: teacherData.phoneNumber?.trim() || undefined,
         active: teacherData.active,
-        teacherAssignments: formattedTeacherAssignments, // Correct format
-        
-        // For backward compatibility with old subjects field:
-        subjects: formattedTeacherAssignments.flatMap(assignment => {
-          return assignment.subjects.map(subject => ({
-            subject: subject.subjectName,
-            class: assignment.className,
-            classId: assignment.class,
-            assignedDate: new Date(),
-            isActive: true
-          }));
-        })
+        dateOfBirth: teacherData.dateOfBirth || undefined,
+        address: teacherData.address?.trim() || undefined,
+        sex: teacherData.sex || undefined,
+        age: teacherData.age ? parseInt(teacherData.age) : undefined,
+        teacherAssignments: formattedAssignments
       };
       
       console.log('📤 Creating teacher with data:', JSON.stringify(teacherDataToSend, null, 2));
@@ -307,11 +375,13 @@ const CreateTeacherWithSubjects = () => {
         surname: '',
         phoneNumber: '',
         class: '',
-        active: true
+        active: true,
+        dateOfBirth: '',
+        address: '',
+        sex: '',
+        age: ''
       });
-      setAssignments([]);
-      setExpandedAssignment(null);
-      setAvailableSubjects({});
+      setTeacherAssignments([]);
       
       // Navigate back after 2 seconds
       setTimeout(() => {
@@ -334,6 +404,9 @@ const CreateTeacherWithSubjects = () => {
             errorMessage = err.response.data.message;
           } else if (err.response.data.error) {
             errorMessage = err.response.data.error;
+          } else if (err.response.data.errors) {
+            // Handle validation errors
+            errorMessage = Object.values(err.response.data.errors).join(', ');
           }
         }
         setError(`Server Error (${err.response.status}): ${errorMessage}`);
@@ -481,11 +554,57 @@ const CreateTeacherWithSubjects = () => {
             </div>
             
             <div style={styles.formGroup}>
+              <label>Date of Birth</label>
+              <input
+                type="date"
+                value={teacherData.dateOfBirth}
+                onChange={(e) => handleDateOfBirthChange(e.target.value)}
+                style={styles.input}
+              />
+            </div>
+            
+            <div style={styles.formGroup}>
+              <label>Age</label>
+              <input
+                type="number"
+                value={teacherData.age}
+                readOnly
+                style={{...styles.input, backgroundColor: '#F0F0F0'}}
+              />
+            </div>
+            
+            <div style={styles.formGroup}>
+              <label>Sex</label>
+              <select
+                value={teacherData.sex}
+                onChange={(e) => setTeacherData({...teacherData, sex: e.target.value})}
+                style={styles.select}
+              >
+                <option value="">Select Sex</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            
+            <div style={styles.formGroup}>
+              <label>Address</label>
+              <input
+                type="text"
+                value={teacherData.address}
+                onChange={(e) => setTeacherData({...teacherData, address: e.target.value})}
+                placeholder="e.g., 123 Main St"
+                style={styles.input}
+              />
+            </div>
+            
+            <div style={styles.formGroup}>
               <label>Primary Class (Optional)</label>
               <select
                 value={teacherData.class}
                 onChange={(e) => setTeacherData({...teacherData, class: e.target.value})}
                 style={styles.select}
+                disabled={loadingClasses}
               >
                 <option value="">Select Primary Class</option>
                 {classes.map(cls => (
@@ -494,6 +613,7 @@ const CreateTeacherWithSubjects = () => {
                   </option>
                 ))}
               </select>
+              {loadingClasses && <small style={styles.loadingText}>Loading classes...</small>}
               <small style={styles.helpText}>For timetable purposes. Teachers can teach multiple classes.</small>
             </div>
             
@@ -511,19 +631,22 @@ const CreateTeacherWithSubjects = () => {
           </div>
         </div>
 
-        {/* Subject Assignments */}
+        {/* Teacher Assignments Section - Matching ManageUsers.js format */}
         <div style={styles.section}>
           <div style={styles.sectionHeader}>
             <h3 style={styles.sectionTitle}>
-              <FiBook /> Subject Assignments
+              <FiBook /> Teacher Assignments *
             </h3>
+            {errors.teacherAssignments && (
+              <span style={styles.errorText}>{errors.teacherAssignments}</span>
+            )}
             <button
               type="button"
-              onClick={addAssignment}
+              onClick={openTeacherAssignmentModal}
               style={styles.addButton}
               disabled={loading}
             >
-              <FiPlus /> Add Class Assignment
+              <FiPlus /> Add Assignment
             </button>
           </div>
           
@@ -531,126 +654,35 @@ const CreateTeacherWithSubjects = () => {
             Assign this teacher to teach subjects in different classes. A teacher can teach multiple subjects in multiple classes.
           </p>
           
-          {assignments.length === 0 ? (
+          {teacherAssignments.length === 0 ? (
             <div style={styles.emptyAssignments}>
-              <p>No assignments yet. Click "Add Class Assignment" to get started.</p>
+              <p>No assignments yet. Click "Add Assignment" to get started.</p>
             </div>
           ) : (
-            assignments.map((assignment, index) => (
-              <div key={index} style={styles.assignmentCard}>
-                <div 
-                  style={styles.assignmentHeader}
-                  onClick={() => setExpandedAssignment(expandedAssignment === index ? null : index)}
-                >
-                  <div style={styles.assignmentInfo}>
-                    <h4 style={styles.assignmentTitle}>
-                      Assignment {index + 1}
-                      {assignment.classId && classes.find(c => c._id === assignment.classId) && (
-                        <span style={styles.className}>
-                          - {classes.find(c => c._id === assignment.classId).name}
-                        </span>
-                      )}
-                    </h4>
-                    {assignment.subjectIds.length > 0 && (
-                      <span style={styles.subjectCount}>
-                        {assignment.subjectIds.length} subject(s) selected
-                      </span>
-                    )}
-                  </div>
-                  <div style={styles.assignmentActions}>
+            <div style={styles.assignmentsContainer}>
+              {teacherAssignments.map((assignment, index) => (
+                <div key={index} style={styles.assignmentItem}>
+                  <div style={styles.assignmentHeader}>
+                    <strong>{assignment.className}</strong>
                     <button
                       type="button"
-                      onClick={() => removeAssignment(index)}
+                      onClick={() => removeTeacherAssignment(assignment.classId)}
                       style={styles.removeAssignmentButton}
                       disabled={loading}
                     >
-                      <FiTrash2 />
+                      <FiXCircle />
                     </button>
-                    <button
-                      type="button"
-                      style={styles.expandButton}
-                    >
-                      {expandedAssignment === index ? <FiChevronUp /> : <FiChevronDown />}
-                    </button>
+                  </div>
+                  <div style={styles.assignmentSubjects}>
+                    {assignment.subjects.map((subject, subIndex) => (
+                      <span key={subIndex} style={styles.assignmentSubjectBadge}>
+                        {subject.subjectName}
+                      </span>
+                    ))}
                   </div>
                 </div>
-                
-                {expandedAssignment === index && (
-                  <div style={styles.assignmentDetails}>
-                    {/* Class Selection */}
-                    <div style={styles.formGroup}>
-                      <label>Class *</label>
-                      <select
-                        value={assignment.classId}
-                        onChange={(e) => updateAssignment(index, 'classId', e.target.value)}
-                        style={{...styles.select, ...(errors[`assignment_${index}_class`] && styles.inputError)}}
-                        disabled={loading}
-                      >
-                        <option value="">Select a class</option>
-                        {classes.map(cls => (
-                          <option key={cls._id} value={cls._id}>
-                            {cls.name} {cls.level ? `(${cls.level})` : ''}
-                          </option>
-                        ))}
-                      </select>
-                      {errors[`assignment_${index}_class`] && (
-                        <span style={styles.errorText}>{errors[`assignment_${index}_class`]}</span>
-                      )}
-                    </div>
-                    
-                    {/* Subject Selection (only if class is selected) */}
-                    {assignment.classId && availableSubjects[assignment.classId] && availableSubjects[assignment.classId].length > 0 && (
-                      <div style={styles.formGroup}>
-                        <label>Select Subjects *</label>
-                        {errors[`assignment_${index}_subjects`] && (
-                          <span style={styles.errorText}>{errors[`assignment_${index}_subjects`]}</span>
-                        )}
-                        <div style={styles.subjectsGrid}>
-                          {availableSubjects[assignment.classId].map(subject => (
-                            <label key={subject.id} style={styles.subjectCheckbox}>
-                              <input
-                                type="checkbox"
-                                checked={assignment.subjectIds.includes(subject.id)}
-                                onChange={() => toggleSubjectSelection(assignment.classId, subject.id)}
-                                style={styles.checkbox}
-                                disabled={loading}
-                              />
-                              <div style={styles.subjectCheckboxContent}>
-                                <span style={styles.subjectName}>{subject.name}</span>
-                                {subject.code && (
-                                  <span style={styles.subjectCode}>{subject.code}</span>
-                                )}
-                                {subject.isCore && (
-                                  <span style={styles.coreBadge}>Core</span>
-                                )}
-                              </div>
-                            </label>
-                          ))}
-                        </div>
-                        <small style={styles.helpText}>
-                          {assignment.subjectIds.length} subject(s) selected
-                        </small>
-                      </div>
-                    )}
-                    
-                    {/* Loading indicator for subjects */}
-                    {assignment.classId && (!availableSubjects[assignment.classId] || availableSubjects[assignment.classId].length === 0) && (
-                      <div style={styles.loadingSubjects}>
-                        <div style={styles.spinner}></div>
-                        <p>Loading subjects for this class...</p>
-                      </div>
-                    )}
-                    
-                    {/* No subjects available */}
-                    {assignment.classId && availableSubjects[assignment.classId] && availableSubjects[assignment.classId].length === 0 && (
-                      <div style={styles.noSubjectsMessage}>
-                        <p>No subjects available for this class. Please add subjects to the class first.</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </div>
 
@@ -681,6 +713,91 @@ const CreateTeacherWithSubjects = () => {
           </button>
         </div>
       </form>
+
+      {/* Teacher Assignment Modal */}
+      {teacherAssignmentModal.open && (
+        <div style={styles.modalOverlay}>
+          <div style={{...styles.modalContent, maxWidth: '600px'}}>
+            <div style={styles.modalHeader}>
+              <h3>Add Teacher Assignment</h3>
+              <button onClick={closeTeacherAssignmentModal} style={styles.modalCloseButton}>
+                <FiX />
+              </button>
+            </div>
+            
+            <div style={styles.modalBody}>
+              <div style={styles.formGroup}>
+                <label>Select Class</label>
+                <select
+                  value={teacherAssignmentModal.selectedClass}
+                  onChange={(e) => handleAssignmentClassChange(e.target.value)}
+                  style={styles.input}
+                  disabled={loadingAssignmentSubjects}
+                >
+                  <option value="">Select a Class</option>
+                  {classes.map(cls => (
+                    <option key={cls._id} value={cls._id}>
+                      {cls.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {teacherAssignmentModal.selectedClass && (
+                <div style={styles.formGroup}>
+                  <label>Select Subjects for {classes.find(c => c._id === teacherAssignmentModal.selectedClass)?.name}</label>
+                  {loadingAssignmentSubjects ? (
+                    <div style={styles.loadingSubjects}>
+                      <div style={styles.smallSpinner}></div>
+                      <span>Loading subjects...</span>
+                    </div>
+                  ) : availableSubjectsForAssignment.length > 0 ? (
+                    <>
+                      <div style={styles.subjectsSelectionGrid}>
+                        {availableSubjectsForAssignment.map((subject, index) => (
+                          <label key={subject.id || index} style={styles.subjectCheckbox}>
+                            <input
+                              type="checkbox"
+                              checked={teacherAssignmentModal.selectedSubjects.includes(subject.id)}
+                              onChange={() => handleAssignmentSubjectToggle(subject.id)}
+                              disabled={loading}
+                            />
+                            <span>
+                              {subject.name} 
+                              {subject.code && ` (${subject.code})`}
+                              {subject.isCore && <span style={styles.coreBadge}>Core</span>}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                      <small style={{ color: '#666', fontSize: '12px' }}>
+                        {teacherAssignmentModal.selectedSubjects.length} subject(s) selected
+                      </small>
+                    </>
+                  ) : (
+                    <div style={styles.noSubjectsMessage}>
+                      <p>No subjects available for this class.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div style={styles.modalFooter}>
+              <button
+                onClick={addTeacherAssignment}
+                disabled={!teacherAssignmentModal.selectedClass || teacherAssignmentModal.selectedSubjects.length === 0}
+                style={styles.modalSubmitButton}
+              >
+                <FiSave /> Add Assignment
+              </button>
+              <button onClick={closeTeacherAssignmentModal} style={styles.modalCancelButton}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -839,6 +956,11 @@ const styles = {
     marginTop: '4px',
     display: 'block'
   },
+  loadingText: {
+    fontSize: '12px',
+    color: '#D4A017',
+    marginLeft: '8px'
+  },
   addButton: {
     padding: '10px 20px',
     backgroundColor: '#4B5320',
@@ -861,146 +983,101 @@ const styles = {
     color: '#666',
     border: '1px dashed #D0D0D0'
   },
-  assignmentCard: {
+  assignmentsContainer: {
     border: '1px solid #E0E0E0',
-    borderRadius: '8px',
-    marginBottom: '16px',
-    overflow: 'hidden',
+    borderRadius: '4px',
+    padding: '12px',
     backgroundColor: 'white'
+  },
+  assignmentItem: {
+    marginBottom: '12px',
+    padding: '12px',
+    border: '1px solid #E0E0E0',
+    borderRadius: '4px',
+    backgroundColor: '#F8F9FA'
   },
   assignmentHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: '16px',
-    backgroundColor: '#F8F9FA',
-    cursor: 'pointer',
-    transition: 'background-color 0.2s'
-  },
-  assignmentInfo: {
-    flex: 1
-  },
-  assignmentTitle: {
-    fontSize: '16px',
-    fontWeight: '600',
-    color: '#333',
-    margin: '0 0 4px 0'
-  },
-  className: {
-    color: '#4B5320',
-    fontWeight: '500',
-    marginLeft: '8px'
-  },
-  subjectCount: {
-    fontSize: '14px',
-    color: '#666'
-  },
-  assignmentActions: {
-    display: 'flex',
-    gap: '8px'
+    marginBottom: '8px'
   },
   removeAssignmentButton: {
-    padding: '8px',
-    backgroundColor: '#FFF3F3',
+    background: 'none',
+    border: 'none',
     color: '#B22222',
-    border: 'none',
-    borderRadius: '4px',
     cursor: 'pointer',
     fontSize: '16px',
+    padding: '4px'
+  },
+  assignmentSubjects: {
     display: 'flex',
-    alignItems: 'center',
-    transition: 'all 0.2s'
+    flexWrap: 'wrap',
+    gap: '6px'
   },
-  expandButton: {
-    padding: '8px',
-    backgroundColor: '#EDF2F7',
-    color: '#4A5568',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    fontSize: '16px',
-    display: 'flex',
-    alignItems: 'center',
-    transition: 'all 0.2s'
+  assignmentSubjectBadge: {
+    fontSize: '12px',
+    backgroundColor: '#E3F2FD',
+    color: '#1565C0',
+    padding: '4px 8px',
+    borderRadius: '12px'
   },
-  assignmentDetails: {
-    padding: '20px',
-    backgroundColor: 'white',
-    borderTop: '1px solid #E0E0E0'
-  },
-  subjectsGrid: {
+  subjectsSelectionGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-    gap: '12px',
-    marginTop: '12px',
+    gap: '10px',
     maxHeight: '300px',
     overflowY: 'auto',
     padding: '10px',
     border: '1px solid #E0E0E0',
-    borderRadius: '6px',
-    backgroundColor: '#F8F9FA'
+    borderRadius: '4px',
+    backgroundColor: 'white'
   },
   subjectCheckbox: {
     display: 'flex',
-    alignItems: 'flex-start',
-    padding: '12px',
-    border: '2px solid #E0E0E0',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-    backgroundColor: 'white'
-  },
-  checkbox: {
-    marginRight: '10px',
-    marginTop: '3px',
+    alignItems: 'center',
+    gap: '8px',
+    fontSize: '14px',
+    padding: '8px',
+    border: '1px solid #E0E0E0',
+    borderRadius: '4px',
+    backgroundColor: '#F8F9FA',
     cursor: 'pointer'
   },
-  subjectCheckboxContent: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px'
-  },
-  subjectName: {
-    fontWeight: '500',
-    fontSize: '14px'
-  },
-  subjectCode: {
-    fontSize: '12px',
-    color: '#666'
-  },
   coreBadge: {
-    fontSize: '11px',
+    fontSize: '10px',
     color: '#228B22',
     backgroundColor: '#E6FFE6',
     padding: '2px 6px',
     borderRadius: '10px',
-    alignSelf: 'flex-start',
+    marginLeft: '4px',
     fontWeight: '500'
   },
   loadingSubjects: {
-    textAlign: 'center',
+    display: 'flex',
+    alignItems: 'center',
     padding: '20px',
-    color: '#666',
     backgroundColor: '#F8F9FA',
-    borderRadius: '6px',
-    border: '1px dashed #D0D0D0'
+    borderRadius: '4px',
+    color: '#666',
+    fontSize: '14px'
   },
   noSubjectsMessage: {
-    padding: '12px',
+    padding: '10px',
     backgroundColor: '#FFF3CD',
     border: '1px solid #FFEAA7',
     borderRadius: '4px',
     color: '#856404',
     fontSize: '14px'
   },
-  spinner: {
-    width: '30px',
-    height: '30px',
-    border: '3px solid #f3f3f3',
-    borderTop: '3px solid #4B5320',
+  smallSpinner: {
+    width: '20px',
+    height: '20px',
+    border: '2px solid #f3f3f3',
+    borderTop: '2px solid #4B5320',
     borderRadius: '50%',
     animation: 'spin 1s linear infinite',
-    margin: '0 auto 10px auto'
+    marginRight: '10px'
   },
   spinnerSmall: {
     width: '16px',
@@ -1047,6 +1124,71 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     transition: 'all 0.2s'
+  },
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: '8px',
+    width: '90%',
+    maxWidth: '500px'
+  },
+  modalHeader: {
+    padding: '20px',
+    borderBottom: '1px solid #E0E0E0',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  modalCloseButton: {
+    background: 'none',
+    border: 'none',
+    fontSize: '20px',
+    color: '#666',
+    cursor: 'pointer',
+    padding: '4px'
+  },
+  modalBody: {
+    padding: '20px'
+  },
+  modalFooter: {
+    padding: '20px',
+    borderTop: '1px solid #E0E0E0',
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '12px'
+  },
+  modalSubmitButton: {
+    padding: '10px 20px',
+    backgroundColor: '#D4A017',
+    color: '#4B5320',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '600',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
+  },
+  modalCancelButton: {
+    padding: '10px 20px',
+    backgroundColor: '#6B7280',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px'
   }
 };
 
@@ -1056,15 +1198,6 @@ styleSheet.textContent = `
   @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
-  }
-  
-  .subjectCheckbox input[type="checkbox"]:checked + div {
-    background-color: #F0FFF4;
-    border-color: #4B5320;
-  }
-  
-  .assignmentHeader:hover {
-    background-color: #F0F0F0;
   }
   
   button:hover:not(:disabled) {
@@ -1087,10 +1220,6 @@ styleSheet.textContent = `
     background-color: #FFE6E6;
   }
   
-  .expandButton:hover:not(:disabled) {
-    background-color: #E2E8F0;
-  }
-  
   .cancelButton:hover:not(:disabled) {
     background-color: #5A6268;
   }
@@ -1099,12 +1228,24 @@ styleSheet.textContent = `
     background-color: #C09015;
   }
   
+  .modalSubmitButton:hover:not(:disabled) {
+    background-color: #C09015;
+  }
+  
+  .modalCancelButton:hover:not(:disabled) {
+    background-color: #5A6268;
+  }
+  
   .closeMessageButton:hover {
     background-color: rgba(0,0,0,0.1);
   }
   
   .backButton:hover:not(:disabled) {
     background-color: #5A6268;
+  }
+  
+  .subjectCheckbox:hover {
+    background-color: #F0F0F0;
   }
 `;
 document.head.appendChild(styleSheet);

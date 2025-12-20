@@ -609,17 +609,56 @@ const EditResults = () => {
                     <td style={{ padding: '12px' }}>{result.subject || 'N/A'}</td>
                     <td style={{ padding: '12px' }}>{result.class?.name || result.class || 'N/A'}</td>
                     <td style={{ padding: '12px' }}>
-                      <ResultScoreEditor
-                        result={result}
-                        editingResultId={editingResultId}
-                        editScore={editScore}
-                        setEditScore={setEditScore}
-                        loading={editingLoading}
-                        onSave={handleSaveScore}
-                        onCancel={cancelEditing}
-                        maxScore={result.totalMarks || result.testId?.totalMarks || 100}
-                        canEdit={user.role === 'super_admin' || user.role === 'admin'}
-                      />
+                      {editingResultId === result._id ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <input
+                            type="number"
+                            value={editScore}
+                            onChange={(e) => setEditScore(e.target.value)}
+                            min="0"
+                            max={result.totalMarks || result.testId?.totalMarks || 100}
+                            style={{
+                              width: '60px',
+                              padding: '6px',
+                              border: '1px solid #dee2e6',
+                              borderRadius: '4px'
+                            }}
+                          />
+                          <button
+                            onClick={() => handleSaveScore(result._id)}
+                            disabled={editingLoading}
+                            style={{
+                              backgroundColor: '#28a745',
+                              color: 'white',
+                              border: 'none',
+                              padding: '6px 12px',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              fontSize: '12px'
+                            }}
+                          >
+                            {editingLoading ? 'Saving...' : 'Save'}
+                          </button>
+                          <button
+                            onClick={cancelEditing}
+                            style={{
+                              backgroundColor: '#6c757d',
+                              color: 'white',
+                              border: 'none',
+                              padding: '6px 12px',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              fontSize: '12px'
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <span>
+                          {result.score || 0} / {result.totalMarks || result.testId?.totalMarks || 100}
+                        </span>
+                      )}
                     </td>
                     <td style={{ padding: '12px' }}>
                       {new Date(result.submittedAt).toLocaleDateString()}
@@ -857,7 +896,7 @@ const EditResults = () => {
                       <div>
                         <strong>{result.userId?.name || 'Unknown Student'}</strong>
                         <div style={{ fontSize: '14px', color: '#6c757d' }}>
-                          Score: {result.score} / {result.totalMarks} ({result.percentage}%)
+                          Score: {result.score} / {result.totalMarks}
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: '8px' }}>

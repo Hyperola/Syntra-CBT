@@ -85,12 +85,24 @@ const CreateAdmin = () => {
     
     setLoading(true);
     setError(null);
+    setSuccess(null);
     
     try {
       const token = localStorage.getItem('token');
       
       // Clean username (remove spaces, convert to lowercase)
       const cleanedUsername = adminData.username.replace(/\s+/g, '_').toLowerCase();
+      
+      // Log the data being sent
+      console.log('Sending admin creation request:', {
+        username: cleanedUsername,
+        email: adminData.email,
+        name: adminData.name,
+        surname: adminData.surname,
+        role: 'admin',
+        adminPermissions: adminData.adminPermissions,
+        active: adminData.active
+      });
       
       const response = await axios.post('http://localhost:5000/api/users', {
         username: cleanedUsername,
@@ -100,34 +112,71 @@ const CreateAdmin = () => {
         surname: adminData.surname,
         role: 'admin',
         adminPermissions: adminData.adminPermissions,
-        active: adminData.active
+        active: adminData.active,
+        createdBy: user.id // Add createdBy field
       }, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
       });
       
-      setSuccess('Admin created successfully!');
-      
-      // Reset form
-      setAdminData({
-        username: '',
-        password: '',
-        confirmPassword: '',
-        email: '',
-        name: '',
-        surname: '',
-        adminPermissions: ['VIEW_ANALYTICS', 'MANAGE_USERS'],
-        active: true,
-        role: 'admin'
-      });
-      
-      // Navigate back after 2 seconds
-      setTimeout(() => {
-        navigate('/admin/users');
-      }, 2000);
+      if (response.data.success) {
+        setSuccess('Admin created successfully!');
+        
+        // Reset form
+        setAdminData({
+          username: '',
+          password: '',
+          confirmPassword: '',
+          email: '',
+          name: '',
+          surname: '',
+          adminPermissions: ['VIEW_ANALYTICS', 'MANAGE_USERS'],
+          active: true,
+          role: 'admin'
+        });
+        
+        // Navigate back after 2 seconds
+        setTimeout(() => {
+          navigate('/admin/users');
+        }, 2000);
+      } else {
+        setError(response.data.message || 'Failed to create admin');
+      }
       
     } catch (err) {
       console.error('Error creating admin:', err);
-      setError(err.response?.data?.message || 'Failed to create admin');
+      
+      if (err.response) {
+        // Server responded with error
+        if (err.response.status === 400) {
+          setError(err.response.data.message || 'Validation error. Please check the form.');
+          if (err.response.data.errors) {
+            // Handle validation errors
+            const validationErrors = {};
+            err.response.data.errors.forEach(errorMsg => {
+              if (errorMsg.includes('Username')) validationErrors.username = errorMsg;
+              if (errorMsg.includes('Email')) validationErrors.email = errorMsg;
+              if (errorMsg.includes('Password')) validationErrors.password = errorMsg;
+            });
+            setErrors(validationErrors);
+          }
+        } else if (err.response.status === 401) {
+          setError('Authentication failed. Please log in again.');
+          setTimeout(() => navigate('/login'), 2000);
+        } else if (err.response.status === 403) {
+          setError('Permission denied. You do not have access to create admins.');
+        } else {
+          setError(err.response.data?.message || `Server error: ${err.response.status}`);
+        }
+      } else if (err.request) {
+        // Request was made but no response
+        setError('Network error. Please check your connection and try again.');
+      } else {
+        // Other errors
+        setError('An unexpected error occurred. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -180,6 +229,7 @@ const CreateAdmin = () => {
                 onChange={(e) => setAdminData({...adminData, username: e.target.value})}
                 placeholder="admin_user"
                 style={{...styles.input, ...(errors.username && styles.inputError)}}
+                disabled={loading}
               />
               {errors.username && <span style={styles.errorText}>{errors.username}</span>}
               <small style={styles.helpText}>No spaces allowed. Use underscores if needed.</small>
@@ -193,6 +243,7 @@ const CreateAdmin = () => {
                 onChange={(e) => setAdminData({...adminData, email: e.target.value})}
                 placeholder="admin@school.com"
                 style={{...styles.input, ...(errors.email && styles.inputError)}}
+                disabled={loading}
               />
               {errors.email && <span style={styles.errorText}>{errors.email}</span>}
             </div>
@@ -205,6 +256,7 @@ const CreateAdmin = () => {
                 onChange={(e) => setAdminData({...adminData, name: e.target.value})}
                 placeholder="John"
                 style={{...styles.input, ...(errors.name && styles.inputError)}}
+                disabled={loading}
               />
               {errors.name && <span style={styles.errorText}>{errors.name}</span>}
             </div>
@@ -217,6 +269,7 @@ const CreateAdmin = () => {
                 onChange={(e) => setAdminData({...adminData, surname: e.target.value})}
                 placeholder="Doe"
                 style={{...styles.input, ...(errors.surname && styles.inputError)}}
+                disabled={loading}
               />
               {errors.surname && <span style={styles.errorText}>{errors.surname}</span>}
             </div>
@@ -229,6 +282,7 @@ const CreateAdmin = () => {
                 onChange={(e) => setAdminData({...adminData, password: e.target.value})}
                 placeholder="••••••••"
                 style={{...styles.input, ...(errors.password && styles.inputError)}}
+                disabled={loading}
               />
               {errors.password && <span style={styles.errorText}>{errors.password}</span>}
               <small style={styles.helpText}>Minimum 6 characters</small>
@@ -242,6 +296,7 @@ const CreateAdmin = () => {
                 onChange={(e) => setAdminData({...adminData, confirmPassword: e.target.value})}
                 placeholder="••••••••"
                 style={{...styles.input, ...(errors.confirmPassword && styles.inputError)}}
+                disabled={loading}
               />
               {errors.confirmPassword && <span style={styles.errorText}>{errors.confirmPassword}</span>}
             </div>
@@ -252,6 +307,7 @@ const CreateAdmin = () => {
                 value={adminData.active}
                 onChange={(e) => setAdminData({...adminData, active: e.target.value === 'true'})}
                 style={styles.select}
+                disabled={loading}
               >
                 <option value="true">Active</option>
                 <option value="false">Inactive</option>
@@ -271,12 +327,20 @@ const CreateAdmin = () => {
           
           <div style={styles.permissionsGrid}>
             {adminPermissionOptions.map(permission => (
-              <label key={permission.value} style={styles.permissionLabel}>
+              <label 
+                key={permission.value} 
+                style={{
+                  ...styles.permissionLabel,
+                  opacity: loading ? 0.6 : 1,
+                  cursor: loading ? 'not-allowed' : 'pointer'
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={adminData.adminPermissions.includes(permission.value)}
-                  onChange={() => handlePermissionToggle(permission.value)}
+                  onChange={() => !loading && handlePermissionToggle(permission.value)}
                   style={styles.checkbox}
+                  disabled={loading}
                 />
                 <div style={styles.permissionContent}>
                   <span style={styles.permissionName}>{permission.label}</span>
@@ -336,10 +400,16 @@ const styles = {
     maxWidth: '1000px',
     margin: '0 auto',
     padding: '24px',
-    fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif"
+    fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
+    backgroundColor: '#f5f5f5',
+    minHeight: '100vh'
   },
   header: {
-    marginBottom: '32px'
+    marginBottom: '32px',
+    backgroundColor: 'white',
+    padding: '24px',
+    borderRadius: '12px',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
   },
   title: {
     fontSize: '28px',
@@ -371,7 +441,8 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
-    fontWeight: '500'
+    fontWeight: '500',
+    borderLeft: '4px solid #B22222'
   },
   successMessage: {
     backgroundColor: '#E6FFE6',
@@ -382,7 +453,8 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
-    fontWeight: '500'
+    fontWeight: '500',
+    borderLeft: '4px solid #228B22'
   },
   form: {
     backgroundColor: 'white',
@@ -418,7 +490,9 @@ const styles = {
     border: '1px solid #D0D0D0',
     borderRadius: '6px',
     fontSize: '14px',
-    transition: 'border-color 0.2s'
+    transition: 'border-color 0.2s',
+    backgroundColor: 'white',
+    boxSizing: 'border-box'
   },
   inputError: {
     borderColor: '#B22222',
@@ -430,7 +504,8 @@ const styles = {
     border: '1px solid #D0D0D0',
     borderRadius: '6px',
     fontSize: '14px',
-    backgroundColor: 'white'
+    backgroundColor: 'white',
+    cursor: 'pointer'
   },
   errorText: {
     color: '#B22222',
@@ -463,11 +538,17 @@ const styles = {
     border: '2px solid #E0E0E0',
     borderRadius: '8px',
     cursor: 'pointer',
-    transition: 'all 0.2s'
+    transition: 'all 0.2s',
+    '&:hover': {
+      borderColor: '#4B5320',
+      backgroundColor: '#F9F9F9'
+    }
   },
   checkbox: {
     marginRight: '12px',
-    marginTop: '4px'
+    marginTop: '4px',
+    cursor: 'pointer',
+    accentColor: '#4B5320'
   },
   permissionContent: {
     display: 'flex',
@@ -487,7 +568,8 @@ const styles = {
   selectedPermissions: {
     backgroundColor: '#F8F9FA',
     padding: '20px',
-    borderRadius: '8px'
+    borderRadius: '8px',
+    marginTop: '20px'
   },
   permissionsList: {
     display: 'flex',
@@ -501,12 +583,13 @@ const styles = {
     color: '#4B5320',
     borderRadius: '16px',
     fontSize: '12px',
-    fontWeight: '500'
+    fontWeight: '500',
+    display: 'inline-block'
   },
   spinnerSmall: {
     width: '16px',
     height: '16px',
-    border: '2px solid #f3f3f3',
+    border: '2px solid rgba(255, 255, 255, 0.3)',
     borderTop: '2px solid white',
     borderRadius: '50%',
     animation: 'spin 1s linear infinite',
@@ -517,7 +600,9 @@ const styles = {
     display: 'flex',
     justifyContent: 'flex-end',
     gap: '16px',
-    marginTop: '32px'
+    marginTop: '32px',
+    paddingTop: '24px',
+    borderTop: '1px solid #E0E0E0'
   },
   cancelButton: {
     padding: '12px 24px',
@@ -530,7 +615,15 @@ const styles = {
     fontWeight: '600',
     display: 'flex',
     alignItems: 'center',
-    gap: '8px'
+    gap: '8px',
+    transition: 'background-color 0.2s',
+    '&:hover': {
+      backgroundColor: '#4B5563'
+    },
+    '&:disabled': {
+      opacity: 0.5,
+      cursor: 'not-allowed'
+    }
   },
   submitButton: {
     padding: '12px 24px',
@@ -543,7 +636,16 @@ const styles = {
     fontWeight: '600',
     display: 'flex',
     alignItems: 'center',
-    gap: '8px'
+    gap: '8px',
+    transition: 'background-color 0.2s',
+    '&:hover': {
+      backgroundColor: '#B68C14'
+    },
+    '&:disabled': {
+      opacity: 0.5,
+      cursor: 'not-allowed',
+      backgroundColor: '#D4A017'
+    }
   }
 };
 
@@ -561,6 +663,11 @@ styleSheet.textContent = `
   
   .permissionLabel input[type="checkbox"]:checked {
     accent-color: #4B5320;
+  }
+  
+  input:disabled, select:disabled {
+    background-color: #f5f5f5;
+    cursor: not-allowed;
   }
 `;
 document.head.appendChild(styleSheet);
