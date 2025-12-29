@@ -32,7 +32,7 @@ const scheduleRoutes = require('./routes/scheduleRoutes');
 const teacherQuestionsRoutes = require('./routes/teacherQuestionsRoutes');
 
 // REPORT CARD ROUTE - FIXED: Changed from reportcards to reportcard
-const reportCardsRoutes = require('./routes/reportcard'); // CORRECTED
+const reportCardsRoutes = require('./routes/reportCard'); // CORRECTED
 
 const app = express();
 

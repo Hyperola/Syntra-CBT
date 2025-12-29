@@ -92,7 +92,7 @@ const addHeader = (doc, session, term) => {
      .text('123 Education Boulevard, Sanniville City', logoX + logoSize + 15, logoY + 20)
      .text('info@sanniville.edu | (123) 456-7890', logoX + logoSize + 15, logoY + 30);
   
-  // FIXED: Include term in the main title
+  // Include term in the main title
   const reportTitle = term ? `TERM REPORT CARD - ${term.toUpperCase()}` : 'TERM REPORT CARD';
   
   doc.fontSize(TYPOGRAPHY.sizes.subtitle)
@@ -108,15 +108,6 @@ const addHeader = (doc, session, term) => {
        width: doc.page.width - (LAYOUT.margin * 2), 
        align: 'center' 
      });
-  
-  // If term is provided, also show it separately (for clarity)
-  if (term) {
-    // Optional: You can also show term here if you want it displayed twice
-    // doc.text(`Term: ${term.charAt(0).toUpperCase() + term.slice(1)}`, LAYOUT.margin, logoY + 85, { 
-    //   width: doc.page.width - (LAYOUT.margin * 2), 
-    //   align: 'center' 
-    // });
-  }
   
   return LAYOUT.headerHeight + LAYOUT.sectionGap;
 };
@@ -436,6 +427,33 @@ const addFooter = doc => {
            LAYOUT.margin, footerY + 6, { width: doc.page.width - (LAYOUT.margin * 2), align: 'center' });
 };
 
+// Helper function to build session query for specific term
+const buildSessionQuery = (sessionName, termName) => {
+  const fullSession = `${sessionName} ${termName}`;
+  
+  // Try different session formats that might be in the database
+  return {
+    $or: [
+      // Exact match for "2025/2026 First Term"
+      { session: fullSession },
+      // Match for "2025/2026" (session only) with term field
+      { 
+        $and: [
+          { session: sessionName },
+          { term: termName }
+        ]
+      },
+      // Match session starting with year and containing term
+      { 
+        session: { 
+          $regex: `${sessionName}.*${termName.replace(' Term', '').trim()}`, 
+          $options: 'i' 
+        } 
+      }
+    ]
+  };
+};
+
 // Main report card endpoint with term parameter
 router.get('/export/report/:studentId/:session', auth, async (req, res) => {
   try {
@@ -490,20 +508,16 @@ router.get('/export/report/:studentId/:session', auth, async (req, res) => {
       return res.status(403).json({ error: 'Students can only view their own report cards' });
     }
     
-    // Query results with better filtering - FIXED: Include both session formats
+    // FIXED: Build query to fetch results for SPECIFIC term only
+    const sessionQuery = buildSessionQuery(sessionName, termName);
+    
     const query = {
       userId: studentId,
-      $or: [
-        { session: fullSession }, // Format: "2025/2026 First Term"
-        { session: sessionName }, // Format: "2025/2026" (might also be stored this way)
-        { 
-          session: { $regex: `^${sessionName}`, $options: 'i' } // Starts with session name
-        }
-      ],
+      ...sessionQuery,
       isActive: true
     };
     
-    console.log('🔍 Querying results with:', query);
+    console.log('🔍 Querying results with:', JSON.stringify(query, null, 2));
     
     const results = await Result.find(query)
       .populate('testId', 'title type subject totalMarks')
@@ -515,15 +529,40 @@ router.get('/export/report/:studentId/:session', auth, async (req, res) => {
       .lean();
     
     if (results.length === 0) {
-      return res.status(404).json({ 
-        error: `No results found for ${student.name || 'Student'} in ${fullSession}` 
-      });
+      // Try one more approach - check if results are stored with just the term field
+      const alternativeQuery = {
+        userId: studentId,
+        session: sessionName, // Just the session without term
+        term: termName,       // Term in separate field
+        isActive: true
+      };
+      
+      console.log('⚠️ No results found with first query, trying alternative:', alternativeQuery);
+      
+      const alternativeResults = await Result.find(alternativeQuery)
+        .populate('testId', 'title type subject totalMarks')
+        .populate({
+          path: 'class',
+          select: 'name'
+        })
+        .sort({ subject: 1, submittedAt: -1 })
+        .lean();
+      
+      if (alternativeResults.length === 0) {
+        return res.status(404).json({ 
+          error: `No results found for ${student.name || 'Student'} in ${fullSession}` 
+        });
+      }
+      
+      results = alternativeResults;
     }
     
-    console.log('✅ Found results:', results.length);
-    console.log('Sample results with test type info:', results.map(r => ({
+    console.log('✅ Found results for specific term:', results.length);
+    console.log('Sample results with session info:', results.slice(0, 3).map(r => ({
       subject: r.subject,
       score: r.score,
+      session: r.session,
+      term: r.term,
       testType: r.testId?.type,
       testTitle: r.testId?.title
     })));
@@ -622,7 +661,8 @@ router.get('/export/report/:studentId/:session', auth, async (req, res) => {
       }
     });
     
-    console.log('📊 Processed report data:', {
+    console.log('📊 Processed report data for term:', {
+      term: termName,
       numSubjects: reportData.numSubjects,
       subjects: Object.keys(reportData.subjects),
       sampleSubjectData: reportData.subjects[Object.keys(reportData.subjects)[0]],
@@ -630,12 +670,11 @@ router.get('/export/report/:studentId/:session', auth, async (req, res) => {
       totalPossible: reportData.totalPossible
     });
     
-    // Get class results for position calculation
+    // Get class results for position calculation - FOR SPECIFIC TERM ONLY
+    const classSessionQuery = buildSessionQuery(sessionName, termName);
+    
     const classQuery = { 
-      $or: [
-        { session: fullSession },
-        { session: { $regex: `^${sessionName}`, $options: 'i' } }
-      ],
+      ...classSessionQuery,
       isActive: true 
     };
     
@@ -645,7 +684,7 @@ router.get('/export/report/:studentId/:session', auth, async (req, res) => {
       classQuery.class = studentClassId;
     }
     
-    console.log('📊 Calculating position with query:', classQuery);
+    console.log('📊 Calculating position with query for term:', JSON.stringify(classQuery, null, 2));
     
     const classResults = await Result.find(classQuery)
       .populate('userId', 'name surname')
@@ -696,7 +735,8 @@ router.get('/export/report/:studentId/:session', auth, async (req, res) => {
     const average = reportData.totalPossible > 0 ? 
       (reportData.totalScore / reportData.totalPossible * 100).toFixed(1) : '0.0';
     
-    console.log('🏆 Position calculation:', {
+    console.log('🏆 Position calculation for term:', {
+      term: termName,
       position,
       classSize,
       average,
@@ -711,7 +751,7 @@ router.get('/export/report/:studentId/:session', auth, async (req, res) => {
       size: 'A4',
       margin: LAYOUT.margin,
       info: {
-        Title: `Report Card - ${reportData.student}`,
+        Title: `Report Card - ${reportData.student} - ${termName}`,
         Author: 'Sanniville Academy',
         Subject: `Academic Report - ${fullSession}`,
       },
@@ -738,12 +778,14 @@ router.get('/export/report/:studentId/:session', auth, async (req, res) => {
     console.log('✅ Report card generated successfully:', {
       studentId,
       studentName: student.name,
-      session: fullSession,
+      session: sessionName,
       term: termName,
+      fullSession,
       filename,
       numSubjects: reportData.numSubjects,
       position: `${position}/${classSize}`,
-      examScoresFound: Object.keys(reportData.subjects).some(subject => reportData.subjects[subject].exam > 0)
+      examScoresFound: Object.keys(reportData.subjects).some(subject => reportData.subjects[subject].exam > 0),
+      totalScore: reportData.totalScore
     });
     
   } catch (error) {
@@ -836,18 +878,36 @@ router.get('/debug/:studentId/:session', auth, async (req, res) => {
       .populate('class', 'name')
       .lean();
     
-    // Try multiple session formats
-    const results = await Result.find({
-      userId: studentId,
-      $or: [
-        { session: fullSession },
-        { session: sessionName },
-        { session: { $regex: `^${sessionName}`, $options: 'i' } }
-      ],
-      isActive: true
-    })
-    .populate('testId', 'title type subject totalMarks')
-    .lean();
+    // Try different query approaches
+    const queries = [
+      // Query 1: Exact full session match
+      { userId: studentId, session: fullSession, isActive: true },
+      // Query 2: Session + term field
+      { userId: studentId, session: sessionName, term: termName, isActive: true },
+      // Query 3: Regex match
+      { 
+        userId: studentId, 
+        session: { $regex: `${sessionName}.*${termName.replace(' Term', '').trim()}`, $options: 'i' },
+        isActive: true 
+      }
+    ];
+    
+    let results = [];
+    let queryUsed = null;
+    
+    // Try each query until we find results
+    for (const query of queries) {
+      console.log(`Trying query: ${JSON.stringify(query)}`);
+      const foundResults = await Result.find(query)
+        .populate('testId', 'title type subject totalMarks')
+        .lean();
+      
+      if (foundResults.length > 0) {
+        results = foundResults;
+        queryUsed = query;
+        break;
+      }
+    }
     
     // Analyze results
     const analysis = {
@@ -855,13 +915,18 @@ router.get('/debug/:studentId/:session', auth, async (req, res) => {
       testTypesFound: [],
       subjectsFound: [],
       examScores: [],
-      caScores: []
+      caScores: [],
+      termsFound: []
     };
     
     results.forEach(result => {
       const session = result.session;
       if (!analysis.sessionFormatsFound.includes(session)) {
         analysis.sessionFormatsFound.push(session);
+      }
+      
+      if (result.term && !analysis.termsFound.includes(result.term)) {
+        analysis.termsFound.push(result.term);
       }
       
       const testType = result.testId?.type || 'unknown';
@@ -887,14 +952,18 @@ router.get('/debug/:studentId/:session', auth, async (req, res) => {
           subject: subject,
           score: result.score,
           testType: testType,
-          testTitle: result.testId?.title
+          testTitle: result.testId?.title,
+          session: result.session,
+          term: result.term
         });
       } else {
         analysis.caScores.push({
           subject: subject,
           score: result.score,
           testType: testType,
-          testTitle: result.testId?.title
+          testTitle: result.testId?.title,
+          session: result.session,
+          term: result.term
         });
       }
     });
@@ -910,7 +979,8 @@ router.get('/debug/:studentId/:session', auth, async (req, res) => {
         studentId,
         sessionName,
         termName,
-        fullSession
+        fullSession,
+        queryUsed
       },
       resultsCount: results.length,
       analysis: analysis,
@@ -919,10 +989,10 @@ router.get('/debug/:studentId/:session', auth, async (req, res) => {
         subject: r.subject || r.testId?.subject,
         score: r.score,
         session: r.session,
+        term: r.term,
         testType: r.testId?.type,
         testTitle: r.testId?.title,
-        totalMarks: r.testId?.totalMarks,
-        isExam: analysis.examScores.some(e => e.subject === (r.subject || r.testId?.subject) && e.score === r.score)
+        totalMarks: r.testId?.totalMarks
       })),
       groupedData: results.reduce((acc, result) => {
         const subject = result.subject || result.testId?.subject || 'Unknown';
@@ -931,7 +1001,8 @@ router.get('/debug/:studentId/:session', auth, async (req, res) => {
           type: result.testId?.type,
           title: result.testId?.title,
           score: result.score,
-          isExam: analysis.examScores.some(e => e.subject === subject && e.score === result.score)
+          session: result.session,
+          term: result.term
         });
         return acc;
       }, {})
@@ -961,13 +1032,16 @@ router.get('/test-types/:studentId', auth, async (req, res) => {
       testTitle: r.testId?.title,
       testType: r.testId?.type,
       score: r.score,
-      session: r.session
+      session: r.session,
+      term: r.term
     }));
     
     res.json({
       testTypes,
       uniqueTypes: [...new Set(testTypes.map(t => t.testType))],
-      uniqueTitles: [...new Set(testTypes.map(t => t.testTitle))].filter(Boolean)
+      uniqueTitles: [...new Set(testTypes.map(t => t.testTitle))].filter(Boolean),
+      uniqueSessions: [...new Set(testTypes.map(t => t.session))],
+      uniqueTerms: [...new Set(testTypes.map(t => t.term))].filter(Boolean)
     });
     
   } catch (error) {

@@ -1,4 +1,4 @@
-// routes/users.js - UPDATED WITH COMPLETE TEACHER MANAGEMENT
+// routes/users.js - UPDATED WITH COMPLETE TEACHER MANAGEMENT AND BASE64 IMAGE HANDLING
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
@@ -65,6 +65,56 @@ const getClassName = async (classId) => {
   }
 };
 
+// Helper function to handle base64 image
+const handleBase64Image = async (base64Data, userId, isUpdate = false, user = null) => {
+  try {
+    if (!base64Data || !base64Data.startsWith('data:image')) {
+      return null;
+    }
+
+    console.log('📸 Processing base64 image');
+    
+    // Extract base64 data
+    const matches = base64Data.match(/^data:image\/(\w+);base64,/);
+    if (!matches || matches.length < 2) {
+      throw new Error('Invalid base64 image format');
+    }
+    
+    const mimeType = matches[1];
+    const extension = mimeType === 'jpeg' ? 'jpg' : mimeType;
+    const base64Image = base64Data.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64Image, 'base64');
+    
+    // Generate filename
+    const fileName = `profile_${userId}_${Date.now()}.${extension}`;
+    const uploadDir = path.join(__dirname, '../../uploads/profiles');
+    
+    // Ensure directory exists
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    
+    // Delete old image if updating
+    if (isUpdate && user && user.profileImage) {
+      const oldPath = path.join(uploadDir, user.profileImage);
+      if (fs.existsSync(oldPath)) {
+        fs.unlinkSync(oldPath);
+      }
+    }
+    
+    // Save new image
+    const filePath = path.join(uploadDir, fileName);
+    fs.writeFileSync(filePath, buffer);
+    
+    console.log('✅ Base64 image saved to:', filePath);
+    return fileName;
+    
+  } catch (imageError) {
+    console.error('❌ Error saving base64 image:', imageError.message);
+    return null;
+  }
+};
+
 // ============================================================
 // TEACHER-SPECIFIC ENDPOINTS
 // ============================================================
@@ -78,7 +128,7 @@ router.get('/teachers/list', auth, async (req, res) => {
       role: 'teacher',
       active: true 
     })
-      .select('_id firstName lastName middleName username email phone specialization qualifications')
+      .select('_id firstName lastName middleName username email phone specialization qualifications profileImage')
       .sort({ firstName: 1, lastName: 1 })
       .lean();
 
@@ -93,6 +143,7 @@ router.get('/teachers/list', auth, async (req, res) => {
       username: teacher.username,
       email: teacher.email,
       phone: teacher.phone || '',
+      profileImage: teacher.profileImage,
       displayName: `${teacher.firstName || ''} ${teacher.lastName || ''}`.trim() || teacher.username,
       specialization: teacher.specialization || 'General',
       qualifications: teacher.qualifications || []
@@ -134,7 +185,7 @@ router.get('/teachers/with-assignments', auth, async (req, res) => {
         select: 'name code category',
         model: 'Subject'
       })
-      .select('_id firstName lastName middleName username email phone teacherAssignments')
+      .select('_id firstName lastName middleName username email phone teacherAssignments profileImage')
       .sort({ firstName: 1, lastName: 1 })
       .lean();
 
@@ -164,6 +215,7 @@ router.get('/teachers/with-assignments', auth, async (req, res) => {
       return {
         ...teacher,
         name: `${teacher.firstName || ''} ${teacher.lastName || ''}`.trim() || teacher.username,
+        profileImage: teacher.profileImage,
         stats: {
           totalClasses,
           totalSubjects,
@@ -231,7 +283,7 @@ router.get('/teachers/available/:classId/:subjectId', auth, async (req, res) => 
       role: 'teacher',
       active: true 
     })
-      .select('_id firstName lastName username email phone specialization qualifications teacherAssignments')
+      .select('_id firstName lastName username email phone specialization qualifications teacherAssignments profileImage')
       .lean();
 
     // Get teachers who are already assigned to this subject
@@ -251,6 +303,7 @@ router.get('/teachers/available/:classId/:subjectId', auth, async (req, res) => 
           username: teacher.username,
           email: teacher.email,
           phone: teacher.phone || 'N/A',
+          profileImage: teacher.profileImage,
           specialization: teacher.specialization || 'General',
           qualifications: teacher.qualifications || []
         });
@@ -268,6 +321,7 @@ router.get('/teachers/available/:classId/:subjectId', auth, async (req, res) => 
           username: teacher.username,
           email: teacher.email,
           phone: teacher.phone || 'N/A',
+          profileImage: teacher.profileImage,
           specialization: teacher.specialization || 'General',
           qualifications: teacher.qualifications || [],
           currentAssignments,
@@ -491,7 +545,7 @@ router.get('/teachers/:teacherId/workload', auth, async (req, res) => {
         select: 'name code category periodCount',
         model: 'Subject'
       })
-      .select('_id firstName lastName username email teacherAssignments')
+      .select('_id firstName lastName username email teacherAssignments profileImage')
       .lean();
 
     if (!teacher || teacher.role !== 'teacher') {
@@ -556,7 +610,8 @@ router.get('/teachers/:teacherId/workload', auth, async (req, res) => {
         id: teacher._id,
         name: `${teacher.firstName || ''} ${teacher.lastName || ''}`.trim() || teacher.username,
         username: teacher.username,
-        email: teacher.email
+        email: teacher.email,
+        profileImage: teacher.profileImage
       },
       workload: {
         totalClasses: classWorkloads.length,
@@ -749,7 +804,7 @@ router.get('/', auth, checkPermission('view_users'), async (req, res) => {
       try {
         const totalUsers = await User.countDocuments({}).maxTimeMS(5000);
         const simpleUsers = await User.find({})
-          .select('_id username firstName lastName role active')
+          .select('_id username firstName lastName role active profileImage')
           .limit(50)
           .lean()
           .maxTimeMS(5000);
@@ -889,7 +944,7 @@ router.get('/:id', auth, checkPermission('view_users'), async (req, res) => {
   }
 });
 
-// Create new user - UPDATED WITH PROPER TEACHER HANDLING
+// Create new user - UPDATED WITH PROPER TEACHER HANDLING AND BASE64 IMAGE SUPPORT
 router.post('/', auth, checkPermission('create_users'), validateUserInput, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -921,7 +976,8 @@ router.post('/', auth, checkPermission('create_users'), validateUserInput, async
       sex,
       age,
       teacherAssignments = [],
-      enrolledSubjects = []
+      enrolledSubjects = [],
+      profileImage // Base64 image data
     } = req.body;
 
     // Backward compatibility: if firstName/lastName not provided, use name/surname
@@ -1000,6 +1056,16 @@ router.post('/', auth, checkPermission('create_users'), validateUserInput, async
     if (classId && classId.trim() !== '' && mongoose.Types.ObjectId.isValid(classId)) {
       classValue = classId;
       className = await getClassName(classId);
+    }
+
+    // Handle base64 profile image if provided - ADDED FOR CREATION
+    let profileImageFileName = null;
+    if (profileImage && profileImage.startsWith('data:image')) {
+      console.log('📸 Handling base64 profile image during user creation');
+      profileImageFileName = await handleBase64Image(profileImage, 'new', false);
+      if (profileImageFileName) {
+        console.log('✅ Base64 image processed for new user:', profileImageFileName);
+      }
     }
 
     // For teachers, process assignments if provided - FIXED VERSION
@@ -1108,6 +1174,8 @@ router.post('/', auth, checkPermission('create_users'), validateUserInput, async
       age: age ? parseInt(age) : undefined,
       teacherAssignments: processedTeacherAssignments,  // This is now properly set
       enrolledSubjects: processedEnrolledSubjects,
+      profileImage: profileImageFileName, // Store the image filename
+      profilePicture: profileImageFileName, // For backward compatibility
       createdBy: req.user.id
     };
 
@@ -1233,7 +1301,8 @@ router.put('/:id', auth, checkPermission('edit_users'), async (req, res) => {
       sex,
       age,
       teacherAssignments = [],
-      enrolledSubjects = []
+      enrolledSubjects = [],
+      profileImage // Base64 image data
     } = req.body;
     
     const user = await User.findById(req.params.id).session(session);
@@ -1254,51 +1323,32 @@ router.put('/:id', auth, checkPermission('edit_users'), async (req, res) => {
       role: user.role
     });
 
-    // Handle base64 profile image if provided
-    if (req.body.profileImage && req.body.profileImage.startsWith('data:image')) {
-      try {
-        console.log('📸 Handling base64 profile image update');
-        
-        // Extract base64 data
-        const matches = req.body.profileImage.match(/^data:image\/(\w+);base64,/);
-        if (!matches || matches.length < 2) {
-          throw new Error('Invalid base64 image format');
+    // Handle base64 profile image if provided - UPDATED TO USE HELPER FUNCTION
+    if (profileImage !== undefined) {
+      if (profileImage && profileImage.startsWith('data:image')) {
+        try {
+          console.log('📸 Handling base64 profile image update');
+          const fileName = await handleBase64Image(profileImage, req.params.id, true, user);
+          if (fileName) {
+            user.profileImage = fileName;
+            user.profilePicture = fileName;
+            console.log('✅ Base64 image updated:', fileName);
+          }
+        } catch (imageError) {
+          console.error('❌ Error saving base64 image:', imageError.message);
         }
-        
-        const mimeType = matches[1];
-        const extension = mimeType === 'jpeg' ? 'jpg' : mimeType;
-        const base64Data = req.body.profileImage.replace(/^data:image\/\w+;base64,/, '');
-        const buffer = Buffer.from(base64Data, 'base64');
-        
-        // Generate filename
-        const fileName = `profile_${req.params.id}_${Date.now()}.${extension}`;
+      } else if (profileImage === '' || profileImage === null) {
+        // Clear profile image if empty string or null is sent
         const uploadDir = path.join(__dirname, '../../uploads/profiles');
-        
-        // Ensure directory exists
-        if (!fs.existsSync(uploadDir)) {
-          fs.mkdirSync(uploadDir, { recursive: true });
-        }
-        
-        // Delete old image if exists
         if (user.profileImage) {
           const oldPath = path.join(uploadDir, user.profileImage);
           if (fs.existsSync(oldPath)) {
             fs.unlinkSync(oldPath);
           }
         }
-        
-        // Save new image
-        const filePath = path.join(uploadDir, fileName);
-        fs.writeFileSync(filePath, buffer);
-        
-        // Update user with new image filename
-        user.profileImage = fileName;
-        user.profilePicture = fileName;
-        
-        console.log('✅ Base64 image saved to:', filePath);
-        
-      } catch (imageError) {
-        console.error('❌ Error saving base64 image:', imageError.message);
+        user.profileImage = '';
+        user.profilePicture = '';
+        console.log('🗑️ Cleared profile image');
       }
     }
 
@@ -1882,7 +1932,7 @@ router.get('/subject-teachers/class/:classId', auth, async (req, res) => {
       role: 'teacher',
       active: true 
     })
-      .select('_id firstName lastName username email phone teacherAssignments')
+      .select('_id firstName lastName username email phone teacherAssignments profileImage')
       .populate('teacherAssignments.class', 'name shortName level')
       .populate('teacherAssignments.subjects.subject', 'name code')
       .lean();
@@ -1920,7 +1970,8 @@ router.get('/subject-teachers/class/:classId', auth, async (req, res) => {
               name: `${teacher.firstName || ''} ${teacher.lastName || ''}`.trim() || teacher.username,
               username: teacher.username,
               email: teacher.email,
-              phone: teacher.phone || 'N/A'
+              phone: teacher.phone || 'N/A',
+              profileImage: teacher.profileImage
             },
             subjects,
             totalSubjects: subjects.length
@@ -2115,7 +2166,7 @@ router.get('/subject-teachers/all-assignments', auth, async (req, res) => {
       role: 'teacher',
       active: true 
     })
-      .select('_id firstName lastName username email teacherAssignments')
+      .select('_id firstName lastName username email teacherAssignments profileImage')
       .populate('teacherAssignments.class', 'name shortName level')
       .populate('teacherAssignments.subjects.subject', 'name code')
       .sort('firstName lastName')
@@ -2135,7 +2186,8 @@ router.get('/subject-teachers/all-assignments', auth, async (req, res) => {
                     id: teacher._id,
                     name: `${teacher.firstName || ''} ${teacher.lastName || ''}`.trim() || teacher.username,
                     username: teacher.username,
-                    email: teacher.email
+                    email: teacher.email,
+                    profileImage: teacher.profileImage
                   },
                   class: {
                     id: assignment.class._id,
@@ -2340,7 +2392,7 @@ router.get('/students/:studentId/enrolled-subjects', auth, async (req, res) => {
     const student = await User.findById(studentId)
       .populate('enrolledSubjects.subject', 'name code category')
       .populate('enrolledSubjects.class', 'name shortName')
-      .select('enrolledSubjects firstName lastName middleName username');
+      .select('enrolledSubjects firstName lastName middleName username profileImage');
 
     if (!student) {
       return res.status(404).json({
@@ -2359,7 +2411,8 @@ router.get('/students/:studentId/enrolled-subjects', auth, async (req, res) => {
         firstName: student.firstName,
         lastName: student.lastName,
         middleName: student.middleName,
-        username: student.username
+        username: student.username,
+        profileImage: student.profileImage
       },
       enrolledSubjects: student.enrolledSubjects,
       coreSubjects,
@@ -2392,7 +2445,7 @@ router.get('/teachers/:teacherId/assignments', auth, async (req, res) => {
     console.log('👨‍🏫 GET /api/users/teachers/:teacherId/assignments - Fetching assignments for teacher:', teacherId);
 
     // Verify teacher exists
-    const teacher = await User.findById(teacherId).select('_id firstName lastName middleName username role');
+    const teacher = await User.findById(teacherId).select('_id firstName lastName middleName username role profileImage');
     
     if (!teacher || teacher.role !== 'teacher') {
       return res.status(404).json({
@@ -2413,7 +2466,7 @@ router.get('/teachers/:teacherId/assignments', auth, async (req, res) => {
         select: 'name code category isCore',
         model: 'Subject'
       })
-      .select('teacherAssignments firstName lastName middleName username role')
+      .select('teacherAssignments firstName lastName middleName username role profileImage')
       .lean();
 
     if (!teacherWithAssignments) {
@@ -2487,7 +2540,8 @@ router.get('/teachers/:teacherId/assignments', auth, async (req, res) => {
         lastName: teacherWithAssignments.lastName,
         middleName: teacherWithAssignments.middleName,
         username: teacherWithAssignments.username,
-        role: teacherWithAssignments.role
+        role: teacherWithAssignments.role,
+        profileImage: teacherWithAssignments.profileImage
       },
       assignments: assignmentsWithStudentCounts,
       summary: {
@@ -2515,7 +2569,7 @@ router.get('/teachers/:teacherId/assignments', auth, async (req, res) => {
     console.error('❌ GET /users/teachers/:teacherId/assignments error:', err);
     
     // Return minimal data on error
-    const teacher = await User.findById(teacherId).select('_id firstName lastName middleName username role').lean();
+    const teacher = await User.findById(teacherId).select('_id firstName lastName middleName username role profileImage').lean();
     
     if (!teacher) {
       return res.status(404).json({
@@ -2532,7 +2586,8 @@ router.get('/teachers/:teacherId/assignments', auth, async (req, res) => {
         lastName: teacher.lastName,
         middleName: teacher.middleName,
         username: teacher.username,
-        role: teacher.role
+        role: teacher.role,
+        profileImage: teacher.profileImage
       },
       assignments: [],
       summary: {
@@ -2555,7 +2610,7 @@ router.get('/teachers/:teacherId/classes', auth, async (req, res) => {
     const teacher = await User.findById(teacherId)
       .populate('teacherAssignments.class', 'name shortName level')
       .populate('teacherAssignments.subjects.subject', 'name code')
-      .select('teacherAssignments firstName lastName middleName username')
+      .select('teacherAssignments firstName lastName middleName username profileImage')
       .lean();
 
     if (!teacher || teacher.role !== 'teacher') {
@@ -2607,7 +2662,8 @@ router.get('/teachers/:teacherId/classes', auth, async (req, res) => {
         firstName: teacher.firstName,
         lastName: teacher.lastName,
         middleName: teacher.middleName,
-        username: teacher.username
+        username: teacher.username,
+        profileImage: teacher.profileImage
       },
       classes,
       totalClasses: classes.length
@@ -2657,6 +2713,16 @@ router.delete('/:id', auth, checkPermission('delete_users'), async (req, res) =>
         success: false,
         message: 'Cannot delete your own account' 
       });
+    }
+
+    // Delete profile image if exists
+    if (user.profileImage) {
+      const uploadDir = path.join(__dirname, '../../uploads/profiles');
+      const imagePath = path.join(uploadDir, user.profileImage);
+      if (fs.existsSync(imagePath)) {
+        fs.unlinkSync(imagePath);
+        console.log('🗑️ Deleted profile image:', user.profileImage);
+      }
     }
 
     await User.findByIdAndDelete(req.params.id).session(session);
@@ -2738,28 +2804,67 @@ router.put('/profile/me', auth, async (req, res) => {
   try {
     console.log('📝 PUT /api/users/profile/me - User ID:', req.user.id, 'Data:', req.body);
     
-    const { firstName, lastName, middleName, email, phoneNumber, address, dateOfBirth, sex, age } = req.body;
+    const { firstName, lastName, middleName, email, phoneNumber, address, dateOfBirth, sex, age, profileImage } = req.body;
     
-    const user = await User.findByIdAndUpdate(
-      req.user.id,
-      { 
-        firstName, 
-        lastName,
-        middleName,
-        email: email ? email.toLowerCase() : undefined, 
-        phoneNumber, 
-        address, 
-        dateOfBirth, 
-        sex, 
-        age 
-      },
-      { new: true, runValidators: true }
-    ).select('-password -loginAttempts -lockUntil');
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Handle base64 profile image if provided
+    if (profileImage !== undefined) {
+      if (profileImage && profileImage.startsWith('data:image')) {
+        try {
+          console.log('📸 Handling base64 profile image update for current user');
+          const fileName = await handleBase64Image(profileImage, req.user.id, true, user);
+          if (fileName) {
+            user.profileImage = fileName;
+            user.profilePicture = fileName;
+            console.log('✅ Base64 image updated for current user:', fileName);
+          }
+        } catch (imageError) {
+          console.error('❌ Error saving base64 image:', imageError.message);
+        }
+      } else if (profileImage === '' || profileImage === null) {
+        // Clear profile image if empty string or null is sent
+        const uploadDir = path.join(__dirname, '../../uploads/profiles');
+        if (user.profileImage) {
+          const oldPath = path.join(uploadDir, user.profileImage);
+          if (fs.existsSync(oldPath)) {
+            fs.unlinkSync(oldPath);
+          }
+        }
+        user.profileImage = '';
+        user.profilePicture = '';
+        console.log('🗑️ Cleared profile image for current user');
+      }
+    }
+
+    // Update other fields
+    user.firstName = firstName || user.firstName;
+    user.lastName = lastName || user.lastName;
+    user.middleName = middleName || user.middleName;
+    if (email && email !== user.email) {
+      user.email = email.toLowerCase();
+    }
+    user.phoneNumber = phoneNumber || user.phoneNumber;
+    user.address = address || user.address;
+    user.dateOfBirth = dateOfBirth || user.dateOfBirth;
+    user.sex = sex || user.sex;
+    user.age = age || user.age;
+
+    await user.save();
+
+    const updatedUser = await User.findById(req.user.id)
+      .select('-password -loginAttempts -lockUntil');
 
     res.json({ 
       success: true,
       message: 'Profile updated successfully', 
-      user 
+      user: updatedUser 
     });
   } catch (error) {
     console.error('❌ Update profile error:', error);
@@ -2779,7 +2884,7 @@ router.put('/profile/me', auth, async (req, res) => {
   }
 });
 
-// Upload profile image
+// Upload profile image via multipart/form-data (existing route - kept for compatibility)
 router.post('/:id/upload-profile-image', auth, checkPermission('edit_users'), async (req, res) => {
   try {
     console.log('🖼️ POST /api/users/:id/upload-profile-image - User ID:', req.params.id);
