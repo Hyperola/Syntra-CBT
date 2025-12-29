@@ -1,4 +1,4 @@
-// components/Analytics.js - UPDATED TO USE PROPER DATA STRUCTURE
+// components/Analytics.js - CLEAN VERSION WITHOUT UI ERRORS
 import React, { useState, useEffect, useMemo } from 'react';
 import useTeacherData from '../../hooks/useTeacherData';
 import { 
@@ -28,7 +28,7 @@ ChartJS.register(
   Title, Filler
 );
 
-const Analytics = () => {
+const TeacherAnalytics = () => {
   const { 
     analytics, 
     analyticsSummary,
@@ -63,29 +63,6 @@ const Analytics = () => {
     textPrimary: '#1F2937',
     textSecondary: '#6B7280'
   };
-
-  // Debug real data
-  useEffect(() => {
-    console.log('📊 ANALYTICS COMPONENT DEBUG:', {
-      analyticsCount: analytics?.length,
-      analyticsSummary: analyticsSummary,
-      testsCount: tests?.length,
-      resultsCount: results?.length,
-      loading,
-      error,
-      lastUpdated,
-      analyticsSample: analytics?.[0]
-    });
-    
-    if (analytics?.length > 0) {
-      console.log('📊 ANALYTICS DATA SAMPLE:', {
-        firstTest: analytics[0],
-        scores: analytics.map(a => a.averageScore),
-        classes: analytics.map(a => a.class),
-        hasClassNames: analytics.every(a => a.class && !a.class.includes('ObjectId'))
-      });
-    }
-  }, [analytics, analyticsSummary, tests, results, loading, error, lastUpdated]);
 
   // Handle refresh
   const handleRefresh = async () => {
@@ -154,21 +131,8 @@ const Analytics = () => {
     return ['all', ...Array.from(subjectSet).sort()];
   }, [analytics]);
 
-  // Calculate overview metrics - USING ANALYTICS SUMMARY IF AVAILABLE
+  // Calculate overview metrics
   const overviewMetrics = useMemo(() => {
-    // Use analyticsSummary if available
-    if (analyticsSummary) {
-      return {
-        averageScore: analyticsSummary.overallAverageScore || 0,
-        totalStudents: analyticsSummary.totalStudents || 0,
-        testsCompleted: analyticsSummary.totalTests || 0,
-        avgTimeSpent: analyticsSummary.avgTimeSpent || 0,
-        passRate: analyticsSummary.passRate || 0,
-        improvement: analyticsSummary.improvement || 0
-      };
-    }
-    
-    // Fallback to calculating from filtered analytics
     const metrics = {
       averageScore: 0,
       totalStudents: 0,
@@ -178,8 +142,15 @@ const Analytics = () => {
       improvement: 0
     };
 
-    if (filteredAnalytics.length > 0) {
-      // Average score
+    // Use analyticsSummary if available
+    if (analyticsSummary) {
+      metrics.averageScore = analyticsSummary.overallAverageScore || 0;
+      metrics.totalStudents = analyticsSummary.totalStudents || 0;
+      metrics.testsCompleted = analyticsSummary.totalTests || 0;
+      metrics.passRate = analyticsSummary.passRate || 0;
+      metrics.improvement = analyticsSummary.improvement || 0;
+    } else if (filteredAnalytics.length > 0) {
+      // Calculate from filtered analytics
       const validScores = filteredAnalytics
         .map(a => a.averageScore)
         .filter(score => !isNaN(score) && score > 0);
@@ -189,55 +160,41 @@ const Analytics = () => {
         metrics.averageScore = parseFloat((totalScore / validScores.length).toFixed(2));
       }
       
-      // Total students (sum of all test students)
-      const totalStudents = filteredAnalytics
+      // Total students
+      metrics.totalStudents = filteredAnalytics
         .map(a => a.totalStudents || 0)
         .reduce((sum, count) => sum + count, 0);
-      metrics.totalStudents = totalStudents;
       
       // Tests with students
       metrics.testsCompleted = filteredAnalytics.filter(a => a.totalStudents > 0).length;
       
-      // Pass rate (tests with average score >= 50%)
+      // Pass rate
       const passingTests = filteredAnalytics.filter(a => a.averageScore >= 50).length;
       metrics.passRate = filteredAnalytics.length > 0 ? 
         parseFloat(((passingTests / filteredAnalytics.length) * 100).toFixed(2)) : 0;
-      
-      // Improvement trend (compare first 3 vs last 3 tests by date)
-      if (filteredAnalytics.length >= 6) {
-        const sortedByDate = [...filteredAnalytics].sort((a, b) => 
-          new Date(a.createdAt) - new Date(b.createdAt)
-        );
-        
-        const firstThree = sortedByDate.slice(0, 3);
-        const lastThree = sortedByDate.slice(-3);
-        
-        const firstAvg = firstThree.reduce((sum, t) => sum + (t.averageScore || 0), 0) / firstThree.length;
-        const lastAvg = lastThree.reduce((sum, t) => sum + (t.averageScore || 0), 0) / lastThree.length;
-        
-        if (firstAvg > 0) {
-          metrics.improvement = parseFloat(((lastAvg - firstAvg) / firstAvg * 100).toFixed(2));
-        }
-      }
-    }
-
-    // Calculate average time spent from results
-    if (results && results.length > 0) {
-      const timeResults = results.filter(r => r.timeSpent && r.timeSpent > 0);
-      if (timeResults.length > 0) {
-        const totalTime = timeResults.reduce((sum, r) => sum + (r.timeSpent || 0), 0);
-        metrics.avgTimeSpent = parseFloat((totalTime / timeResults.length).toFixed(0));
-      }
     }
 
     return metrics;
-  }, [analyticsSummary, filteredAnalytics, results]);
+  }, [analyticsSummary, filteredAnalytics]);
 
   // Prepare chart data
   const performanceData = useMemo(() => {
     const topTests = filteredAnalytics
       .filter(a => a.averageScore > 0)
       .slice(0, 8);
+    
+    if (topTests.length === 0) {
+      return {
+        labels: ['No Data'],
+        datasets: [{
+          label: 'Average Score (%)',
+          data: [0],
+          backgroundColor: [brandColors.light],
+          borderColor: [brandColors.dark],
+          borderWidth: 1,
+        }],
+      };
+    }
     
     return {
       labels: topTests.map(a => {
@@ -271,6 +228,32 @@ const Analytics = () => {
   const testTrendsData = useMemo(() => {
     const recentTests = filteredAnalytics.slice(0, 6);
     
+    if (recentTests.length === 0) {
+      return {
+        labels: ['No Data'],
+        datasets: [
+          {
+            label: 'Completion Rate (%)',
+            data: [0],
+            backgroundColor: brandColors.primary + '40',
+            borderColor: brandColors.primary,
+            borderWidth: 2,
+            tension: 0.3,
+            fill: true,
+          },
+          {
+            label: 'Average Score (%)',
+            data: [0],
+            backgroundColor: brandColors.secondary + '40',
+            borderColor: brandColors.secondary,
+            borderWidth: 2,
+            tension: 0.3,
+            fill: true,
+          }
+        ],
+      };
+    }
+    
     return {
       labels: recentTests.map(a => {
         const title = a.testTitle || 'Test';
@@ -303,7 +286,7 @@ const Analytics = () => {
   const studentPerformanceData = useMemo(() => {
     if (!results || results.length === 0) {
       return {
-        labels: ['No Data Available'],
+        labels: ['No Data'],
         datasets: [{
           label: 'Student Distribution',
           data: [100],
@@ -314,11 +297,10 @@ const Analytics = () => {
       };
     }
     
-    // Calculate distribution from real results
-    const excellent = results.filter(r => (r.score || 0) >= 90).length;
-    const good = results.filter(r => (r.score || 0) >= 75 && (r.score || 0) < 90).length;
-    const average = results.filter(r => (r.score || 0) >= 50 && (r.score || 0) < 75).length;
-    const poor = results.filter(r => (r.score || 0) < 50).length;
+    const excellent = results.filter(r => (r.percentage || 0) >= 90).length;
+    const good = results.filter(r => (r.percentage || 0) >= 75 && (r.percentage || 0) < 90).length;
+    const average = results.filter(r => (r.percentage || 0) >= 50 && (r.percentage || 0) < 75).length;
+    const poor = results.filter(r => (r.percentage || 0) < 50).length;
     
     return {
       labels: ['Top Performers (≥90%)', 'Good (75-89%)', 'Average (50-74%)', 'Needs Improvement (<50%)'],
@@ -342,24 +324,18 @@ const Analytics = () => {
     };
   }, [results, brandColors]);
 
-  // Chart options (same as before)
+  // Chart options
   const barOptions = {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
       legend: { 
-        position: 'top',
-        labels: {
-          padding: 20,
-          font: {
-            size: 12
-          }
-        }
+        display: false
       },
       tooltip: {
         callbacks: {
           label: function(context) {
-            return `${context.dataset.label}: ${context.raw}%`;
+            return `${context.label}: ${context.raw}%`;
           }
         }
       }
@@ -396,18 +372,45 @@ const Analytics = () => {
   };
 
   const lineOptions = {
-    ...barOptions,
-    scales: {
-      ...barOptions.scales,
-      x: {
-        ...barOptions.scales.x,
-        ticks: {
-          ...barOptions.scales.x.ticks,
-          maxRotation: 0,
-          minRotation: 0
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'top',
+        labels: {
+          padding: 20,
+          font: {
+            size: 12
+          }
+        }
+      },
+      tooltip: {
+        callbacks: {
+          label: function(context) {
+            return `${context.dataset.label}: ${context.raw}%`;
+          }
         }
       }
-    }
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        max: 100,
+        ticks: {
+          callback: function(value) {
+            return value + '%';
+          }
+        },
+        grid: {
+          color: 'rgba(0, 0, 0, 0.05)',
+        }
+      },
+      x: {
+        grid: {
+          display: false,
+        }
+      }
+    },
   };
 
   const doughnutOptions = {
@@ -436,12 +439,12 @@ const Analytics = () => {
     cutout: '65%',
   };
 
-  // Metrics cards - USING REAL DATA
+  // Metrics cards
   const metricCards = [
     {
       id: 'averageScore',
       title: 'Average Score',
-      value: `${overviewMetrics.averageScore}%`,
+      value: `${overviewMetrics.averageScore.toFixed(1)}%`,
       icon: <FiAward size={20} />,
       color: brandColors.primary,
       bgColor: brandColors.primary + '20',
@@ -469,37 +472,15 @@ const Analytics = () => {
     {
       id: 'passRate',
       title: 'Pass Rate',
-      value: `${overviewMetrics.passRate}%`,
+      value: `${overviewMetrics.passRate.toFixed(1)}%`,
       icon: <FiPercent size={20} />,
       color: brandColors.success,
       bgColor: brandColors.success + '20',
       description: 'Tests with average score ≥ 50%'
     },
-    {
-      id: 'avgTimeSpent',
-      title: 'Avg. Time Spent',
-      value: `${overviewMetrics.avgTimeSpent} min`,
-      icon: <FiClock size={20} />,
-      color: brandColors.info,
-      bgColor: brandColors.info + '20',
-      description: 'Average time per test'
-    },
-    {
-      id: 'improvementTrend',
-      title: 'Improvement Trend',
-      value: `${Math.abs(overviewMetrics.improvement)}%`,
-      icon: parseFloat(overviewMetrics.improvement) >= 0 ? 
-        <FiTrendingUp size={20} /> : <FiTrendingDown size={20} />,
-      color: parseFloat(overviewMetrics.improvement) >= 0 ? 
-        brandColors.success : brandColors.danger,
-      bgColor: parseFloat(overviewMetrics.improvement) >= 0 ? 
-        brandColors.success + '20' : brandColors.danger + '20',
-      description: parseFloat(overviewMetrics.improvement) >= 0 ? 
-        'Performance improvement' : 'Performance decline'
-    },
   ];
 
-  // Handle export REAL DATA
+  // Handle export
   const handleExport = () => {
     const data = {
       analytics: filteredAnalytics,
@@ -561,11 +542,7 @@ const Analytics = () => {
           fontWeight: '500',
           marginBottom: '10px',
           color: brandColors.textPrimary,
-        }}>Loading Real Analytics Data...</h3>
-        <p style={{
-          fontSize: '14px',
-          color: brandColors.textSecondary,
-        }}>Fetching from database</p>
+        }}>Loading Analytics Data...</h3>
       </div>
     );
   }
@@ -615,8 +592,10 @@ const Analytics = () => {
                 Performance Analytics
               </h1>
               <p style={{ fontSize: '16px', margin: '0', color: 'rgba(255, 255, 255, 0.9)' }}>
-                Real data insights • {filteredAnalytics.length} tests • {overviewMetrics.totalStudents} students
-                {lastUpdated && ` • Updated ${new Date(lastUpdated).toLocaleTimeString()}`}
+                {filteredAnalytics.length > 0 
+                  ? `${filteredAnalytics.length} tests • ${overviewMetrics.totalStudents} students assessed`
+                  : 'No test data available'}
+                {lastUpdated && ` • Last updated ${new Date(lastUpdated).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`}
               </p>
             </div>
           </div>
@@ -646,26 +625,28 @@ const Analytics = () => {
               }} />
               {isRefreshing ? 'Refreshing...' : 'Refresh Data'}
             </button>
-            <button 
-              onClick={handleExport}
-              style={{
-                backgroundColor: brandColors.secondary,
-                color: '#FFFFFF',
-                border: 'none',
-                padding: '10px 20px',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: '500',
-                fontSize: '14px',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                transition: 'all 0.3s ease',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-              }}
-            >
-              <FiDownload size={16} /> Export Real Data
-            </button>
+            {filteredAnalytics.length > 0 && (
+              <button 
+                onClick={handleExport}
+                style={{
+                  backgroundColor: brandColors.secondary,
+                  color: '#FFFFFF',
+                  border: 'none',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  fontSize: '14px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  transition: 'all 0.3s ease',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                }}
+              >
+                <FiDownload size={16} /> Export Data
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -685,22 +666,6 @@ const Analytics = () => {
           }}>
             <FiAlertTriangle size={20} />
             <span>{error}</span>
-            <button 
-              onClick={handleRefresh}
-              style={{
-                marginLeft: 'auto',
-                backgroundColor: 'transparent',
-                color: 'inherit',
-                border: '1px solid currentColor',
-                padding: '4px 12px',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '12px',
-                fontWeight: '500',
-              }}
-            >
-              Retry
-            </button>
           </div>
         )}
         {success && (
@@ -721,116 +686,118 @@ const Analytics = () => {
       </div>
 
       {/* Filters */}
-      <div style={{
-        backgroundColor: brandColors.cardBg,
-        borderRadius: '12px',
-        marginBottom: '20px',
-        padding: '25px',
-        boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
-      }}>
+      {analytics.length > 0 && (
         <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-          gap: '20px',
+          backgroundColor: brandColors.cardBg,
+          borderRadius: '12px',
+          marginBottom: '20px',
+          padding: '25px',
+          boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
         }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <label style={{ fontSize: '14px', fontWeight: '500', color: brandColors.textPrimary }}>
-              Time Period
-            </label>
-            <select 
-              value={timeFilter} 
-              onChange={(e) => setTimeFilter(e.target.value)}
-              style={{
-                padding: '10px 12px',
-                border: `1px solid ${brandColors.light}`,
-                borderRadius: '8px',
-                fontSize: '14px',
-                backgroundColor: brandColors.cardBg,
-                color: brandColors.textPrimary,
-                outline: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              <option value="all">All Time</option>
-              <option value="week">Last Week</option>
-              <option value="month">Last Month</option>
-              <option value="quarter">Last Quarter</option>
-            </select>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <label style={{ fontSize: '14px', fontWeight: '500', color: brandColors.textPrimary }}>
-              Subject
-            </label>
-            <select 
-              value={subjectFilter} 
-              onChange={(e) => setSubjectFilter(e.target.value)}
-              style={{
-                padding: '10px 12px',
-                border: `1px solid ${brandColors.light}`,
-                borderRadius: '8px',
-                fontSize: '14px',
-                backgroundColor: brandColors.cardBg,
-                color: brandColors.textPrimary,
-                outline: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              {subjects.map(subject => (
-                <option key={subject} value={subject}>
-                  {subject === 'all' ? 'All Subjects' : subject}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <label style={{ fontSize: '14px', fontWeight: '500', color: brandColors.textPrimary }}>
-              Data View
-            </label>
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button
-                onClick={() => setViewMode('overview')}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+            gap: '20px',
+          }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ fontSize: '14px', fontWeight: '500', color: brandColors.textPrimary }}>
+                Time Period
+              </label>
+              <select 
+                value={timeFilter} 
+                onChange={(e) => setTimeFilter(e.target.value)}
                 style={{
-                  flex: 1,
-                  padding: '10px 16px',
-                  border: 'none',
+                  padding: '10px 12px',
+                  border: `1px solid ${brandColors.light}`,
                   borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
                   fontSize: '14px',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                  backgroundColor: viewMode === 'overview' ? brandColors.primary : brandColors.light,
-                  color: viewMode === 'overview' ? '#FFFFFF' : brandColors.textPrimary,
+                  backgroundColor: brandColors.cardBg,
+                  color: brandColors.textPrimary,
+                  outline: 'none',
+                  cursor: 'pointer',
                 }}
               >
-                <FiGrid size={16} /> Overview
-              </button>
-              <button
-                onClick={() => setViewMode('detailed')}
+                <option value="all">All Time</option>
+                <option value="week">Last Week</option>
+                <option value="month">Last Month</option>
+                <option value="quarter">Last Quarter</option>
+              </select>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ fontSize: '14px', fontWeight: '500', color: brandColors.textPrimary }}>
+                Subject
+              </label>
+              <select 
+                value={subjectFilter} 
+                onChange={(e) => setSubjectFilter(e.target.value)}
                 style={{
-                  flex: 1,
-                  padding: '10px 16px',
-                  border: 'none',
+                  padding: '10px 12px',
+                  border: `1px solid ${brandColors.light}`,
                   borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
                   fontSize: '14px',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                  backgroundColor: viewMode === 'detailed' ? brandColors.primary : brandColors.light,
-                  color: viewMode === 'detailed' ? '#FFFFFF' : brandColors.textPrimary,
+                  backgroundColor: brandColors.cardBg,
+                  color: brandColors.textPrimary,
+                  outline: 'none',
+                  cursor: 'pointer',
                 }}
               >
-                <FiPieChart size={16} /> Detailed
-              </button>
+                {subjects.map(subject => (
+                  <option key={subject} value={subject}>
+                    {subject === 'all' ? 'All Subjects' : subject}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ fontSize: '14px', fontWeight: '500', color: brandColors.textPrimary }}>
+                Data View
+              </label>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  onClick={() => setViewMode('overview')}
+                  style={{
+                    flex: 1,
+                    padding: '10px 16px',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    fontSize: '14px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    backgroundColor: viewMode === 'overview' ? brandColors.primary : brandColors.light,
+                    color: viewMode === 'overview' ? '#FFFFFF' : brandColors.textPrimary,
+                  }}
+                >
+                  <FiGrid size={16} /> Overview
+                </button>
+                <button
+                  onClick={() => setViewMode('detailed')}
+                  style={{
+                    flex: 1,
+                    padding: '10px 16px',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    fontSize: '14px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    backgroundColor: viewMode === 'detailed' ? brandColors.primary : brandColors.light,
+                    color: viewMode === 'detailed' ? '#FFFFFF' : brandColors.textPrimary,
+                  }}
+                >
+                  <FiPieChart size={16} /> Detailed
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Content */}
       <div>
@@ -846,12 +813,10 @@ const Analytics = () => {
               <FiBarChart2 size={48} />
             </div>
             <h3 style={{ color: brandColors.textPrimary, fontSize: '24px', fontWeight: '600', margin: '0 0 10px 0' }}>
-              {analytics.length === 0 ? 'No Analytics Data Available' : 'No Data Matches Filters'}
+              No Analytics Data Available
             </h3>
             <p style={{ color: brandColors.textSecondary, fontSize: '16px', margin: '0 0 30px 0', maxWidth: '500px', marginLeft: 'auto', marginRight: 'auto' }}>
-              {analytics.length === 0 
-                ? 'You haven\'t conducted any tests yet. Create and administer tests to generate real analytics.'
-                : 'Try changing your filter settings or create new tests.'}
+              You haven't conducted any tests with student results yet. Create and administer tests to generate analytics.
             </p>
             <div style={{ display: 'flex', gap: '15px', justifyContent: 'center' }}>
               <button 
@@ -912,9 +877,7 @@ const Analytics = () => {
                     border: `1px solid ${brandColors.light}`,
                     position: 'relative',
                     overflow: 'hidden',
-                    cursor: 'help',
                   }}
-                  title={metric.description}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
                     <div style={{ backgroundColor: metric.bgColor, width: '48px', height: '48px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -943,8 +906,8 @@ const Analytics = () => {
                   <p style={{ fontSize: '32px', fontWeight: '700', color: brandColors.textPrimary, margin: '0', lineHeight: '1' }}>
                     {metric.value}
                   </p>
-                  <p style={{ fontSize: '12px', color: brandColors.textSecondary, marginTop: '8px', marginBottom: '0', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <FiInfo size={12} /> {metric.description}
+                  <p style={{ fontSize: '12px', color: brandColors.textSecondary, marginTop: '8px', marginBottom: '0' }}>
+                    {metric.description}
                   </p>
                 </div>
               ))}
@@ -964,21 +927,9 @@ const Analytics = () => {
                   <h3 style={{ fontSize: '18px', fontWeight: '600', color: brandColors.textPrimary, margin: '0' }}>
                     Performance by Subject
                   </h3>
-                  <div style={{ display: 'flex', gap: '20px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: brandColors.textSecondary }}>
-                      <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: brandColors.primary }}></div>
-                      Average Score (%)
-                    </div>
-                  </div>
                 </div>
                 <div style={{ height: '300px', position: 'relative' }}>
-                  {filteredAnalytics.length > 0 ? (
-                    <Bar data={performanceData} options={barOptions} />
-                  ) : (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: brandColors.textSecondary, fontSize: '16px', fontStyle: 'italic' }}>
-                      No test data available
-                    </div>
-                  )}
+                  <Bar data={performanceData} options={barOptions} />
                 </div>
               </div>
 
@@ -1000,25 +951,9 @@ const Analytics = () => {
                     <h3 style={{ fontSize: '18px', fontWeight: '600', color: brandColors.textPrimary, margin: '0' }}>
                       Test Trends
                     </h3>
-                    <div style={{ display: 'flex', gap: '20px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: brandColors.textSecondary }}>
-                        <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: brandColors.primary }}></div>
-                        Completion Rate
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: brandColors.textSecondary }}>
-                        <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: brandColors.secondary }}></div>
-                        Average Score
-                      </div>
-                    </div>
                   </div>
                   <div style={{ height: '300px', position: 'relative' }}>
-                    {filteredAnalytics.length > 0 ? (
-                      <Line data={testTrendsData} options={lineOptions} />
-                    ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: brandColors.textSecondary, fontSize: '16px', fontStyle: 'italic' }}>
-                        No trend data available
-                      </div>
-                    )}
+                    <Line data={testTrendsData} options={lineOptions} />
                   </div>
                 </div>
 
@@ -1041,13 +976,7 @@ const Analytics = () => {
                     </div>
                   </div>
                   <div style={{ height: '300px', position: 'relative' }}>
-                    {results && results.length > 0 ? (
-                      <Doughnut data={studentPerformanceData} options={doughnutOptions} />
-                    ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: brandColors.textSecondary, fontSize: '16px', fontStyle: 'italic' }}>
-                        No student results available
-                      </div>
-                    )}
+                    <Doughnut data={studentPerformanceData} options={doughnutOptions} />
                   </div>
                 </div>
               </div>
@@ -1067,7 +996,7 @@ const Analytics = () => {
                     Detailed Test Metrics
                   </h2>
                   <p style={{ fontSize: '14px', color: brandColors.textSecondary, margin: '0' }}>
-                    Real data from {filteredAnalytics.length} tests
+                    Showing {filteredAnalytics.length} tests
                   </p>
                 </div>
                 <div style={{ overflowX: 'auto', borderRadius: '8px', border: `1px solid ${brandColors.light}` }}>
@@ -1091,9 +1020,6 @@ const Analytics = () => {
                         </th>
                         <th style={{ backgroundColor: brandColors.light, padding: '16px', textAlign: 'left', fontWeight: '600', fontSize: '14px', color: brandColors.textPrimary, borderBottom: `1px solid ${brandColors.light}` }}>
                           Students
-                        </th>
-                        <th style={{ backgroundColor: brandColors.light, padding: '16px', textAlign: 'left', fontWeight: '600', fontSize: '14px', color: brandColors.textPrimary, borderBottom: `1px solid ${brandColors.light}` }}>
-                          Top Performer
                         </th>
                         <th style={{ backgroundColor: brandColors.light, padding: '16px', textAlign: 'left', fontWeight: '600', fontSize: '14px', color: brandColors.textPrimary, borderBottom: `1px solid ${brandColors.light}` }}>
                           Date
@@ -1130,7 +1056,7 @@ const Analytics = () => {
                               fontSize: '12px',
                               fontWeight: '500',
                             }}>
-                              {test.class || test.className || 'Unknown'}
+                              {test.class || 'Unknown'}
                             </span>
                           </td>
                           <td style={{ padding: '16px', fontSize: '14px', color: brandColors.textPrimary, borderBottom: `1px solid ${brandColors.light}` }}>
@@ -1152,7 +1078,7 @@ const Analytics = () => {
                                 style={{
                                   height: '100%',
                                   borderRadius: '12px',
-                                  width: `${test.completionRate}%`,
+                                  width: `${Math.min(test.completionRate, 100)}%`,
                                   backgroundColor: getCompletionColor(test.completionRate),
                                 }}
                               />
@@ -1165,12 +1091,6 @@ const Analytics = () => {
                             <span style={{ fontWeight: '600', color: brandColors.primary }}>
                               {test.totalStudents}
                             </span>
-                          </td>
-                          <td style={{ padding: '16px', fontSize: '14px', color: brandColors.textPrimary, borderBottom: `1px solid ${brandColors.light}` }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <FiAward size={14} style={{ color: brandColors.secondary }} />
-                              <span>{test.topStudent}</span>
-                            </div>
                           </td>
                           <td style={{ padding: '16px', fontSize: '14px', color: brandColors.textPrimary, borderBottom: `1px solid ${brandColors.light}` }}>
                             {new Date(test.createdAt).toLocaleDateString()}
@@ -1189,20 +1109,4 @@ const Analytics = () => {
   );
 };
 
-// Add CSS animation
-const styleTag = document.createElement('style');
-styleTag.innerHTML = `
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
-  
-  @media (max-width: 768px) {
-    body {
-      font-size: 14px;
-    }
-  }
-`;
-document.head.appendChild(styleTag);
-
-export default Analytics;
+export default TeacherAnalytics;

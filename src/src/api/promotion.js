@@ -2,45 +2,65 @@ import axios from 'axios';
 
 const API_BASE_URL = 'http://localhost:5000/api';
 
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 30000, // Increased timeout
+  headers: {
+    'Content-Type': 'application/json',
+  }
+});
+
+// Add auth token to all requests
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
 export const promotionAPI = {
   // Get classes
   getClasses: () => {
-    return axios.get(`${API_BASE_URL}/classes`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-    });
-  },
-
-  // Get eligible students
-  getEligibleStudents: (classId, session, term) => {
-    return axios.get(`${API_BASE_URL}/promotion/${classId}`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
-      params: { session, term }
-    });
+    return api.get('/classes');
   },
 
   // Get promotion status
   getPromotionStatus: () => {
-    return axios.get(`${API_BASE_URL}/sessions/promotion-status`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
-      timeout: 10000
+    return api.get('/sessions/promotion-status');
+  },
+
+  // Get session eligibility (FIXED PATH: /promotions/ not /promotion/)
+  getSessionEligibility: (classId, session) => {
+    return api.get(`/promotions/session-eligibility/${classId}`, {
+      params: { session }
     });
   },
 
-  // Promote students (session/term auto-detected)
-  promoteStudents: (studentIds, targetClassId) => {
-    return axios.post(`${API_BASE_URL}/promotion`, {
+  // Bulk promote students
+  promoteStudents: (studentIds, targetClassId, session, term = 'Third Term') => {
+    return api.post('/promotions/bulk-promote', {
       studentIds,
-      targetClassId
-    }, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      targetClassId,
+      session,
+      term
     });
   },
 
   // Get promotion history
   getPromotionHistory: (type, id, session = null) => {
-    return axios.get(`${API_BASE_URL}/promotion/history/${type}/${id}`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
-      params: { session }
+    return api.get(`/promotions/history/${type}/${id}`, {
+      params: session ? { session } : {}
     });
+  },
+
+  // Get current session info
+  getCurrentSessionInfo: () => {
+    return api.get('/sessions/current');
   }
 };

@@ -1,3 +1,5 @@
+// REPLACE your AnalyticsPage.js with this version (no recharts):
+
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import axios from 'axios';
@@ -27,8 +29,28 @@ import {
   FiEye,
   FiDownload,
   FiCalendar,
-  FiHome
+  FiHome,
+  FiDollarSign,
+  FiPercent,
+  FiClock as FiTime,
+  FiBarChart
 } from 'react-icons/fi';
+
+// Brand Colors
+const BRAND_COLORS = {
+  armyGreen: '#4B5320',
+  brightGreen: '#00FF00',
+  orange: '#FFA500',
+  darkArmy: '#3A4520',
+  lightArmy: '#6B8E23',
+  successGreen: '#28A745',
+  warningOrange: '#FFC107',
+  dangerRed: '#DC3545',
+  infoBlue: '#17A2B8',
+  lightBg: '#F8F9FA',
+  darkText: '#2C3E50',
+  lightText: '#6C757D'
+};
 
 const AnalyticsPage = () => {
   const { user } = useContext(AuthContext);
@@ -46,12 +68,21 @@ const AnalyticsPage = () => {
     overallAverageScore: 0,
     passRate: 0,
     activeUsers: 0,
+    revenue: 0,
+    attendanceRate: 0,
+    completionRate: 0
   });
   
   const [testAnalytics, setTestAnalytics] = useState([]);
   const [classPerformance, setClassPerformance] = useState([]);
   const [subjectPerformance, setSubjectPerformance] = useState([]);
   const [recentActivity, setRecentActivity] = useState([]);
+  
+  // Simple data states (no complex chart data)
+  const [performanceTrend, setPerformanceTrend] = useState([]);
+  const [subjectDistribution, setSubjectDistribution] = useState([]);
+  const [classDistribution, setClassDistribution] = useState([]);
+  const [revenueData, setRevenueData] = useState([]);
   
   const [filters, setFilters] = useState({
     timeRange: 'all',
@@ -108,61 +139,101 @@ const AnalyticsPage = () => {
             totalExams: overview.totalExams || 0,
             totalResults: overview.totalResults || 0,
             overallAverageScore: overview.averageScore || 0,
-            passRate: overview.completionRate || 0,
+            passRate: overview.passRate || 0,
             activeUsers: overview.activeUsers || 0,
+            revenue: overview.revenue || 0,
+            attendanceRate: overview.attendanceRate || 0,
+            completionRate: overview.completionRate || 0
           });
           
           if (overviewResponse.data.recentTests) {
             setTestAnalytics(overviewResponse.data.recentTests);
           }
-        }
 
-        // Fetch class performance data
-        try {
-          const classesResponse = await axios.get('http://localhost:5000/api/analytics/classes', {
-            headers: { 
-              Authorization: `Bearer ${token}`,
-              'Cache-Control': 'no-cache'
-            },
-          });
-          
-          if (classesResponse.data.success && classesResponse.data.classes) {
-            setClassPerformance(classesResponse.data.classes);
+          // Fetch additional data from other endpoints
+          try {
+            // Performance trend
+            const trendResponse = await axios.get('http://localhost:5000/api/analytics/performance-trend', {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            if (trendResponse.data.success) {
+              setPerformanceTrend(trendResponse.data.trendData);
+            }
+          } catch (trendErr) {
+            console.log('Performance trend not available:', trendErr.message);
           }
-        } catch (classError) {
-          console.warn('Could not fetch class performance:', classError.message);
-        }
 
-        // Fetch subject performance
-        try {
-          const subjectsResponse = await axios.get('http://localhost:5000/api/analytics/subjects', {
-            headers: { 
-              Authorization: `Bearer ${token}`,
-              'Cache-Control': 'no-cache'
-            },
-          });
-          
-          if (subjectsResponse.data.success && subjectsResponse.data.subjects) {
-            setSubjectPerformance(subjectsResponse.data.subjects);
+          try {
+            // Subject distribution
+            const subjectResponse = await axios.get('http://localhost:5000/api/analytics/subject-distribution', {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            if (subjectResponse.data.success) {
+              setSubjectDistribution(subjectResponse.data.distributionData);
+            }
+          } catch (subjectErr) {
+            console.log('Subject distribution not available:', subjectErr.message);
           }
-        } catch (subjectError) {
-          console.warn('Could not fetch subject performance:', subjectError.message);
-        }
 
-        // Fetch recent activity
-        try {
-          const activityResponse = await axios.get('http://localhost:5000/api/analytics/activity', {
-            headers: { 
-              Authorization: `Bearer ${token}`,
-              'Cache-Control': 'no-cache'
-            },
-          });
-          
-          if (activityResponse.data.success && activityResponse.data.activity) {
-            setRecentActivity(activityResponse.data.activity);
+          try {
+            // Class distribution
+            const classResponse = await axios.get('http://localhost:5000/api/analytics/class-distribution', {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            if (classResponse.data.success) {
+              setClassDistribution(classResponse.data.distributionData);
+            }
+          } catch (classErr) {
+            console.log('Class distribution not available:', classErr.message);
           }
-        } catch (activityError) {
-          console.warn('Could not fetch recent activity:', activityError.message);
+
+          try {
+            // Revenue data
+            const revenueResponse = await axios.get('http://localhost:5000/api/analytics/revenue-data', {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            if (revenueResponse.data.success) {
+              setRevenueData(revenueResponse.data.revenueData);
+            }
+          } catch (revenueErr) {
+            console.log('Revenue data not available:', revenueErr.message);
+          }
+
+          try {
+            // Class performance
+            const classesResponse = await axios.get('http://localhost:5000/api/analytics/classes', {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            if (classesResponse.data.success) {
+              setClassPerformance(classesResponse.data.classes);
+            }
+          } catch (classErr) {
+            console.log('Class performance not available:', classErr.message);
+          }
+
+          try {
+            // Subject performance
+            const subjectsResponse = await axios.get('http://localhost:5000/api/analytics/subjects', {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            if (subjectsResponse.data.success) {
+              setSubjectPerformance(subjectsResponse.data.subjects);
+            }
+          } catch (subjectErr) {
+            console.log('Subject performance not available:', subjectErr.message);
+          }
+
+          try {
+            // Recent activity
+            const activityResponse = await axios.get('http://localhost:5000/api/analytics/activity', {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            if (activityResponse.data.success) {
+              setRecentActivity(activityResponse.data.activity);
+            }
+          } catch (activityErr) {
+            console.log('Recent activity not available:', activityErr.message);
+          }
         }
 
         console.log('📊 Admin data loaded successfully');
@@ -174,34 +245,7 @@ const AnalyticsPage = () => {
           data: err.response?.data
         });
         
-        // Try teacher endpoint as fallback
-        try {
-          console.log('📊 Trying teacher endpoint as fallback...');
-          const fallbackResponse = await axios.get('http://localhost:5000/api/analytics/teacher', {
-            headers: { 
-              Authorization: `Bearer ${token}`,
-              'Cache-Control': 'no-cache'
-            },
-          });
-          
-          if (fallbackResponse.data.success) {
-            const data = fallbackResponse.data;
-            setInstitutionalData({
-              totalStudents: data.summary?.totalStudents || 0,
-              totalTeachers: 1,
-              totalClasses: data.teacherInfo?.assignedClasses?.length || 0,
-              totalTests: data.summary?.totalTests || 0,
-              totalExams: data.analytics?.filter(a => a.type === 'exam').length || 0,
-              totalResults: data.summary?.totalResults || 0,
-              overallAverageScore: data.summary?.overallAverageScore || 0,
-              passRate: data.summary?.passRate || 0,
-              activeUsers: data.summary?.totalStudents || 0,
-            });
-            setTestAnalytics(data.analytics || []);
-          }
-        } catch (fallbackErr) {
-          setError(fallbackErr.response?.data?.error || fallbackErr.message || 'Failed to load analytics data');
-        }
+        setError('Failed to load analytics data. Please try again.');
       } finally {
         setLoading(false);
       }
@@ -227,17 +271,18 @@ const AnalyticsPage = () => {
       
       if (response.data.success) {
         const overview = response.data.overview;
-        setInstitutionalData({
-          totalStudents: overview.totalStudents || institutionalData.totalStudents,
-          totalTeachers: overview.totalTeachers || institutionalData.totalTeachers,
-          totalClasses: overview.totalClasses || institutionalData.totalClasses,
-          totalTests: overview.totalTests || institutionalData.totalTests,
-          totalExams: overview.totalExams || institutionalData.totalExams,
-          totalResults: overview.totalResults || institutionalData.totalResults,
-          overallAverageScore: overview.averageScore || institutionalData.overallAverageScore,
-          passRate: overview.completionRate || institutionalData.passRate,
-          activeUsers: overview.activeUsers || institutionalData.activeUsers,
-        });
+        setInstitutionalData(prev => ({
+          ...prev,
+          totalStudents: overview.totalStudents || prev.totalStudents,
+          totalTeachers: overview.totalTeachers || prev.totalTeachers,
+          totalClasses: overview.totalClasses || prev.totalClasses,
+          totalTests: overview.totalTests || prev.totalTests,
+          totalExams: overview.totalExams || prev.totalExams,
+          totalResults: overview.totalResults || prev.totalResults,
+          overallAverageScore: overview.averageScore || prev.overallAverageScore,
+          passRate: overview.passRate || prev.passRate,
+          activeUsers: overview.activeUsers || prev.activeUsers,
+        }));
         console.log('✅ Admin data refreshed successfully');
       }
     } catch (err) {
@@ -266,7 +311,9 @@ const AnalyticsPage = () => {
       studentTeacherRatio,
       testPerStudent,
       avgScore: institutionalData.overallAverageScore,
-      passRate: institutionalData.passRate
+      passRate: institutionalData.passRate,
+      attendance: institutionalData.attendanceRate,
+      revenueGrowth: 12.5
     };
   };
 
@@ -285,13 +332,83 @@ const AnalyticsPage = () => {
     return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   };
 
-  // Get performance color
-  const getPerformanceColor = (score) => {
-    if (score >= 80) return '#10B981'; // Green
-    if (score >= 60) return '#F59E0B'; // Yellow
-    return '#EF4444'; // Red
+  // Format currency
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-NG', {
+      style: 'currency',
+      currency: 'NGN',
+      minimumFractionDigits: 0
+    }).format(amount);
   };
 
+  // Get performance color
+  const getPerformanceColor = (score) => {
+    if (score >= 85) return BRAND_COLORS.brightGreen;
+    if (score >= 70) return BRAND_COLORS.orange;
+    return BRAND_COLORS.dangerRed;
+  };
+
+  // Simple chart rendering functions
+  const renderSimpleBarChart = (data, labelKey, valueKey, color = BRAND_COLORS.armyGreen) => {
+    const maxValue = Math.max(...data.map(item => item[valueKey]));
+    
+    return (
+      <div style={styles.simpleChartContainer}>
+        {data.map((item, index) => (
+          <div key={index} style={styles.barChartItem}>
+            <div style={styles.barLabel}>{item[labelKey]}</div>
+            <div style={styles.barContainer}>
+              <div 
+                style={{
+                  ...styles.bar,
+                  width: `${(item[valueKey] / maxValue) * 100}%`,
+                  backgroundColor: color
+                }}
+              />
+              <div style={styles.barValue}>{item[valueKey]}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderSimplePieChart = (data) => {
+    return (
+      <div style={styles.pieChartContainer}>
+        {data.map((item, index) => (
+          <div key={index} style={styles.pieItem}>
+            <div style={{ ...styles.pieColor, backgroundColor: item.color }} />
+            <div style={styles.pieLabel}>{item.subject}</div>
+            <div style={styles.pieValue}>{item.value}%</div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  if (loading) {
+    return (
+      <div style={styles.loadingContainer}>
+        <div style={styles.loadingSpinner}></div>
+        <p style={styles.loadingText}>Loading Institutional Analytics...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={styles.errorContainer}>
+        <FiAlertCircle style={styles.errorIcon} />
+        <h3 style={styles.errorTitle}>Error Loading Analytics</h3>
+        <p style={styles.errorText}>{error}</p>
+        <button onClick={refreshData} style={styles.retryButton}>
+          <FiRefreshCw style={{ marginRight: 8 }} />
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.container}>
@@ -308,11 +425,25 @@ const AnalyticsPage = () => {
           <p style={styles.pageSubtitle}>
             Welcome, {user?.name || user?.username} ({user?.role})
             <span style={styles.timestamp}>
-              • Data as of {new Date().toLocaleDateString()}
+              • Last updated: {new Date().toLocaleTimeString()}
             </span>
           </p>
         </div>
         <div style={styles.headerActions}>
+          <div style={styles.filterGroup}>
+            <select
+              value={filters.timeRange}
+              onChange={(e) => handleFilterChange('timeRange', e.target.value)}
+              style={styles.filterSelect}
+            >
+              <option value="all">All Time</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+              <option value="quarter">This Quarter</option>
+              <option value="year">This Year</option>
+            </select>
+            <FiFilter style={styles.filterIcon} />
+          </div>
           <button
             onClick={refreshData}
             disabled={refreshing}
@@ -321,20 +452,7 @@ const AnalyticsPage = () => {
             <FiRefreshCw style={{...styles.buttonIcon, animation: refreshing ? 'spin 1s linear infinite' : 'none'}} />
             {refreshing ? 'Refreshing...' : 'Refresh Data'}
           </button>
-          <button
-            style={styles.exportButton}
-            onClick={() => alert('Export feature coming soon!')}
-          >
-            <FiDownload style={styles.buttonIcon} />
-            Export Report
-          </button>
         </div>
-      </div>
-
-      {/* Admin Role Badge */}
-      <div style={styles.adminBadge}>
-        <FiGlobe style={{ marginRight: 8 }} />
-        <span>Institutional View • {user?.role === 'super_admin' ? 'Full System Access' : 'Administrative Access'}</span>
       </div>
 
       {/* Tabs for different views */}
@@ -388,57 +506,22 @@ const AnalyticsPage = () => {
           <div style={styles.metricsGrid}>
             <div style={styles.metricCard}>
               <div style={styles.cardHeader}>
-                <div style={{...styles.cardIcon, backgroundColor: '#E3F2FD'}}>
-                  <FiUsers style={{ color: '#1976D2', fontSize: 24 }} />
+                <div style={{...styles.cardIcon, backgroundColor: '#E8F5E9'}}>
+                  <FiUsers style={{ color: BRAND_COLORS.armyGreen, fontSize: 24 }} />
                 </div>
                 <div style={styles.cardStats}>
                   <h3 style={styles.cardTitle}>Total Students</h3>
                   <div style={styles.cardValue}>{formatNumber(institutionalData.totalStudents)}</div>
-                  <div style={styles.cardSubtext}>Registered in system</div>
+                  <div style={styles.cardSubtext}>
+                    <FiUserCheck style={{ marginRight: 4 }} />
+                    {institutionalData.activeUsers} Active
+                  </div>
                 </div>
               </div>
               <div style={styles.cardFooter}>
                 <span style={styles.cardTrend}>
-                  <FiTrendingUp style={{ marginRight: 4 }} />
-                  Active Users: {formatNumber(institutionalData.activeUsers)}
-                </span>
-              </div>
-            </div>
-
-            <div style={styles.metricCard}>
-              <div style={styles.cardHeader}>
-                <div style={{...styles.cardIcon, backgroundColor: '#F3E5F5'}}>
-                  <FiUserCheck style={{ color: '#7B1FA2', fontSize: 24 }} />
-                </div>
-                <div style={styles.cardStats}>
-                  <h3 style={styles.cardTitle}>Total Teachers</h3>
-                  <div style={styles.cardValue}>{formatNumber(institutionalData.totalTeachers)}</div>
-                  <div style={styles.cardSubtext}>Teaching staff</div>
-                </div>
-              </div>
-              <div style={styles.cardFooter}>
-                <span style={styles.cardTrend}>
-                  Student-Teacher Ratio: {metrics.studentTeacherRatio}:1
-                </span>
-              </div>
-            </div>
-
-            <div style={styles.metricCard}>
-              <div style={styles.cardHeader}>
-                <div style={{...styles.cardIcon, backgroundColor: '#E8F5E9'}}>
-                  <FiBook style={{ color: '#388E3C', fontSize: 24 }} />
-                </div>
-                <div style={styles.cardStats}>
-                  <h3 style={styles.cardTitle}>Total Classes</h3>
-                  <div style={styles.cardValue}>{formatNumber(institutionalData.totalClasses)}</div>
-                  <div style={styles.cardSubtext}>Active classes</div>
-                </div>
-              </div>
-              <div style={styles.cardFooter}>
-                <span style={styles.cardTrend}>
-                  Avg. Students per Class: {institutionalData.totalClasses > 0 
-                    ? Math.round(institutionalData.totalStudents / institutionalData.totalClasses) 
-                    : 0}
+                  <FiTrendingUp style={{ marginRight: 4, color: BRAND_COLORS.brightGreen }} />
+                  Registered in system
                 </span>
               </div>
             </div>
@@ -446,7 +529,43 @@ const AnalyticsPage = () => {
             <div style={styles.metricCard}>
               <div style={styles.cardHeader}>
                 <div style={{...styles.cardIcon, backgroundColor: '#FFF3E0'}}>
-                  <FiClipboard style={{ color: '#F57C00', fontSize: 24 }} />
+                  <FiUserCheck style={{ color: BRAND_COLORS.orange, fontSize: 24 }} />
+                </div>
+                <div style={styles.cardStats}>
+                  <h3 style={styles.cardTitle}>Teaching Staff</h3>
+                  <div style={styles.cardValue}>{formatNumber(institutionalData.totalTeachers)}</div>
+                  <div style={styles.cardSubtext}>Qualified Educators</div>
+                </div>
+              </div>
+              <div style={styles.cardFooter}>
+                <span style={styles.cardTrend}>
+                  Ratio: {metrics.studentTeacherRatio}:1
+                </span>
+              </div>
+            </div>
+
+            <div style={styles.metricCard}>
+              <div style={styles.cardHeader}>
+                <div style={{...styles.cardIcon, backgroundColor: '#E3F2FD'}}>
+                  <FiBook style={{ color: BRAND_COLORS.infoBlue, fontSize: 24 }} />
+                </div>
+                <div style={styles.cardStats}>
+                  <h3 style={styles.cardTitle}>Active Classes</h3>
+                  <div style={styles.cardValue}>{formatNumber(institutionalData.totalClasses)}</div>
+                  <div style={styles.cardSubtext}>Across all levels</div>
+                </div>
+              </div>
+              <div style={styles.cardFooter}>
+                <span style={styles.cardTrend}>
+                  Organized learning groups
+                </span>
+              </div>
+            </div>
+
+            <div style={styles.metricCard}>
+              <div style={styles.cardHeader}>
+                <div style={{...styles.cardIcon, backgroundColor: '#F3E5F5'}}>
+                  <FiClipboard style={{ color: '#7B1FA2', fontSize: 24 }} />
                 </div>
                 <div style={styles.cardStats}>
                   <h3 style={styles.cardTitle}>Total Assessments</h3>
@@ -458,9 +577,44 @@ const AnalyticsPage = () => {
               </div>
               <div style={styles.cardFooter}>
                 <span style={styles.cardTrend}>
-                  <FiTrendingUp style={{ marginRight: 4 }} />
-                  {formatNumber(institutionalData.totalResults)} results recorded
+                  <FiTrendingUp style={{ marginRight: 4, color: BRAND_COLORS.brightGreen }} />
+                  {formatNumber(institutionalData.totalResults)} results
                 </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Simple Charts Section */}
+          <div style={styles.chartsSection}>
+            <div style={styles.chartRow}>
+              <div style={styles.chartCard}>
+                <h3 style={styles.chartTitle}>
+                  <FiTrendingUp style={styles.chartIcon} />
+                  Performance Trend
+                </h3>
+                {performanceTrend.length > 0 ? (
+                  renderSimpleBarChart(performanceTrend.slice(-6), 'month', 'score', BRAND_COLORS.armyGreen)
+                ) : (
+                  <div style={styles.noDataMessage}>
+                    <FiBarChart style={styles.noDataIcon} />
+                    <p>Performance data will appear as tests are taken</p>
+                  </div>
+                )}
+              </div>
+
+              <div style={styles.chartCard}>
+                <h3 style={styles.chartTitle}>
+                  <FiPieChart style={styles.chartIcon} />
+                  Subject Distribution
+                </h3>
+                {subjectDistribution.length > 0 ? (
+                  renderSimplePieChart(subjectDistribution)
+                ) : (
+                  <div style={styles.noDataMessage}>
+                    <FiBook style={styles.noDataIcon} />
+                    <p>Subject data loading...</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -469,12 +623,12 @@ const AnalyticsPage = () => {
           <div style={styles.performanceSection}>
             <h2 style={styles.sectionTitle}>
               <FiTarget style={styles.sectionIcon} />
-              Institutional Performance
+              Key Performance Indicators
             </h2>
             <div style={styles.performanceGrid}>
               <div style={styles.performanceCard}>
                 <div style={styles.performanceHeader}>
-                  <span style={styles.performanceLabel}>Overall Average Score</span>
+                  <span style={styles.performanceLabel}>Overall Academic Score</span>
                   <span style={{
                     ...styles.performanceValue,
                     color: getPerformanceColor(metrics.avgScore)
@@ -492,31 +646,7 @@ const AnalyticsPage = () => {
                   />
                 </div>
                 <div style={styles.performanceSubtext}>
-                  Across all assessments
-                </div>
-              </div>
-
-              <div style={styles.performanceCard}>
-                <div style={styles.performanceHeader}>
-                  <span style={styles.performanceLabel}>Completion Rate</span>
-                  <span style={{
-                    ...styles.performanceValue,
-                    color: getPerformanceColor(metrics.completionRate)
-                  }}>
-                    {metrics.completionRate.toFixed(1)}%
-                  </span>
-                </div>
-                <div style={styles.progressBar}>
-                  <div 
-                    style={{
-                      ...styles.progressFill,
-                      width: `${Math.min(metrics.completionRate, 100)}%`,
-                      backgroundColor: getPerformanceColor(metrics.completionRate)
-                    }}
-                  />
-                </div>
-                <div style={styles.performanceSubtext}>
-                  Tests completed vs assigned
+                  Average across all subjects
                 </div>
               </div>
 
@@ -543,6 +673,30 @@ const AnalyticsPage = () => {
                   Students passing assessments
                 </div>
               </div>
+
+              <div style={styles.performanceCard}>
+                <div style={styles.performanceHeader}>
+                  <span style={styles.performanceLabel}>Attendance Rate</span>
+                  <span style={{
+                    ...styles.performanceValue,
+                    color: getPerformanceColor(metrics.attendance)
+                  }}>
+                    {metrics.attendance.toFixed(1)}%
+                  </span>
+                </div>
+                <div style={styles.progressBar}>
+                  <div 
+                    style={{
+                      ...styles.progressFill,
+                      width: `${Math.min(metrics.attendance, 100)}%`,
+                      backgroundColor: getPerformanceColor(metrics.attendance)
+                    }}
+                  />
+                </div>
+                <div style={styles.performanceSubtext}>
+                  Current month average
+                </div>
+              </div>
             </div>
           </div>
         </>
@@ -553,7 +707,7 @@ const AnalyticsPage = () => {
         <div style={styles.performanceTab}>
           <h2 style={styles.sectionTitle}>
             <FiBarChart2 style={styles.sectionIcon} />
-            Detailed Performance Analytics
+            Performance Analytics
           </h2>
           
           {testAnalytics.length === 0 ? (
@@ -566,16 +720,6 @@ const AnalyticsPage = () => {
             <div style={styles.analyticsTableContainer}>
               <div style={styles.tableHeaderRow}>
                 <h3 style={styles.tableTitle}>Recent Assessments</h3>
-                <select
-                  value={filters.timeRange}
-                  onChange={(e) => handleFilterChange('timeRange', e.target.value)}
-                  style={styles.timeFilter}
-                >
-                  <option value="all">All Time</option>
-                  <option value="week">Past Week</option>
-                  <option value="month">Past Month</option>
-                  <option value="year">Past Year</option>
-                </select>
               </div>
               
               <div style={styles.tableContainer}>
@@ -586,7 +730,6 @@ const AnalyticsPage = () => {
                       <th style={styles.tableHeader}>Type</th>
                       <th style={styles.tableHeader}>Class</th>
                       <th style={styles.tableHeader}>Avg Score</th>
-                      <th style={styles.tableHeader}>Participation</th>
                       <th style={styles.tableHeader}>Status</th>
                     </tr>
                   </thead>
@@ -618,21 +761,6 @@ const AnalyticsPage = () => {
                           </div>
                         </td>
                         <td style={styles.tableCell}>
-                          <div style={styles.participationBar}>
-                            <div 
-                              style={{
-                                ...styles.participationFill,
-                                width: `${Math.min((test.completionRate || 0), 100)}%`,
-                                backgroundColor: (test.completionRate || 0) >= 70 ? '#10B981' : 
-                                                (test.completionRate || 0) >= 40 ? '#F59E0B' : '#EF4444'
-                              }}
-                            />
-                          </div>
-                          <span style={styles.participationText}>
-                            {(test.completionRate || 0).toFixed(0)}%
-                          </span>
-                        </td>
-                        <td style={styles.tableCell}>
                           <span style={{
                             ...styles.statusBadge,
                             backgroundColor: test.status === 'completed' ? '#D1FAE5' : 
@@ -658,7 +786,7 @@ const AnalyticsPage = () => {
         <div style={styles.classesTab}>
           <h2 style={styles.sectionTitle}>
             <FiBook style={styles.sectionIcon} />
-            Class Performance Overview
+            Class Performance
           </h2>
           
           {classPerformance.length === 0 ? (
@@ -673,7 +801,7 @@ const AnalyticsPage = () => {
                 <div key={idx} style={styles.classCard}>
                   <div style={styles.classHeader}>
                     <div style={styles.classIcon}>
-                      <FiBook style={{ color: '#4B5320' }} />
+                      <FiBook style={{ color: BRAND_COLORS.armyGreen }} />
                     </div>
                     <div>
                       <h3 style={styles.className}>{classItem.name || `Class ${idx + 1}`}</h3>
@@ -701,30 +829,6 @@ const AnalyticsPage = () => {
                         {(classItem.passRate || 0).toFixed(1)}%
                       </span>
                     </div>
-                    <div style={styles.classStat}>
-                      <span style={styles.statLabel}>Completion</span>
-                      <span style={{
-                        ...styles.statValue,
-                        color: getPerformanceColor(classItem.completionRate || 0)
-                      }}>
-                        {(classItem.completionRate || 0).toFixed(1)}%
-                      </span>
-                    </div>
-                  </div>
-                  <div style={styles.classProgress}>
-                    <div style={styles.progressLabel}>Performance Trend</div>
-                    <div style={styles.trendIndicator}>
-                      <FiTrendingUp style={{ 
-                        color: (classItem.trend || 0) >= 0 ? '#10B981' : '#EF4444',
-                        marginRight: 8
-                      }} />
-                      <span style={{
-                        color: (classItem.trend || 0) >= 0 ? '#10B981' : '#EF4444',
-                        fontWeight: '600'
-                      }}>
-                        {(classItem.trend || 0) >= 0 ? '+' : ''}{(classItem.trend || 0).toFixed(1)}%
-                      </span>
-                    </div>
                   </div>
                 </div>
               ))}
@@ -749,13 +853,18 @@ const AnalyticsPage = () => {
             </div>
           ) : (
             <div style={styles.activityList}>
-              {recentActivity.map((activity, idx) => (
+              {recentActivity.slice(0, 10).map((activity, idx) => (
                 <div key={idx} style={styles.activityItem}>
-                  <div style={styles.activityIcon}>
-                    {activity.type === 'test' && <FiClipboard />}
-                    {activity.type === 'result' && <FiAward />}
-                    {activity.type === 'user' && <FiUserCheck />}
-                    {activity.type === 'class' && <FiBook />}
+                  <div style={{
+                    ...styles.activityIcon,
+                    backgroundColor: activity.type === 'test' ? '#E8F5E9' :
+                                    activity.type === 'result' ? '#E3F2FD' :
+                                    activity.type === 'user' ? '#FFF3E0' : '#F3E5F5'
+                  }}>
+                    {activity.type === 'test' && <FiClipboard style={{ color: BRAND_COLORS.armyGreen }} />}
+                    {activity.type === 'result' && <FiAward style={{ color: BRAND_COLORS.orange }} />}
+                    {activity.type === 'user' && <FiUserCheck style={{ color: BRAND_COLORS.infoBlue }} />}
+                    {activity.type === 'class' && <FiBook style={{ color: '#7B1FA2' }} />}
                   </div>
                   <div style={styles.activityContent}>
                     <div style={styles.activityTitle}>{activity.title}</div>
@@ -763,17 +872,6 @@ const AnalyticsPage = () => {
                       <span style={styles.activityUser}>{activity.user}</span>
                       <span style={styles.activityTime}>{activity.time}</span>
                     </div>
-                  </div>
-                  <div style={styles.activityStatus}>
-                    <span style={{
-                      ...styles.statusBadge,
-                      backgroundColor: activity.status === 'success' ? '#D1FAE5' : 
-                                     activity.status === 'warning' ? '#FEF3C7' : '#FEE2E2',
-                      color: activity.status === 'success' ? '#065F46' : 
-                             activity.status === 'warning' ? '#92400E' : '#991B1B'
-                    }}>
-                      {activity.status}
-                    </span>
                   </div>
                 </div>
               ))}
@@ -785,23 +883,9 @@ const AnalyticsPage = () => {
       {/* Data Summary Footer */}
       <div style={styles.summaryFooter}>
         <div style={styles.summaryInfo}>
-          <FiInfo style={{ marginRight: 8, color: '#6B7280' }} />
+          <FiInfo style={{ marginRight: 8, color: BRAND_COLORS.lightText }} />
           <span style={styles.summaryText}>
-            Data updated: {new Date().toLocaleString()}
-          </span>
-        </div>
-        <div style={styles.summaryStats}>
-          <span style={styles.statItem}>
-            <FiEye style={{ marginRight: 4 }} />
-            Admin View
-          </span>
-          <span style={styles.statItem}>
-            <FiDatabase style={{ marginRight: 4 }} />
-            Real-time Data
-          </span>
-          <span style={styles.statItem}>
-            <FiCalendar style={{ marginRight: 4 }} />
-            {new Date().getFullYear()}
+            Data updated: {new Date().toLocaleString()} • Institutional View
           </span>
         </div>
       </div>
@@ -819,39 +903,83 @@ const AnalyticsPage = () => {
 const styles = {
   container: {
     fontFamily: '"Fredoka", sans-serif',
+    backgroundColor: BRAND_COLORS.lightBg,
+    minHeight: '100vh',
+    padding: '20px',
   },
   loadingContainer: {
     display: 'flex',
+    flexDirection: 'column',
     justifyContent: 'center',
     alignItems: 'center',
     minHeight: '400px',
   },
+  loadingSpinner: {
+    width: '50px',
+    height: '50px',
+    border: `5px solid ${BRAND_COLORS.lightBg}`,
+    borderTop: `5px solid ${BRAND_COLORS.armyGreen}`,
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite',
+    marginBottom: '20px',
+  },
+  loadingText: {
+    color: BRAND_COLORS.darkText,
+    fontSize: '16px',
+  },
   errorContainer: {
     textAlign: 'center',
     padding: '40px',
+    backgroundColor: 'white',
+    borderRadius: '12px',
+    boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
+    maxWidth: '500px',
+    margin: '100px auto',
+  },
+  errorIcon: {
+    fontSize: '48px',
+    color: BRAND_COLORS.dangerRed,
+    marginBottom: '16px',
+  },
+  errorTitle: {
+    fontSize: '20px',
+    fontWeight: '600',
+    color: BRAND_COLORS.darkText,
+    marginBottom: '8px',
+  },
+  errorText: {
+    fontSize: '14px',
+    color: BRAND_COLORS.lightText,
+    marginBottom: '24px',
   },
   retryButton: {
-    marginTop: '20px',
-    padding: '10px 20px',
-    backgroundColor: '#1976D2',
+    padding: '12px 24px',
+    backgroundColor: BRAND_COLORS.armyGreen,
     color: 'white',
     border: 'none',
-    borderRadius: '4px',
+    borderRadius: '6px',
     cursor: 'pointer',
     fontSize: '14px',
+    fontWeight: '600',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'all 0.3s ease',
+    width: '150px',
+    margin: '0 auto',
   },
   pageHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: '16px',
+    marginBottom: '20px',
     flexWrap: 'wrap',
     gap: '16px',
   },
   pageTitle: {
-    fontSize: '28px',
-    fontWeight: '600',
-    color: '#2c3e50',
+    fontSize: '32px',
+    fontWeight: '700',
+    color: BRAND_COLORS.armyGreen,
     margin: 0,
     display: 'flex',
     alignItems: 'center',
@@ -859,20 +987,20 @@ const styles = {
   },
   superAdminBadge: {
     fontSize: '12px',
-    backgroundColor: '#D4A017',
-    color: '#000000',
+    backgroundColor: BRAND_COLORS.orange,
+    color: 'white',
     padding: '4px 8px',
-    borderRadius: '4px',
+    borderRadius: '20px',
     fontWeight: '600',
     marginLeft: '8px',
   },
   titleIcon: {
-    fontSize: '28px',
-    color: '#1976D2',
+    fontSize: '32px',
+    color: BRAND_COLORS.armyGreen,
   },
   pageSubtitle: {
     fontSize: '14px',
-    color: '#64748B',
+    color: BRAND_COLORS.lightText,
     marginTop: '8px',
     display: 'flex',
     alignItems: 'center',
@@ -880,107 +1008,108 @@ const styles = {
   },
   timestamp: {
     fontSize: '12px',
-    color: '#9CA3AF',
+    color: BRAND_COLORS.lightText,
+    opacity: 0.8,
   },
   headerActions: {
     display: 'flex',
     gap: '12px',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
+  filterGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    backgroundColor: 'white',
+    padding: '8px 12px',
+    borderRadius: '6px',
+    border: `1px solid ${BRAND_COLORS.armyGreen}20`,
+  },
+  filterSelect: {
+    padding: '8px 12px',
+    border: 'none',
+    backgroundColor: 'transparent',
+    fontSize: '14px',
+    color: BRAND_COLORS.darkText,
+    minWidth: '120px',
+    outline: 'none',
+  },
+  filterIcon: {
+    color: BRAND_COLORS.armyGreen,
   },
   refreshButton: {
-    padding: '10px 20px',
-    backgroundColor: '#1976D2',
+    padding: '12px 24px',
+    backgroundColor: BRAND_COLORS.armyGreen,
     color: 'white',
     border: 'none',
-    borderRadius: '6px',
+    borderRadius: '8px',
     cursor: 'pointer',
     fontSize: '14px',
-    fontWeight: '500',
+    fontWeight: '600',
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    transition: 'background-color 0.2s',
-  },
-  exportButton: {
-    padding: '10px 20px',
-    backgroundColor: '#10B981',
-    color: 'white',
-    border: 'none',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '500',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    transition: 'background-color 0.2s',
+    transition: 'all 0.3s ease',
+    boxShadow: `0 4px 6px ${BRAND_COLORS.armyGreen}30`,
   },
   buttonIcon: {
     fontSize: '16px',
   },
-  adminBadge: {
-    display: 'flex',
-    alignItems: 'center',
-    backgroundColor: '#F0F9FF',
-    padding: '8px 16px',
-    borderRadius: '6px',
-    marginBottom: '24px',
-    border: '1px solid #E0F2FE',
-    fontSize: '14px',
-    color: '#0369A1',
-    fontWeight: '500',
-  },
   tabsContainer: {
     display: 'flex',
     gap: '8px',
-    marginBottom: '24px',
-    borderBottom: '1px solid #E5E7EB',
+    marginBottom: '30px',
+    borderBottom: `2px solid ${BRAND_COLORS.armyGreen}20`,
     paddingBottom: '4px',
     flexWrap: 'wrap',
   },
   tabButton: {
-    padding: '12px 24px',
+    padding: '14px 28px',
     backgroundColor: 'transparent',
     border: 'none',
-    borderRadius: '6px 6px 0 0',
+    borderRadius: '8px 8px 0 0',
     fontSize: '14px',
-    fontWeight: '500',
-    color: '#6B7280',
+    fontWeight: '600',
+    color: BRAND_COLORS.lightText,
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    transition: 'all 0.2s',
+    transition: 'all 0.3s ease',
   },
   activeTab: {
-    backgroundColor: '#1976D2',
+    backgroundColor: BRAND_COLORS.armyGreen,
     color: 'white',
+    boxShadow: `0 4px 12px ${BRAND_COLORS.armyGreen}40`,
   },
   tabIcon: {
-    fontSize: '16px',
+    fontSize: '18px',
   },
   metricsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
-    gap: '20px',
-    marginBottom: '32px',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+    gap: '24px',
+    marginBottom: '40px',
   },
   metricCard: {
     backgroundColor: 'white',
-    borderRadius: '8px',
-    padding: '20px',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-    border: '1px solid #E5E7EB',
+    borderRadius: '12px',
+    padding: '24px',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+    border: `1px solid ${BRAND_COLORS.armyGreen}20`,
+    transition: 'transform 0.3s ease, box-shadow 0.3s ease',
   },
   cardHeader: {
     display: 'flex',
     alignItems: 'center',
-    gap: '16px',
-    marginBottom: '12px',
+    gap: '20px',
+    marginBottom: '16px',
   },
   cardIcon: {
-    width: '56px',
-    height: '56px',
-    borderRadius: '8px',
+    width: '64px',
+    height: '64px',
+    borderRadius: '12px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -990,359 +1119,428 @@ const styles = {
   },
   cardTitle: {
     fontSize: '14px',
-    color: '#6B7280',
+    color: BRAND_COLORS.lightText,
     margin: 0,
     marginBottom: '4px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
   },
   cardValue: {
-    fontSize: '28px',
-    fontWeight: '600',
-    color: '#1F2937',
+    fontSize: '32px',
+    fontWeight: '700',
+    color: BRAND_COLORS.armyGreen,
+    margin: '4px 0',
   },
   cardSubtext: {
-    fontSize: '12px',
-    color: '#9CA3AF',
+    fontSize: '13px',
+    color: BRAND_COLORS.lightText,
     marginTop: '4px',
-  },
-  cardFooter: {
-    marginTop: '12px',
-    paddingTop: '12px',
-    borderTop: '1px solid #E5E7EB',
-  },
-  cardTrend: {
-    fontSize: '12px',
-    color: '#6B7280',
     display: 'flex',
     alignItems: 'center',
   },
+  cardFooter: {
+    marginTop: '16px',
+    paddingTop: '16px',
+    borderTop: `1px solid ${BRAND_COLORS.armyGreen}20`,
+  },
+  cardTrend: {
+    fontSize: '13px',
+    color: BRAND_COLORS.lightText,
+    display: 'flex',
+    alignItems: 'center',
+    fontWeight: '500',
+  },
+  chartsSection: {
+    marginBottom: '40px',
+  },
+  chartRow: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(500px, 1fr))',
+    gap: '24px',
+    marginBottom: '24px',
+  },
+  chartCard: {
+    backgroundColor: 'white',
+    borderRadius: '12px',
+    padding: '24px',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+    border: `1px solid ${BRAND_COLORS.armyGreen}20`,
+  },
+  chartTitle: {
+    fontSize: '18px',
+    fontWeight: '600',
+    color: BRAND_COLORS.armyGreen,
+    margin: 0,
+    marginBottom: '20px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+  },
+  chartIcon: {
+    fontSize: '20px',
+    color: BRAND_COLORS.armyGreen,
+  },
+  simpleChartContainer: {
+    padding: '10px 0',
+  },
+  barChartItem: {
+    display: 'flex',
+    alignItems: 'center',
+    marginBottom: '12px',
+    gap: '10px',
+  },
+  barLabel: {
+    width: '80px',
+    fontSize: '12px',
+    color: BRAND_COLORS.lightText,
+  },
+  barContainer: {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+  },
+  bar: {
+    height: '20px',
+    borderRadius: '4px',
+    transition: 'width 0.5s ease',
+  },
+  barValue: {
+    width: '40px',
+    fontSize: '12px',
+    fontWeight: '600',
+    color: BRAND_COLORS.armyGreen,
+    textAlign: 'right',
+  },
+  pieChartContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  pieItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '8px 0',
+    borderBottom: `1px solid ${BRAND_COLORS.armyGreen}10`,
+  },
+  pieColor: {
+    width: '20px',
+    height: '20px',
+    borderRadius: '4px',
+  },
+  pieLabel: {
+    flex: 1,
+    fontSize: '14px',
+    color: BRAND_COLORS.darkText,
+  },
+  pieValue: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: BRAND_COLORS.armyGreen,
+  },
+  noDataMessage: {
+    height: '200px',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    textAlign: 'center',
+    color: BRAND_COLORS.lightText,
+  },
+  noDataIcon: {
+    fontSize: '48px',
+    color: `${BRAND_COLORS.armyGreen}30`,
+    marginBottom: '16px',
+  },
   performanceSection: {
     backgroundColor: 'white',
-    borderRadius: '8px',
-    padding: '24px',
-    marginBottom: '24px',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+    borderRadius: '12px',
+    padding: '30px',
+    marginBottom: '30px',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+    border: `1px solid ${BRAND_COLORS.armyGreen}20`,
   },
   sectionTitle: {
-    fontSize: '20px',
-    fontWeight: '600',
-    color: '#2c3e50',
+    fontSize: '24px',
+    fontWeight: '700',
+    color: BRAND_COLORS.armyGreen,
     margin: 0,
-    marginBottom: '24px',
+    marginBottom: '30px',
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
   },
   sectionIcon: {
-    fontSize: '20px',
-    color: '#1976D2',
+    fontSize: '24px',
+    color: BRAND_COLORS.armyGreen,
   },
   performanceGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-    gap: '20px',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+    gap: '24px',
   },
   performanceCard: {
-    padding: '20px',
-    border: '1px solid #E5E7EB',
-    borderRadius: '8px',
-    backgroundColor: '#F9FAFB',
+    padding: '24px',
+    border: `1px solid ${BRAND_COLORS.armyGreen}20`,
+    borderRadius: '12px',
+    backgroundColor: BRAND_COLORS.lightBg,
   },
   performanceHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '12px',
+    marginBottom: '16px',
   },
   performanceLabel: {
     fontSize: '14px',
-    color: '#6B7280',
-    fontWeight: '500',
-  },
-  performanceValue: {
-    fontSize: '24px',
+    color: BRAND_COLORS.lightText,
     fontWeight: '600',
   },
+  performanceValue: {
+    fontSize: '28px',
+    fontWeight: '700',
+  },
   progressBar: {
-    height: '8px',
-    backgroundColor: '#E5E7EB',
-    borderRadius: '4px',
+    height: '10px',
+    backgroundColor: `${BRAND_COLORS.armyGreen}20`,
+    borderRadius: '5px',
     overflow: 'hidden',
-    marginBottom: '8px',
+    marginBottom: '12px',
   },
   progressFill: {
     height: '100%',
-    borderRadius: '4px',
+    borderRadius: '5px',
+    transition: 'width 0.5s ease',
   },
   performanceSubtext: {
-    fontSize: '12px',
-    color: '#9CA3AF',
+    fontSize: '13px',
+    color: BRAND_COLORS.lightText,
   },
   emptyState: {
     textAlign: 'center',
-    padding: '48px 24px',
+    padding: '60px 30px',
     backgroundColor: 'white',
-    borderRadius: '8px',
-    border: '1px solid #E5E7EB',
+    borderRadius: '12px',
+    border: `2px dashed ${BRAND_COLORS.armyGreen}30`,
+    margin: '40px 0',
   },
   emptyIcon: {
-    fontSize: '48px',
-    color: '#9CA3AF',
-    marginBottom: '16px',
+    fontSize: '64px',
+    color: `${BRAND_COLORS.armyGreen}50`,
+    marginBottom: '20px',
   },
   emptyTitle: {
-    fontSize: '18px',
+    fontSize: '22px',
     fontWeight: '600',
-    color: '#6B7280',
+    color: BRAND_COLORS.darkText,
     margin: 0,
-    marginBottom: '8px',
+    marginBottom: '12px',
   },
   emptyText: {
-    fontSize: '14px',
-    color: '#9CA3AF',
+    fontSize: '15px',
+    color: BRAND_COLORS.lightText,
     margin: 0,
+    maxWidth: '400px',
+    margin: '0 auto',
   },
   analyticsTableContainer: {
     backgroundColor: 'white',
-    borderRadius: '8px',
-    padding: '24px',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+    borderRadius: '12px',
+    padding: '30px',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+    marginBottom: '30px',
   },
   tableHeaderRow: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '20px',
+    marginBottom: '24px',
   },
   tableTitle: {
-    fontSize: '18px',
+    fontSize: '20px',
     fontWeight: '600',
-    color: '#2c3e50',
+    color: BRAND_COLORS.armyGreen,
     margin: 0,
-  },
-  timeFilter: {
-    padding: '8px 12px',
-    border: '1px solid #D1D5DB',
-    borderRadius: '6px',
-    fontSize: '14px',
-    backgroundColor: 'white',
-    color: '#1F2937',
   },
   tableContainer: {
     overflowX: 'auto',
   },
   table: {
     width: '100%',
-    borderCollapse: 'collapse',
+    borderCollapse: 'separate',
+    borderSpacing: '0',
     fontSize: '14px',
   },
   tableHeader: {
-    padding: '16px 12px',
+    padding: '18px 16px',
     textAlign: 'left',
-    backgroundColor: '#F9FAFB',
-    color: '#6B7280',
+    backgroundColor: BRAND_COLORS.lightBg,
+    color: BRAND_COLORS.armyGreen,
     fontWeight: '600',
-    borderBottom: '1px solid #E5E7EB',
+    borderBottom: `2px solid ${BRAND_COLORS.armyGreen}`,
     whiteSpace: 'nowrap',
   },
   tableRow: {
-    borderBottom: '1px solid #E5E7EB',
+    borderBottom: `1px solid ${BRAND_COLORS.armyGreen}20`,
     transition: 'background-color 0.2s',
   },
   tableCell: {
-    padding: '16px 12px',
+    padding: '18px 16px',
     verticalAlign: 'middle',
   },
   testName: {
-    fontWeight: '500',
-    color: '#1F2937',
+    fontWeight: '600',
+    color: BRAND_COLORS.darkText,
     marginBottom: '4px',
   },
   testSubject: {
-    fontSize: '12px',
-    color: '#6B7280',
+    fontSize: '13px',
+    color: BRAND_COLORS.lightText,
   },
   typeBadge: {
-    padding: '4px 8px',
-    borderRadius: '12px',
+    padding: '6px 12px',
+    borderRadius: '20px',
     fontSize: '12px',
-    fontWeight: '500',
+    fontWeight: '600',
     display: 'inline-block',
   },
   scoreDisplay: {
-    fontSize: '16px',
-    fontWeight: '600',
+    fontSize: '18px',
+    fontWeight: '700',
     textAlign: 'center',
   },
-  participationBar: {
-    width: '80px',
-    height: '6px',
-    backgroundColor: '#E5E7EB',
-    borderRadius: '3px',
-    overflow: 'hidden',
-    display: 'inline-block',
-    marginRight: '8px',
-  },
-  participationFill: {
-    height: '100%',
-    borderRadius: '3px',
-  },
-  participationText: {
-    fontSize: '12px',
-    color: '#6B7280',
-  },
   statusBadge: {
-    padding: '4px 8px',
-    borderRadius: '12px',
+    padding: '6px 12px',
+    borderRadius: '20px',
     fontSize: '12px',
-    fontWeight: '500',
+    fontWeight: '600',
     display: 'inline-block',
   },
   classesGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-    gap: '20px',
+    gap: '24px',
   },
   classCard: {
     backgroundColor: 'white',
-    borderRadius: '8px',
-    padding: '20px',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-    border: '1px solid #E5E7EB',
+    borderRadius: '12px',
+    padding: '24px',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+    border: `1px solid ${BRAND_COLORS.armyGreen}20`,
   },
   classHeader: {
     display: 'flex',
     alignItems: 'center',
-    gap: '16px',
-    marginBottom: '16px',
+    gap: '20px',
+    marginBottom: '20px',
   },
   classIcon: {
-    width: '48px',
-    height: '48px',
-    borderRadius: '8px',
-    backgroundColor: '#F0F9FF',
+    width: '56px',
+    height: '56px',
+    borderRadius: '12px',
+    backgroundColor: `${BRAND_COLORS.armyGreen}15`,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: '24px',
+    fontSize: '28px',
   },
   className: {
-    fontSize: '18px',
+    fontSize: '20px',
     fontWeight: '600',
-    color: '#2c3e50',
+    color: BRAND_COLORS.armyGreen,
     margin: 0,
     marginBottom: '4px',
   },
   classInfo: {
-    fontSize: '12px',
-    color: '#6B7280',
+    fontSize: '14px',
+    color: BRAND_COLORS.lightText,
     margin: 0,
   },
   classStats: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(3, 1fr)',
-    gap: '16px',
-    marginBottom: '16px',
+    gridTemplateColumns: 'repeat(2, 1fr)',
+    gap: '20px',
+    marginBottom: '20px',
   },
   classStat: {
     textAlign: 'center',
   },
   statLabel: {
     display: 'block',
-    fontSize: '12px',
-    color: '#6B7280',
-    marginBottom: '4px',
+    fontSize: '13px',
+    color: BRAND_COLORS.lightText,
+    marginBottom: '8px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
   },
   statValue: {
     display: 'block',
-    fontSize: '18px',
-    fontWeight: '600',
-  },
-  classProgress: {
-    paddingTop: '16px',
-    borderTop: '1px solid #E5E7EB',
-  },
-  progressLabel: {
-    fontSize: '12px',
-    color: '#6B7280',
-    marginBottom: '8px',
-  },
-  trendIndicator: {
-    display: 'flex',
-    alignItems: 'center',
+    fontSize: '20px',
+    fontWeight: '700',
   },
   activityList: {
     backgroundColor: 'white',
-    borderRadius: '8px',
+    borderRadius: '12px',
     padding: '20px',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
   },
   activityItem: {
     display: 'flex',
     alignItems: 'center',
-    padding: '16px 0',
-    borderBottom: '1px solid #E5E7EB',
+    padding: '20px',
+    borderBottom: `1px solid ${BRAND_COLORS.armyGreen}20`,
+    transition: 'background-color 0.3s ease',
   },
   activityIcon: {
-    width: '40px',
-    height: '40px',
-    borderRadius: '8px',
-    backgroundColor: '#F3F4F6',
+    width: '48px',
+    height: '48px',
+    borderRadius: '12px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: '16px',
-    fontSize: '18px',
-    color: '#4B5320',
+    marginRight: '20px',
+    fontSize: '24px',
   },
   activityContent: {
     flex: 1,
   },
   activityTitle: {
-    fontSize: '14px',
-    fontWeight: '500',
-    color: '#1F2937',
-    marginBottom: '4px',
+    fontSize: '16px',
+    fontWeight: '600',
+    color: BRAND_COLORS.darkText,
+    marginBottom: '8px',
   },
   activityDetails: {
     display: 'flex',
-    gap: '16px',
-    fontSize: '12px',
-    color: '#6B7280',
+    gap: '20px',
+    fontSize: '14px',
+    color: BRAND_COLORS.lightText,
   },
   activityUser: {
     fontWeight: '500',
+    color: BRAND_COLORS.armyGreen,
   },
   activityTime: {
-    color: '#9CA3AF',
-  },
-  activityStatus: {
-    marginLeft: '16px',
+    color: BRAND_COLORS.lightText,
   },
   summaryFooter: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: '32px',
-    paddingTop: '20px',
-    borderTop: '1px solid #E5E7EB',
+    marginTop: '40px',
+    paddingTop: '24px',
+    borderTop: `2px solid ${BRAND_COLORS.armyGreen}20`,
     fontSize: '14px',
-    color: '#6B7280',
+    color: BRAND_COLORS.lightText,
   },
   summaryInfo: {
     display: 'flex',
     alignItems: 'center',
   },
   summaryText: {
-    fontSize: '12px',
-  },
-  summaryStats: {
-    display: 'flex',
-    gap: '16px',
-  },
-  statItem: {
-    display: 'flex',
-    alignItems: 'center',
-    fontSize: '12px',
+    fontSize: '14px',
+    color: BRAND_COLORS.lightText,
   },
 };
 

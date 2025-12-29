@@ -1,8 +1,9 @@
-// models/User.js - COMPLETELY UPDATED WITH FIXES
+// models/User.js - COMPLETELY UPDATED TO MATCH FRONTEND
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const userSchema = new mongoose.Schema({
+  // Authentication & Basic Info (Updated to match frontend)
   username: {
     type: String,
     required: [true, 'Username is required'],
@@ -13,40 +14,47 @@ const userSchema = new mongoose.Schema({
     maxlength: [50, 'Username cannot exceed 50 characters'],
     match: [/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores']
   },
+  
   password: {
     type: String,
     required: [true, 'Password is required'],
     minlength: [6, 'Password must be at least 6 characters'],
     select: false
   },
+  
   email: {
     type: String,
-    required: false,
+    required: true,
     unique: true,
     sparse: true,
     trim: true,
     lowercase: true,
     match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
   },
-  name: {
+  
+  // Personal Information (Updated to match frontend)
+  firstName: {
     type: String,
-    required: [true, 'Name is required'],
+    required: [true, 'First name is required'],
     trim: true,
-    maxlength: [100, 'Name cannot exceed 100 characters']
+    maxlength: [100, 'First name cannot exceed 100 characters']
   },
-  surname: {
+  
+  middleName: {
     type: String,
-    required: [true, 'Surname is required'],
     trim: true,
-    maxlength: [100, 'Surname cannot exceed 100 characters']
+    maxlength: [100, 'Middle name cannot exceed 100 characters'],
+    default: ''
   },
-  studentId: {
+  
+  lastName: {
     type: String,
-    unique: true,
-    sparse: true,
+    required: [true, 'Last name is required'],
     trim: true,
-    uppercase: true
+    maxlength: [100, 'Last name cannot exceed 100 characters']
   },
+  
+  // Role Information
   role: {
     type: String,
     enum: {
@@ -56,11 +64,22 @@ const userSchema = new mongoose.Schema({
     required: [true, 'Role is required'],
     default: 'student'
   },
+  
+  // Student Specific Fields
+  studentId: {
+    type: String,
+    unique: true,
+    sparse: true,
+    trim: true,
+    uppercase: true
+  },
+  
   class: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Class',
     validate: {
       validator: function(classValue) {
+        // Only require class for students
         if (this.role === 'student') {
           return classValue != null;
         }
@@ -69,10 +88,27 @@ const userSchema = new mongoose.Schema({
       message: 'Students must be assigned to a class'
     }
   },
+  
   className: {
     type: String,
     trim: true
   },
+  
+  // Parent Information (for students) - NEW
+  parentEmail: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    sparse: true,
+    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
+  },
+  
+  parentPhoneNumber: {
+    type: String,
+    trim: true,
+    match: [/^\+?[\d\s\-()]+$/, 'Please enter a valid phone number']
+  },
+  
   // FIXED: Added subjects field for backward compatibility and teacher assignments
   subjects: [{
     subject: {
@@ -99,7 +135,7 @@ const userSchema = new mongoose.Schema({
     }
   }],
   
-  // Teacher assignments (new structure)
+  // Teacher assignments (updated structure - keeping original field names)
   teacherAssignments: [{
     class: {
       type: mongoose.Schema.Types.ObjectId,
@@ -119,7 +155,7 @@ const userSchema = new mongoose.Schema({
       subjectName: {
         type: String,
         trim: true,
-        required: true
+        required: false  // FIXED: Changed from true to false
       },
       assignedAt: {
         type: Date,
@@ -132,7 +168,7 @@ const userSchema = new mongoose.Schema({
     }
   }],
   
-  // Student enrolled subjects
+  // Student enrolled subjects (updated structure)
   enrolledSubjects: [{
     subject: {
       type: mongoose.Schema.Types.ObjectId,
@@ -142,7 +178,7 @@ const userSchema = new mongoose.Schema({
     subjectName: {
       type: String,
       trim: true,
-      required: true
+      required: false  // FIXED: Changed from true to false
     },
     class: {
       type: mongoose.Schema.Types.ObjectId,
@@ -163,6 +199,7 @@ const userSchema = new mongoose.Schema({
     }
   }],
   
+  // Permissions
   permissions: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Permission'
@@ -180,6 +217,7 @@ const userSchema = new mongoose.Schema({
     ]
   }],
   
+  // Status
   blocked: {
     type: Boolean,
     default: false
@@ -190,7 +228,8 @@ const userSchema = new mongoose.Schema({
     default: true
   },
   
-  picture: {
+  // Profile Information (Updated) - FIXED: Using only one profile image field
+  profileImage: {
     type: String,
     default: ''
   },
@@ -208,7 +247,10 @@ const userSchema = new mongoose.Schema({
   address: {
     type: String,
     trim: true,
-    maxlength: [500, 'Address cannot exceed 500 characters']
+    maxlength: [500, 'Address cannot exceed 500 characters'],
+    required: function() {
+      return this.role === 'student';
+    }
   },
   
   phoneNumber: {
@@ -231,6 +273,7 @@ const userSchema = new mongoose.Schema({
     max: [120, 'Age cannot exceed 120']
   },
   
+  // Security
   lastLogin: {
     type: Date
   },
@@ -244,6 +287,7 @@ const userSchema = new mongoose.Schema({
     type: Date
   },
   
+  // Audit
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
@@ -267,10 +311,31 @@ userSchema.index({ 'teacherAssignments.class': 1 });
 userSchema.index({ 'teacherAssignments.subjects.subject': 1 });
 userSchema.index({ 'enrolledSubjects.class': 1 });
 userSchema.index({ 'enrolledSubjects.subject': 1 });
+userSchema.index({ firstName: 1, lastName: 1 }); // Added for search
+userSchema.index({ email: 1 }, { unique: true });
+userSchema.index({ username: 1 }, { unique: true });
 
-// Virtual for full name
+// Virtual for full name (Updated for frontend)
 userSchema.virtual('fullName').get(function() {
-  return `${this.name} ${this.surname}`.trim();
+  return `${this.firstName} ${this.middleName ? this.middleName + ' ' : ''}${this.lastName}`.trim();
+});
+
+// Virtual for name (backward compatibility)
+userSchema.virtual('name').get(function() {
+  return this.firstName;
+});
+
+// Virtual for surname (backward compatibility)
+userSchema.virtual('surname').get(function() {
+  return this.lastName;
+});
+
+// Virtual for profileImageUrl (with fallback logic) - UPDATED: Simplified to use only profileImage
+userSchema.virtual('profileImageUrl').get(function() {
+  if (this.profileImage) {
+    return `/uploads/profiles/${this.profileImage}`;
+  }
+  return null;
 });
 
 // Virtual for isLocked
@@ -338,6 +403,20 @@ userSchema.virtual('assignedSubjects').get(function() {
 userSchema.pre('save', async function(next) {
   console.log(`🔄 User pre-save: ${this.username}, role: ${this.role}`);
   
+  // Calculate age from date of birth
+  if (this.isModified('dateOfBirth') && this.dateOfBirth) {
+    const today = new Date();
+    const birthDate = new Date(this.dateOfBirth);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    
+    this.age = age;
+  }
+  
   // Ensure subjects array exists for teachers (backward compatibility)
   if (this.role === 'teacher') {
     if (!this.subjects || !Array.isArray(this.subjects)) {
@@ -367,7 +446,7 @@ userSchema.pre('save', async function(next) {
         const Class = mongoose.model('Class');
         const classDoc = await Class.findById(this.class);
         if (classDoc) {
-          this.className = classDoc.name;
+          this.className = classDoc.name || classDoc.fullName || classDoc.label;
         }
       } catch (error) {
         console.log('Could not populate className from Class document:', error.message);
@@ -385,7 +464,7 @@ userSchema.pre('save', async function(next) {
           const Class = mongoose.model('Class');
           const classDoc = await Class.findById(assignment.class);
           if (classDoc) {
-            assignment.className = classDoc.name;
+            assignment.className = classDoc.name || classDoc.fullName || classDoc.label;
           }
         } catch (error) {
           console.log('Could not populate class name for teacher assignment:', error.message);
@@ -399,7 +478,7 @@ userSchema.pre('save', async function(next) {
             const Subject = mongoose.model('Subject');
             const subjectDoc = await Subject.findById(subject.subject);
             if (subjectDoc) {
-              subject.subjectName = subjectDoc.name;
+              subject.subjectName = subjectDoc.name || subjectDoc.displayName || subjectDoc.subjectName;
             }
           } catch (error) {
             console.log('Could not populate subject name for teacher assignment:', error.message);
@@ -417,7 +496,7 @@ userSchema.pre('save', async function(next) {
           const Subject = mongoose.model('Subject');
           const subjectDoc = await Subject.findById(enrolledSubject.subject);
           if (subjectDoc) {
-            enrolledSubject.subjectName = subjectDoc.name;
+            enrolledSubject.subjectName = subjectDoc.name || subjectDoc.displayName || subjectDoc.subjectName;
           }
         } catch (error) {
           console.log('Could not populate subject name for enrolled subject:', error.message);
@@ -495,7 +574,7 @@ userSchema.methods.addTeacherAssignment = async function(classId, subjectIds) {
   const Subject = mongoose.model('Subject');
   const subjects = await Subject.find({ _id: { $in: subjectIds } });
   const subjectMap = subjects.reduce((map, subject) => {
-    map[subject._id.toString()] = subject.name;
+    map[subject._id.toString()] = subject.name || subject.displayName || subject.subjectName;
     return map;
   }, {});
 
@@ -524,7 +603,7 @@ userSchema.methods.addTeacherAssignment = async function(classId, subjectIds) {
         // Also add to old subjects structure for backward compatibility
         newSubjectsForOldStructure.push({
           subject: subjectName,
-          class: classDoc.name,
+          class: classDoc.name || classDoc.fullName || classDoc.label,
           classId: classId,
           assignedDate: new Date(),
           isActive: true
@@ -535,7 +614,7 @@ userSchema.methods.addTeacherAssignment = async function(classId, subjectIds) {
     // Create new assignment
     assignment = {
       class: classId,
-      className: classDoc.name,
+      className: classDoc.name || classDoc.fullName || classDoc.label,
       subjects: subjectIds.map(subjectId => ({
         subject: subjectId,
         subjectName: subjectMap[subjectId] || 'Unknown Subject',
@@ -548,7 +627,7 @@ userSchema.methods.addTeacherAssignment = async function(classId, subjectIds) {
     // Also add to old subjects structure for backward compatibility
     newSubjectsForOldStructure.push(...subjectIds.map(subjectId => ({
       subject: subjectMap[subjectId] || 'Unknown Subject',
-      class: classDoc.name,
+      class: classDoc.name || classDoc.fullName || classDoc.label,
       classId: classId,
       assignedDate: new Date(),
       isActive: true
@@ -695,7 +774,7 @@ userSchema.methods.enrollInSubjects = async function(classId, subjectIds) {
   }
 
   // Check if student is in the right class
-  if (this.class.toString() !== classId.toString()) {
+  if (this.class && this.class.toString() !== classId.toString()) {
     throw new Error('Student is not in this class');
   }
 
@@ -722,7 +801,7 @@ userSchema.methods.enrollInSubjects = async function(classId, subjectIds) {
   const subjects = await Subject.find({ _id: { $in: allSubjectIds } });
   const subjectMap = subjects.reduce((map, subject) => {
     map[subject._id.toString()] = {
-      name: subject.name,
+      name: subject.name || subject.displayName || subject.subjectName,
       isCore: coreSubjects.includes(subject._id.toString())
     };
     return map;
@@ -739,7 +818,7 @@ userSchema.methods.enrollInSubjects = async function(classId, subjectIds) {
       subject: subjectId,
       subjectName: subjectMap[subjectId]?.name || 'Unknown Subject',
       class: classId,
-      className: classDoc.name,
+      className: classDoc.name || classDoc.fullName || classDoc.label,
       isCore: subjectMap[subjectId]?.isCore || false,
       enrolledAt: new Date()
     });
@@ -817,14 +896,92 @@ userSchema.statics.migrateTeacherAssignments = async function() {
   return migratedCount;
 };
 
-// Ensure virtual fields are serialized
+// NEW: Static method for pagination and search (for frontend)
+userSchema.statics.findWithFilters = async function(filters = {}) {
+  const {
+    page = 1,
+    limit = 10,
+    role,
+    search,
+    active
+  } = filters;
+  
+  const query = {};
+  
+  // Filter by role
+  if (role) query.role = role;
+  
+  // Filter by active status
+  if (active !== undefined) query.active = active === 'true';
+  
+  // Search functionality
+  if (search) {
+    query.$or = [
+      { username: { $regex: search, $options: 'i' } },
+      { firstName: { $regex: search, $options: 'i' } },
+      { lastName: { $regex: search, $options: 'i' } },
+      { email: { $regex: search, $options: 'i' } },
+      { studentId: { $regex: search, $options: 'i' } }
+    ];
+  }
+  
+  const skip = (page - 1) * limit;
+  
+  const [users, total] = await Promise.all([
+    this.find(query)
+      .select('-password -loginAttempts -lockUntil -__v')
+      .populate('class', 'name fullName label level stream')
+      .populate('teacherAssignments.subjects.subject', 'name displayName subjectName code')
+      .populate('enrolledSubjects.subject', 'name displayName subjectName code')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
+    this.countDocuments(query)
+  ]);
+  
+  // Add fullName to each user for frontend
+  const usersWithFullName = users.map(user => {
+    const userObj = user.toObject();
+    userObj.fullName = `${userObj.firstName} ${userObj.middleName ? userObj.middleName + ' ' : ''}${userObj.lastName}`.trim();
+    return userObj;
+  });
+  
+  return {
+    users: usersWithFullName,
+    pagination: {
+      currentPage: page,
+      totalPages: Math.ceil(total / limit),
+      totalUsers: total,
+      limit
+    }
+  };
+};
+
+// Ensure virtual fields are serialized - UPDATED: Simplified profile image logic
 userSchema.set('toJSON', {
   virtuals: true,
+  getters: true, // IMPORTANT: This enables getters
   transform: function(doc, ret) {
+    // Remove sensitive fields
     delete ret.password;
     delete ret.loginAttempts;
     delete ret.lockUntil;
     delete ret.__v;
+    
+    // Add full name for frontend
+    if (!ret.fullName) {
+      ret.fullName = `${ret.firstName} ${ret.middleName ? ret.middleName + ' ' : ''}${ret.lastName}`.trim();
+    }
+    
+    // Backward compatibility
+    if (!ret.name) ret.name = ret.firstName;
+    if (!ret.surname) ret.surname = ret.lastName;
+    
+    // Ensure profileImageUrl is included
+    if (ret.profileImage) {
+      ret.profileImageUrl = `/uploads/profiles/${ret.profileImage}`;
+    }
+    
     return ret;
   }
 });

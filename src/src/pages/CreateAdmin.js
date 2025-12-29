@@ -1,36 +1,46 @@
-// pages/CreateAdmin.js
-import React, { useState, useContext } from 'react';
+// pages/CreateAdmin.js - UPDATED TO MATCH USER MODEL STRUCTURE
+import React, { useState, useContext, useEffect } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
   FiUser, FiShield, FiCheck, FiX, FiAlertCircle, FiCheckCircle,
-  FiLock, FiMail, FiUserPlus
+  FiLock, FiMail, FiUserPlus, FiUpload, FiImage, FiLoader, FiXCircle
 } from 'react-icons/fi';
 
 const CreateAdmin = () => {
-  const { user } = useContext(AuthContext);
+  const { user, token } = useContext(AuthContext);
   const navigate = useNavigate();
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   
-  // Admin data
+  // Admin data - UPDATED TO MATCH USER MODEL STRUCTURE
   const [adminData, setAdminData] = useState({
     username: '',
     password: '',
     confirmPassword: '',
     email: '',
-    name: '',
-    surname: '',
+    firstName: '',
+    middleName: '',
+    lastName: '',
     adminPermissions: [
       'VIEW_ANALYTICS',
       'MANAGE_USERS'
     ],
     active: true,
-    role: 'admin'
+    role: 'admin',
+    address: '',
+    phoneNumber: '',
+    sex: '',
+    profileImage: null
   });
+  
+  // Image upload state
+  const [profileImage, setProfileImage] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
   
   // Form validation
   const [errors, setErrors] = useState({});
@@ -44,22 +54,48 @@ const CreateAdmin = () => {
     { value: 'MANAGE_ADMINS', label: 'Manage Admins' }
   ];
 
+  const sexOptions = [
+    { value: '', label: 'Select gender' },
+    { value: 'male', label: 'Male' },
+    { value: 'female', label: 'Female' },
+    { value: 'other', label: 'Other' }
+  ];
+
+  // Check if user is super admin
+  useEffect(() => {
+    if (user && user.role !== 'super_admin') {
+      navigate('/admin/users');
+    }
+  }, [user, navigate]);
+
   const validateForm = () => {
     const newErrors = {};
     
+    // Basic validation
     if (!adminData.username.trim()) newErrors.username = 'Username is required';
     if (!adminData.password.trim()) newErrors.password = 'Password is required';
     if (adminData.password.length < 6) newErrors.password = 'Password must be at least 6 characters';
     if (!adminData.confirmPassword.trim()) newErrors.confirmPassword = 'Please confirm password';
     if (adminData.password !== adminData.confirmPassword) newErrors.confirmPassword = 'Passwords do not match';
     if (!adminData.email.trim()) newErrors.email = 'Email is required';
-    if (!adminData.name.trim()) newErrors.name = 'Name is required';
-    if (!adminData.surname.trim()) newErrors.surname = 'Surname is required';
+    if (!adminData.firstName.trim()) newErrors.firstName = 'First name is required';
+    if (!adminData.lastName.trim()) newErrors.lastName = 'Last name is required';
+    
+    // Username format validation
+    const usernameRegex = /^[a-zA-Z0-9_]+$/;
+    if (!usernameRegex.test(adminData.username.replace(/\s+/g, '_'))) {
+      newErrors.username = 'Username can only contain letters, numbers, and underscores. No spaces allowed.';
+    }
     
     // Email validation
     const emailRegex = /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/;
     if (adminData.email && !emailRegex.test(adminData.email)) {
       newErrors.email = 'Please enter a valid email address';
+    }
+    
+    // Phone number validation (if provided)
+    if (adminData.phoneNumber && !/^\+?[\d\s\-()]+$/.test(adminData.phoneNumber)) {
+      newErrors.phoneNumber = 'Please enter a valid phone number';
     }
     
     setErrors(newErrors);
@@ -75,6 +111,51 @@ const CreateAdmin = () => {
     }));
   };
 
+  const handleImageUpload = async (file) => {
+    if (!file) return;
+    
+    // Validate file
+    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    const maxSize = 5 * 1024 * 1024; // 5MB
+    
+    if (!validTypes.includes(file.type)) {
+      setError('Please upload a valid image file (JPG, PNG, GIF, WebP).');
+      return;
+    }
+    
+    if (file.size > maxSize) {
+      setError('Image size must be less than 5MB.');
+      return;
+    }
+    
+    setUploadingImage(true);
+    try {
+      // Create preview
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result);
+      };
+      reader.readAsDataURL(file);
+      
+      setProfileImage(file);
+    } catch (err) {
+      setError('Failed to process image.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const removeProfileImage = () => {
+    setProfileImage(null);
+    setImagePreview(null);
+  };
+
+  const cleanUsername = (username) => {
+    if (!username) return '';
+    const cleaned = username.replace(/\s+/g, '_').toLowerCase();
+    return cleaned.replace(/[^a-zA-Z0-9_]/g, '');
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -88,41 +169,74 @@ const CreateAdmin = () => {
     setSuccess(null);
     
     try {
-      const token = localStorage.getItem('token');
+      const authToken = token || localStorage.getItem('token');
       
-      // Clean username (remove spaces, convert to lowercase)
-      const cleanedUsername = adminData.username.replace(/\s+/g, '_').toLowerCase();
+      if (!authToken) {
+        throw new Error('Authentication required. Please log in again.');
+      }
       
-      // Log the data being sent
-      console.log('Sending admin creation request:', {
-        username: cleanedUsername,
-        email: adminData.email,
-        name: adminData.name,
-        surname: adminData.surname,
-        role: 'admin',
-        adminPermissions: adminData.adminPermissions,
-        active: adminData.active
-      });
+      // Clean username
+      const cleanedUsername = cleanUsername(adminData.username);
       
-      const response = await axios.post('http://localhost:5000/api/users', {
+      // Build admin data matching User model structure
+      const adminDataToSend = {
         username: cleanedUsername,
         password: adminData.password,
-        email: adminData.email,
-        name: adminData.name,
-        surname: adminData.surname,
+        email: adminData.email.trim().toLowerCase(),
+        name: adminData.firstName.trim(), // For backward compatibility
+        surname: adminData.lastName.trim(), // For backward compatibility
+        firstName: adminData.firstName.trim(),
+        middleName: adminData.middleName?.trim() || '',
+        lastName: adminData.lastName.trim(),
         role: 'admin',
         adminPermissions: adminData.adminPermissions,
         active: adminData.active,
-        createdBy: user.id // Add createdBy field
-      }, {
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
+        address: adminData.address?.trim() || undefined,
+        phoneNumber: adminData.phoneNumber?.trim() || undefined,
+        sex: adminData.sex || undefined,
+        createdBy: user.id
+      };
+      
+      console.log('📤 Creating admin with data:', JSON.stringify(adminDataToSend, null, 2));
+      
+      // Step 1: Create the admin
+      const response = await axios.post('http://localhost:5000/api/users', 
+        adminDataToSend, 
+        {
+          headers: { 
+            Authorization: `Bearer ${authToken}`,
+            'Content-Type': 'application/json'
+          }
         }
-      });
+      );
+      
+      const adminId = response.data.data?._id || response.data.user?._id || response.data._id;
+      
+      // Step 2: Upload profile image if selected
+      if (profileImage && adminId) {
+        const formDataImage = new FormData();
+        formDataImage.append('profileImage', profileImage);
+        
+        try {
+          await axios.post(
+            `http://localhost:5000/api/users/${adminId}/upload-profile-image`,
+            formDataImage,
+            {
+              headers: { 
+                Authorization: `Bearer ${authToken}`,
+                'Content-Type': 'multipart/form-data'
+              }
+            }
+          );
+          console.log('✅ Profile image uploaded successfully');
+        } catch (imageErr) {
+          console.warn('⚠️ Could not upload profile image:', imageErr);
+          // Continue even if image upload fails
+        }
+      }
       
       if (response.data.success) {
-        setSuccess('Admin created successfully!');
+        setSuccess('Admin created successfully! Redirecting...');
         
         // Reset form
         setAdminData({
@@ -130,12 +244,19 @@ const CreateAdmin = () => {
           password: '',
           confirmPassword: '',
           email: '',
-          name: '',
-          surname: '',
+          firstName: '',
+          middleName: '',
+          lastName: '',
           adminPermissions: ['VIEW_ANALYTICS', 'MANAGE_USERS'],
           active: true,
-          role: 'admin'
+          role: 'admin',
+          address: '',
+          phoneNumber: '',
+          sex: '',
+          profileImage: null
         });
+        setProfileImage(null);
+        setImagePreview(null);
         
         // Navigate back after 2 seconds
         setTimeout(() => {
@@ -149,16 +270,19 @@ const CreateAdmin = () => {
       console.error('Error creating admin:', err);
       
       if (err.response) {
-        // Server responded with error
         if (err.response.status === 400) {
-          setError(err.response.data.message || 'Validation error. Please check the form.');
+          const errorMsg = err.response.data.message || 'Validation error. Please check the form.';
+          setError(errorMsg);
+          
+          // Handle validation errors
           if (err.response.data.errors) {
-            // Handle validation errors
             const validationErrors = {};
             err.response.data.errors.forEach(errorMsg => {
               if (errorMsg.includes('Username')) validationErrors.username = errorMsg;
               if (errorMsg.includes('Email')) validationErrors.email = errorMsg;
               if (errorMsg.includes('Password')) validationErrors.password = errorMsg;
+              if (errorMsg.includes('First name')) validationErrors.firstName = errorMsg;
+              if (errorMsg.includes('Last name')) validationErrors.lastName = errorMsg;
             });
             setErrors(validationErrors);
           }
@@ -167,18 +291,34 @@ const CreateAdmin = () => {
           setTimeout(() => navigate('/login'), 2000);
         } else if (err.response.status === 403) {
           setError('Permission denied. You do not have access to create admins.');
+        } else if (err.response.status === 409) {
+          setError('User with this username or email already exists.');
         } else {
           setError(err.response.data?.message || `Server error: ${err.response.status}`);
         }
       } else if (err.request) {
-        // Request was made but no response
         setError('Network error. Please check your connection and try again.');
       } else {
-        // Other errors
         setError('An unexpected error occurred. Please try again.');
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setAdminData(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+    
+    // Clear error for this field when user starts typing
+    if (errors[name]) {
+      setErrors(prev => ({
+        ...prev,
+        [name]: null
+      }));
     }
   };
 
@@ -188,6 +328,12 @@ const CreateAdmin = () => {
         <div style={styles.errorMessage}>
           <FiAlertCircle /> Access Denied - Super Admin access required
         </div>
+        <button
+          onClick={() => navigate('/admin/users')}
+          style={styles.backButton}
+        >
+          <FiX /> Back to Users
+        </button>
       </div>
     );
   }
@@ -199,6 +345,12 @@ const CreateAdmin = () => {
           <FiUserPlus /> Create New Admin
         </h1>
         <p style={styles.subtitle}>Add administrative user with specific permissions</p>
+        <button
+          onClick={() => navigate('/admin/users')}
+          style={styles.backButton}
+        >
+          <FiX /> Back to Users
+        </button>
       </div>
 
       {error && (
@@ -214,6 +366,62 @@ const CreateAdmin = () => {
       )}
 
       <form onSubmit={handleSubmit} style={styles.form}>
+        {/* Profile Image Upload Section */}
+        <div style={styles.imageUploadSection}>
+          <h3 style={styles.sectionTitle}>Profile Image (Optional)</h3>
+          <div style={styles.imageUploadContainer}>
+            <div style={styles.imagePreviewArea}>
+              {imagePreview ? (
+                <img src={imagePreview} alt="Preview" style={styles.imagePreview} />
+              ) : (
+                <div style={styles.imagePlaceholder}>
+                  <FiImage size={40} color="#718096" />
+                  <span style={styles.placeholderText}>No Image</span>
+                </div>
+              )}
+            </div>
+            <div style={styles.imageUploadControls}>
+              <input
+                type="file"
+                id="profileImage"
+                accept="image/jpeg,image/png,image/gif,image/webp"
+                onChange={(e) => handleImageUpload(e.target.files[0])}
+                style={{ display: 'none' }}
+                disabled={uploadingImage || loading}
+              />
+              <label htmlFor="profileImage" style={styles.uploadButton}>
+                {uploadingImage ? (
+                  <>
+                    <FiLoader style={{animation: 'spin 1s linear infinite'}} />
+                    Uploading...
+                  </>
+                ) : imagePreview ? (
+                  <>
+                    <FiUpload /> Change Photo
+                  </>
+                ) : (
+                  <>
+                    <FiUpload /> Upload Photo
+                  </>
+                )}
+              </label>
+              {imagePreview && (
+                <button
+                  type="button"
+                  onClick={removeProfileImage}
+                  style={styles.removeImageButton}
+                  disabled={uploadingImage || loading}
+                >
+                  <FiXCircle /> Remove
+                </button>
+              )}
+              <div style={styles.imageUploadInfo}>
+                <small>JPG, PNG, GIF, WebP up to 5MB</small>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Basic Admin Information */}
         <div style={styles.section}>
           <h3 style={styles.sectionTitle}>
@@ -221,12 +429,16 @@ const CreateAdmin = () => {
           </h3>
           
           <div style={styles.formGrid}>
+            {/* Username */}
             <div style={styles.formGroup}>
-              <label>Username *</label>
+              <label style={styles.formLabel}>
+                Username <span style={styles.required}>*</span>
+              </label>
               <input
                 type="text"
+                name="username"
                 value={adminData.username}
-                onChange={(e) => setAdminData({...adminData, username: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="admin_user"
                 style={{...styles.input, ...(errors.username && styles.inputError)}}
                 disabled={loading}
@@ -235,12 +447,16 @@ const CreateAdmin = () => {
               <small style={styles.helpText}>No spaces allowed. Use underscores if needed.</small>
             </div>
             
+            {/* Email */}
             <div style={styles.formGroup}>
-              <label>Email *</label>
+              <label style={styles.formLabel}>
+                Email <span style={styles.required}>*</span>
+              </label>
               <input
                 type="email"
+                name="email"
                 value={adminData.email}
-                onChange={(e) => setAdminData({...adminData, email: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="admin@school.com"
                 style={{...styles.input, ...(errors.email && styles.inputError)}}
                 disabled={loading}
@@ -248,38 +464,64 @@ const CreateAdmin = () => {
               {errors.email && <span style={styles.errorText}>{errors.email}</span>}
             </div>
             
+            {/* First Name */}
             <div style={styles.formGroup}>
-              <label>Name *</label>
+              <label style={styles.formLabel}>
+                First Name <span style={styles.required}>*</span>
+              </label>
               <input
                 type="text"
-                value={adminData.name}
-                onChange={(e) => setAdminData({...adminData, name: e.target.value})}
+                name="firstName"
+                value={adminData.firstName}
+                onChange={handleInputChange}
                 placeholder="John"
-                style={{...styles.input, ...(errors.name && styles.inputError)}}
+                style={{...styles.input, ...(errors.firstName && styles.inputError)}}
                 disabled={loading}
               />
-              {errors.name && <span style={styles.errorText}>{errors.name}</span>}
+              {errors.firstName && <span style={styles.errorText}>{errors.firstName}</span>}
             </div>
             
+            {/* Middle Name */}
             <div style={styles.formGroup}>
-              <label>Surname *</label>
+              <label style={styles.formLabel}>Middle Name</label>
               <input
                 type="text"
-                value={adminData.surname}
-                onChange={(e) => setAdminData({...adminData, surname: e.target.value})}
-                placeholder="Doe"
-                style={{...styles.input, ...(errors.surname && styles.inputError)}}
+                name="middleName"
+                value={adminData.middleName}
+                onChange={handleInputChange}
+                placeholder="Michael (optional)"
+                style={styles.input}
                 disabled={loading}
               />
-              {errors.surname && <span style={styles.errorText}>{errors.surname}</span>}
             </div>
             
+            {/* Last Name */}
             <div style={styles.formGroup}>
-              <label>Password *</label>
+              <label style={styles.formLabel}>
+                Last Name <span style={styles.required}>*</span>
+              </label>
+              <input
+                type="text"
+                name="lastName"
+                value={adminData.lastName}
+                onChange={handleInputChange}
+                placeholder="Doe"
+                style={{...styles.input, ...(errors.lastName && styles.inputError)}}
+                disabled={loading}
+              />
+              {errors.lastName && <span style={styles.errorText}>{errors.lastName}</span>}
+            </div>
+            
+            {/* Password */}
+            <div style={styles.formGroup}>
+              <label style={styles.formLabel}>
+                Password <span style={styles.required}>*</span>
+              </label>
               <input
                 type="password"
+                name="password"
                 value={adminData.password}
-                onChange={(e) => setAdminData({...adminData, password: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="••••••••"
                 style={{...styles.input, ...(errors.password && styles.inputError)}}
                 disabled={loading}
@@ -288,12 +530,16 @@ const CreateAdmin = () => {
               <small style={styles.helpText}>Minimum 6 characters</small>
             </div>
             
+            {/* Confirm Password */}
             <div style={styles.formGroup}>
-              <label>Confirm Password *</label>
+              <label style={styles.formLabel}>
+                Confirm Password <span style={styles.required}>*</span>
+              </label>
               <input
                 type="password"
+                name="confirmPassword"
                 value={adminData.confirmPassword}
-                onChange={(e) => setAdminData({...adminData, confirmPassword: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="••••••••"
                 style={{...styles.input, ...(errors.confirmPassword && styles.inputError)}}
                 disabled={loading}
@@ -301,11 +547,60 @@ const CreateAdmin = () => {
               {errors.confirmPassword && <span style={styles.errorText}>{errors.confirmPassword}</span>}
             </div>
             
+            {/* Phone Number */}
             <div style={styles.formGroup}>
-              <label>Status</label>
+              <label style={styles.formLabel}>Phone Number</label>
+              <input
+                type="text"
+                name="phoneNumber"
+                value={adminData.phoneNumber}
+                onChange={handleInputChange}
+                placeholder="+1234567890"
+                style={{...styles.input, ...(errors.phoneNumber && styles.inputError)}}
+                disabled={loading}
+              />
+              {errors.phoneNumber && <span style={styles.errorText}>{errors.phoneNumber}</span>}
+            </div>
+            
+            {/* Gender */}
+            <div style={styles.formGroup}>
+              <label style={styles.formLabel}>Gender</label>
               <select
+                name="sex"
+                value={adminData.sex}
+                onChange={handleInputChange}
+                style={styles.select}
+                disabled={loading}
+              >
+                {sexOptions.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            {/* Address */}
+            <div style={{...styles.formGroup, gridColumn: '1 / -1'}}>
+              <label style={styles.formLabel}>Address</label>
+              <textarea
+                name="address"
+                value={adminData.address}
+                onChange={handleInputChange}
+                placeholder="Enter address"
+                style={styles.textarea}
+                disabled={loading}
+                rows={3}
+              />
+            </div>
+            
+            {/* Status */}
+            <div style={styles.formGroup}>
+              <label style={styles.formLabel}>Status</label>
+              <select
+                name="active"
                 value={adminData.active}
-                onChange={(e) => setAdminData({...adminData, active: e.target.value === 'true'})}
+                onChange={handleInputChange}
                 style={styles.select}
                 disabled={loading}
               >
@@ -370,14 +665,14 @@ const CreateAdmin = () => {
             type="button"
             onClick={() => navigate('/admin/users')}
             style={styles.cancelButton}
-            disabled={loading}
+            disabled={loading || uploadingImage}
           >
             <FiX /> Cancel
           </button>
           <button
             type="submit"
             style={styles.submitButton}
-            disabled={loading}
+            disabled={loading || uploadingImage}
           >
             {loading ? (
               <>
@@ -401,7 +696,7 @@ const styles = {
     margin: '0 auto',
     padding: '24px',
     fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#F5F7FA',
     minHeight: '100vh'
   },
   header: {
@@ -409,7 +704,8 @@ const styles = {
     backgroundColor: 'white',
     padding: '24px',
     borderRadius: '12px',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+    position: 'relative'
   },
   title: {
     fontSize: '28px',
@@ -421,20 +717,43 @@ const styles = {
     gap: '12px'
   },
   subtitle: {
-    color: '#666',
+    color: '#718096',
     margin: 0,
     fontSize: '16px'
   },
+  backButton: {
+    position: 'absolute',
+    top: '24px',
+    right: '24px',
+    padding: '8px 16px',
+    backgroundColor: '#718096',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '600',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    transition: 'all 0.2s',
+    '&:hover': {
+      backgroundColor: '#4A5568',
+      transform: 'translateY(-2px)'
+    }
+  },
   authRequired: {
     display: 'flex',
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: '100vh',
-    padding: '24px'
+    padding: '24px',
+    gap: '20px'
   },
   errorMessage: {
-    backgroundColor: '#FFF3F3',
-    color: '#B22222',
+    backgroundColor: '#FED7D7',
+    color: '#9B2C2C',
     padding: '16px',
     borderRadius: '8px',
     marginBottom: '24px',
@@ -442,11 +761,11 @@ const styles = {
     alignItems: 'center',
     gap: '12px',
     fontWeight: '500',
-    borderLeft: '4px solid #B22222'
+    borderLeft: '4px solid #E53E3E'
   },
   successMessage: {
-    backgroundColor: '#E6FFE6',
-    color: '#228B22',
+    backgroundColor: '#C6F6D5',
+    color: '#22543D',
     padding: '16px',
     borderRadius: '8px',
     marginBottom: '24px',
@@ -454,7 +773,7 @@ const styles = {
     alignItems: 'center',
     gap: '12px',
     fontWeight: '500',
-    borderLeft: '4px solid #228B22'
+    borderLeft: '4px solid #38A169'
   },
   form: {
     backgroundColor: 'white',
@@ -465,16 +784,119 @@ const styles = {
   section: {
     marginBottom: '32px',
     paddingBottom: '24px',
-    borderBottom: '1px solid #E0E0E0'
+    borderBottom: '1px solid #E2E8F0'
   },
   sectionTitle: {
-    fontSize: '20px',
+    fontSize: '18px',
     fontWeight: '600',
-    color: '#4B5320',
+    color: '#2D3748',
     margin: '0 0 20px 0',
     display: 'flex',
     alignItems: 'center',
+    gap: '8px',
+    borderBottom: '2px solid #D69E2E',
+    paddingBottom: '8px'
+  },
+  // Image Upload Styles
+  imageUploadSection: {
+    marginBottom: '32px',
+    padding: '20px',
+    backgroundColor: '#F5F7FA',
+    borderRadius: '8px',
+    border: '1px solid #E2E8F0'
+  },
+  imageUploadContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '20px',
+    '@media (max-width: 768px)': {
+      flexDirection: 'column'
+    }
+  },
+  imagePreviewArea: {
+    width: '150px',
+    height: '150px',
+    borderRadius: '50%',
+    backgroundColor: 'white',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    border: '2px dashed #CBD5E0',
+    flexShrink: 0
+  },
+  imagePreview: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover'
+  },
+  imagePlaceholder: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
     gap: '8px'
+  },
+  placeholderText: {
+    fontSize: '12px',
+    color: '#718096'
+  },
+  imageUploadControls: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+    flex: 1
+  },
+  uploadButton: {
+    padding: '10px 20px',
+    backgroundColor: '#3182CE',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    justifyContent: 'center',
+    transition: 'all 0.2s',
+    width: 'fit-content',
+    '&:hover:not(:disabled)': {
+      backgroundColor: '#2C5282',
+      transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.5,
+      cursor: 'not-allowed'
+    }
+  },
+  removeImageButton: {
+    padding: '10px 20px',
+    backgroundColor: '#FED7D7',
+    color: '#9B2C2C',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    justifyContent: 'center',
+    transition: 'all 0.2s',
+    width: 'fit-content',
+    '&:hover:not(:disabled)': {
+      backgroundColor: '#FEB2B2',
+      transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.5,
+      cursor: 'not-allowed'
+    }
+  },
+  imageUploadInfo: {
+    color: '#718096',
+    fontSize: '12px'
   },
   formGrid: {
     display: 'grid',
@@ -484,43 +906,96 @@ const styles = {
   formGroup: {
     marginBottom: '20px'
   },
+  formLabel: {
+    display: 'block',
+    marginBottom: '6px',
+    fontSize: '14px',
+    fontWeight: '500',
+    color: '#2D3748'
+  },
+  required: {
+    color: '#E53E3E',
+    marginLeft: '2px'
+  },
   input: {
     width: '100%',
-    padding: '12px',
-    border: '1px solid #D0D0D0',
-    borderRadius: '6px',
+    padding: '10px 12px',
+    border: '1px solid #E2E8F0',
+    borderRadius: '4px',
     fontSize: '14px',
     transition: 'border-color 0.2s',
     backgroundColor: 'white',
-    boxSizing: 'border-box'
+    boxSizing: 'border-box',
+    color: '#2D3748',
+    '&:focus': {
+      outline: 'none',
+      borderColor: '#3182CE',
+      boxShadow: '0 0 0 3px rgba(49, 130, 206, 0.1)'
+    },
+    '&:disabled': {
+      backgroundColor: '#F5F7FA',
+      cursor: 'not-allowed'
+    }
+  },
+  textarea: {
+    width: '100%',
+    padding: '10px 12px',
+    border: '1px solid #E2E8F0',
+    borderRadius: '4px',
+    fontSize: '14px',
+    transition: 'border-color 0.2s',
+    backgroundColor: 'white',
+    boxSizing: 'border-box',
+    color: '#2D3748',
+    fontFamily: 'inherit',
+    resize: 'vertical',
+    '&:focus': {
+      outline: 'none',
+      borderColor: '#3182CE',
+      boxShadow: '0 0 0 3px rgba(49, 130, 206, 0.1)'
+    },
+    '&:disabled': {
+      backgroundColor: '#F5F7FA',
+      cursor: 'not-allowed'
+    }
   },
   inputError: {
-    borderColor: '#B22222',
-    backgroundColor: '#FFF9F9'
+    borderColor: '#E53E3E',
+    backgroundColor: '#FFF5F5'
   },
   select: {
     width: '100%',
-    padding: '12px',
-    border: '1px solid #D0D0D0',
-    borderRadius: '6px',
+    padding: '10px 12px',
+    border: '1px solid #E2E8F0',
+    borderRadius: '4px',
     fontSize: '14px',
     backgroundColor: 'white',
-    cursor: 'pointer'
+    cursor: 'pointer',
+    color: '#2D3748',
+    '&:focus': {
+      outline: 'none',
+      borderColor: '#3182CE',
+      boxShadow: '0 0 0 3px rgba(49, 130, 206, 0.1)'
+    },
+    '&:disabled': {
+      backgroundColor: '#F5F7FA',
+      cursor: 'not-allowed'
+    }
   },
   errorText: {
-    color: '#B22222',
+    color: '#E53E3E',
     fontSize: '12px',
     marginTop: '4px',
     display: 'block'
   },
   helpText: {
-    color: '#666',
+    color: '#718096',
     fontSize: '12px',
     marginTop: '4px',
     display: 'block'
   },
   permissionsHelp: {
-    color: '#666',
+    color: '#718096',
     fontSize: '14px',
     margin: '0 0 20px 0',
     lineHeight: '1.5'
@@ -535,20 +1010,21 @@ const styles = {
     display: 'flex',
     alignItems: 'flex-start',
     padding: '16px',
-    border: '2px solid #E0E0E0',
+    border: '2px solid #E2E8F0',
     borderRadius: '8px',
     cursor: 'pointer',
     transition: 'all 0.2s',
+    color: '#2D3748',
     '&:hover': {
-      borderColor: '#4B5320',
-      backgroundColor: '#F9F9F9'
+      borderColor: '#3182CE',
+      backgroundColor: '#F7FAFC'
     }
   },
   checkbox: {
     marginRight: '12px',
     marginTop: '4px',
     cursor: 'pointer',
-    accentColor: '#4B5320'
+    accentColor: '#3182CE'
   },
   permissionContent: {
     display: 'flex',
@@ -559,14 +1035,14 @@ const styles = {
   permissionName: {
     fontWeight: '600',
     fontSize: '14px',
-    color: '#333'
+    color: '#2D3748'
   },
   warningText: {
-    color: '#B22222',
+    color: '#E53E3E',
     fontSize: '12px'
   },
   selectedPermissions: {
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#F5F7FA',
     padding: '20px',
     borderRadius: '8px',
     marginTop: '20px'
@@ -579,7 +1055,7 @@ const styles = {
   },
   permissionBadge: {
     padding: '6px 12px',
-    backgroundColor: '#D4A017',
+    backgroundColor: '#D69E2E',
     color: '#4B5320',
     borderRadius: '16px',
     fontSize: '12px',
@@ -602,11 +1078,11 @@ const styles = {
     gap: '16px',
     marginTop: '32px',
     paddingTop: '24px',
-    borderTop: '1px solid #E0E0E0'
+    borderTop: '1px solid #E2E8F0'
   },
   cancelButton: {
     padding: '12px 24px',
-    backgroundColor: '#6B7280',
+    backgroundColor: '#718096',
     color: 'white',
     border: 'none',
     borderRadius: '6px',
@@ -616,9 +1092,10 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    transition: 'background-color 0.2s',
-    '&:hover': {
-      backgroundColor: '#4B5563'
+    transition: 'all 0.2s',
+    '&:hover:not(:disabled)': {
+      backgroundColor: '#4A5568',
+      transform: 'translateY(-2px)'
     },
     '&:disabled': {
       opacity: 0.5,
@@ -627,7 +1104,7 @@ const styles = {
   },
   submitButton: {
     padding: '12px 24px',
-    backgroundColor: '#D4A017',
+    backgroundColor: '#D69E2E',
     color: '#4B5320',
     border: 'none',
     borderRadius: '6px',
@@ -637,14 +1114,16 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    transition: 'background-color 0.2s',
-    '&:hover': {
-      backgroundColor: '#B68C14'
+    transition: 'all 0.2s',
+    '&:hover:not(:disabled)': {
+      backgroundColor: '#B7791F',
+      transform: 'translateY(-2px)',
+      color: 'white'
     },
     '&:disabled': {
       opacity: 0.5,
       cursor: 'not-allowed',
-      backgroundColor: '#D4A017'
+      backgroundColor: '#D69E2E'
     }
   }
 };
@@ -658,16 +1137,47 @@ styleSheet.textContent = `
   }
   
   .permissionLabel input[type="checkbox"]:checked + div {
-    border-color: #4B5320;
+    border-color: #3182CE;
   }
   
   .permissionLabel input[type="checkbox"]:checked {
-    accent-color: #4B5320;
+    accent-color: #3182CE;
   }
   
-  input:disabled, select:disabled {
-    background-color: #f5f5f5;
+  input:disabled, select:disabled, textarea:disabled {
+    background-color: #F5F7FA;
     cursor: not-allowed;
+  }
+  
+  @media (max-width: 768px) {
+    .imageUploadContainer {
+      flex-direction: column;
+      text-align: center;
+    }
+    
+    .imagePreviewArea {
+      margin: 0 auto;
+    }
+    
+    .formActions {
+      flex-direction: column;
+    }
+    
+    .submitButton, .cancelButton {
+      width: 100%;
+      justify-content: center;
+    }
+    
+    .permissionsGrid {
+      grid-template-columns: 1fr;
+    }
+    
+    .backButton {
+      position: relative;
+      top: auto;
+      right: auto;
+      margin-top: 16px;
+    }
   }
 `;
 document.head.appendChild(styleSheet);

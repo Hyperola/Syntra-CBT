@@ -22,6 +22,7 @@ const ManageSubjects = () => {
     code: '',
     description: '',
     category: 'Core',
+    isCore: true
   });
 
   // Get auth token
@@ -109,10 +110,10 @@ const ManageSubjects = () => {
   };
 
   const handleInputChange = (e) => {
-    const { name, value } = e.target;
+    const { name, value, type, checked } = e.target;
     setFormData(prev => ({
       ...prev,
-      [name]: value
+      [name]: type === 'checkbox' ? checked : value
     }));
   };
 
@@ -126,7 +127,8 @@ const ManageSubjects = () => {
         name: formData.name.trim(),
         code: formData.code.trim(),
         category: formData.category,
-        description: formData.description.trim()
+        description: formData.description.trim(),
+        isCore: formData.category === 'Core' ? true : formData.isCore
       };
 
       if (editingSubject) {
@@ -169,6 +171,7 @@ const ManageSubjects = () => {
       code: '',
       description: '',
       category: 'Core',
+      isCore: true
     });
   };
 
@@ -178,6 +181,7 @@ const ManageSubjects = () => {
       code: subject.code || '',
       description: subject.description || '',
       category: subject.category || 'Core',
+      isCore: subject.isCore !== false
     });
     setEditingSubject(subject);
     setShowForm(true);
@@ -205,32 +209,28 @@ const ManageSubjects = () => {
 
   const getCategoryColor = (category) => {
     const colors = {
-      'Core': '#4B5320',
-      'Science': '#2c3e50',
-      'Arts': '#8B4513',
-      'Elective': '#D4A017',
-      'Other': '#7f8c8d',
-      'core': '#4B5320',
-      'science': '#2c3e50',
-      'arts': '#8B4513',
-      'elective': '#D4A017',
-      'other': '#7f8c8d'
+      'Core': '#2D5016', // Darker green for better contrast
+      'Elective': '#D35400', // Darker orange
+      'Optional': '#2980B9', // Darker blue
+      'General': '#8E44AD', // Darker purple
+      'core': '#2D5016',
+      'elective': '#D35400',
+      'optional': '#2980B9',
+      'general': '#8E44AD'
     };
-    return colors[category] || '#7f8c8d';
+    return colors[category] || '#34495E';
   };
 
   const getCategoryName = (category) => {
     const names = {
       'Core': 'Core Subject',
-      'Science': 'Science',
-      'Arts': 'Arts & Humanities',
       'Elective': 'Elective',
-      'Other': 'Other',
+      'Optional': 'Optional',
+      'General': 'General',
       'core': 'Core Subject',
-      'science': 'Science',
-      'arts': 'Arts & Humanities',
       'elective': 'Elective',
-      'other': 'Other'
+      'optional': 'Optional',
+      'general': 'General'
     };
     return names[category] || 'Unknown Category';
   };
@@ -260,25 +260,26 @@ const ManageSubjects = () => {
     return (
       <div style={{
         minHeight: '100vh',
-        backgroundColor: '#F8F9FA',
+        backgroundColor: '#F5F7FA',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center'
       }}>
         <div style={{
-          backgroundColor: '#FFF3F3',
-          color: '#B22222',
+          backgroundColor: '#FFE5E5',
+          color: '#C53030',
           padding: '24px',
           borderRadius: '8px',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
           display: 'flex',
           alignItems: 'center',
-          gap: '12px'
+          gap: '12px',
+          border: '2px solid #FC8181'
         }}>
           <FiAlertTriangle style={{ fontSize: '24px', flexShrink: 0 }} />
           <div>
-            <h3 style={{ margin: '0 0 8px 0', fontSize: '18px' }}>Access Denied</h3>
-            <p style={{ margin: 0, fontSize: '14px' }}>You don't have permission to manage subjects.</p>
+            <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '600' }}>Access Denied</h3>
+            <p style={{ margin: 0, fontSize: '14px', color: '#742A2A' }}>You don't have permission to manage subjects.</p>
           </div>
         </div>
       </div>
@@ -289,7 +290,7 @@ const ManageSubjects = () => {
     return (
       <div style={{
         minHeight: '100vh',
-        backgroundColor: '#F8F9FA',
+        backgroundColor: '#F5F7FA',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center'
@@ -298,15 +299,15 @@ const ManageSubjects = () => {
           backgroundColor: '#FFFFFF',
           padding: '32px',
           borderRadius: '8px',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
           textAlign: 'center'
         }}>
-          <div style={{ fontSize: '16px', marginBottom: '16px' }}>Loading subjects...</div>
+          <div style={{ fontSize: '16px', marginBottom: '16px', color: '#2D3748' }}>Loading subjects...</div>
           <div style={{ 
             width: '40px', 
             height: '40px', 
-            border: '3px solid #f3f3f3',
-            borderTop: '3px solid #4B5320',
+            border: '3px solid #E2E8F0',
+            borderTop: '3px solid #2D5016',
             borderRadius: '50%',
             animation: 'spin 1s linear infinite',
             margin: '0 auto'
@@ -327,7 +328,7 @@ const ManageSubjects = () => {
   return (
     <div style={{
       minHeight: '100vh',
-      backgroundColor: '#F8F9FA',
+      backgroundColor: '#F5F7FA',
       fontFamily: 'sans-serif'
     }}>
       <main style={{
@@ -348,15 +349,16 @@ const ManageSubjects = () => {
             <h1 style={{
               fontSize: '28px',
               fontWeight: '700',
-              color: '#4B5320',
+              color: '#1A202C',
               margin: '0 0 8px 0'
             }}>
               Subject Management
             </h1>
             <p style={{
-              color: '#6B7280',
+              color: '#4A5568',
               margin: 0,
-              fontSize: '16px'
+              fontSize: '16px',
+              fontWeight: '500'
             }}>
               {subjects.length} subjects • {filteredSubjects.length} filtered
             </p>
@@ -369,8 +371,8 @@ const ManageSubjects = () => {
             }}
             style={{
               padding: '12px 24px',
-              backgroundColor: '#D4A017',
-              color: '#4B5320',
+              backgroundColor: '#2D5016',
+              color: '#FFFFFF',
               border: 'none',
               borderRadius: '6px',
               cursor: 'pointer',
@@ -379,8 +381,11 @@ const ManageSubjects = () => {
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+              boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+              transition: 'background-color 0.2s'
             }}
+            onMouseOver={(e) => e.target.style.backgroundColor = '#244011'}
+            onMouseOut={(e) => e.target.style.backgroundColor = '#2D5016'}
           >
             <FiPlus /> Create New Subject
           </button>
@@ -389,27 +394,29 @@ const ManageSubjects = () => {
         {/* Messages */}
         {error && (
           <div style={{
-            backgroundColor: '#FFF3F3',
-            color: '#B22222',
+            backgroundColor: '#FED7D7',
+            color: '#9B2C2C',
             padding: '16px',
             borderRadius: '8px',
             boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
             marginBottom: '24px',
             display: 'flex',
             alignItems: 'center',
-            gap: '12px'
+            gap: '12px',
+            border: '1px solid #FC8181'
           }}>
             <FiAlertTriangle style={{ fontSize: '20px', flexShrink: 0 }} />
-            <span>{error}</span>
+            <span style={{ fontWeight: '500' }}>{error}</span>
             <button 
               onClick={() => setError(null)}
               style={{
                 marginLeft: 'auto',
                 background: 'none',
                 border: 'none',
-                color: '#B22222',
+                color: '#9B2C2C',
                 cursor: 'pointer',
-                fontSize: '18px'
+                fontSize: '18px',
+                fontWeight: 'bold'
               }}
             >
               ×
@@ -418,27 +425,29 @@ const ManageSubjects = () => {
         )}
         {success && (
           <div style={{
-            backgroundColor: '#E6FFE6',
-            color: '#228B22',
+            backgroundColor: '#C6F6D5',
+            color: '#22543D',
             padding: '16px',
             borderRadius: '8px',
             boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
             marginBottom: '24px',
             display: 'flex',
             alignItems: 'center',
-            gap: '12px'
+            gap: '12px',
+            border: '1px solid #9AE6B4'
           }}>
             <FiCheckCircle style={{ fontSize: '20px', flexShrink: 0 }} />
-            <span>{success}</span>
+            <span style={{ fontWeight: '500' }}>{success}</span>
             <button 
               onClick={() => setSuccess(null)}
               style={{
                 marginLeft: 'auto',
                 background: 'none',
                 border: 'none',
-                color: '#228B22',
+                color: '#22543D',
                 cursor: 'pointer',
-                fontSize: '18px'
+                fontSize: '18px',
+                fontWeight: 'bold'
               }}
             >
               ×
@@ -449,19 +458,19 @@ const ManageSubjects = () => {
         {/* No subjects warning */}
         {subjects.length === 0 && !loading && (
           <div style={{
-            backgroundColor: '#FFF3CD',
-            color: '#D4A017',
+            backgroundColor: '#FEFCBF',
+            color: '#744210',
             padding: '16px',
             borderRadius: '8px',
             marginBottom: '24px',
-            border: '1px solid #FFEAA7',
+            border: '2px solid #F6E05E',
             display: 'flex',
             alignItems: 'center',
             gap: '12px'
           }}>
             <FiAlertTriangle style={{ fontSize: '20px', flexShrink: 0 }} />
             <div>
-              <strong>No subjects found</strong>
+              <strong style={{ fontSize: '16px' }}>No subjects found</strong>
               <p style={{ margin: '4px 0 0 0', fontSize: '14px' }}>
                 Create your first subject to get started.
               </p>
@@ -486,20 +495,25 @@ const ManageSubjects = () => {
               style={{
                 width: '100%',
                 padding: '12px 16px 12px 40px',
-                border: '1px solid #D3D3D3',
+                border: '2px solid #CBD5E0',
                 borderRadius: '6px',
                 fontSize: '14px',
                 outline: 'none',
-                boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
-                transition: 'border-color 0.2s'
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                transition: 'border-color 0.2s',
+                backgroundColor: '#FFFFFF',
+                color: '#2D3748',
+                fontWeight: '500'
               }}
+              onFocus={(e) => e.target.style.borderColor = '#2D5016'}
+              onBlur={(e) => e.target.style.borderColor = '#CBD5E0'}
             />
             <FiSearch style={{
               position: 'absolute',
               left: '16px',
               top: '50%',
               transform: 'translateY(-50%)',
-              color: '#6B7280',
+              color: '#718096',
               fontSize: '16px'
             }} />
           </div>
@@ -509,18 +523,32 @@ const ManageSubjects = () => {
             onChange={e => setFilterCategory(e.target.value)}
             style={{
               padding: '12px 16px',
-              border: '1px solid #D3D3D3',
+              border: '2px solid #CBD5E0',
               borderRadius: '6px',
               fontSize: '14px',
               outline: 'none',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
-              minWidth: '150px',
-              backgroundColor: 'white'
+              boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+              minWidth: '180px',
+              backgroundColor: '#FFFFFF',
+              color: '#2D3748',
+              fontWeight: '500',
+              cursor: 'pointer'
             }}
+            onFocus={(e) => e.target.style.borderColor = '#2D5016'}
+            onBlur={(e) => e.target.style.borderColor = '#CBD5E0'}
           >
-            <option value="all">All Categories</option>
+            <option value="all" style={{ color: '#2D3748', backgroundColor: '#FFFFFF', fontWeight: '500' }}>All Categories</option>
             {categories.filter(cat => cat !== 'all').map(category => (
-              <option key={category} value={category}>
+              <option 
+                key={category} 
+                value={category}
+                style={{ 
+                  color: '#2D3748', 
+                  backgroundColor: '#FFFFFF',
+                  fontWeight: '500',
+                  padding: '8px'
+                }}
+              >
                 {getCategoryName(category)}
               </option>
             ))}
@@ -531,7 +559,7 @@ const ManageSubjects = () => {
             disabled={loading}
             style={{
               padding: '12px 16px',
-              backgroundColor: '#6B7280',
+              backgroundColor: '#4A5568',
               color: 'white',
               border: 'none',
               borderRadius: '6px',
@@ -540,8 +568,13 @@ const ManageSubjects = () => {
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              opacity: loading ? 0.6 : 1
+              opacity: loading ? 0.6 : 1,
+              fontWeight: '600',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+              transition: 'background-color 0.2s'
             }}
+            onMouseOver={(e) => !loading && (e.target.style.backgroundColor = '#2D3748')}
+            onMouseOut={(e) => !loading && (e.target.style.backgroundColor = '#4A5568')}
           >
             <FiRefreshCw style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
             Refresh
@@ -554,15 +587,16 @@ const ManageSubjects = () => {
             backgroundColor: '#FFFFFF',
             padding: '48px 24px',
             borderRadius: '8px',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+            boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
             textAlign: 'center',
-            color: '#6B7280'
+            color: '#4A5568',
+            border: '2px dashed #CBD5E0'
           }}>
-            <FiBook style={{ fontSize: '48px', marginBottom: '16px', opacity: 0.5 }} />
-            <h3 style={{ margin: '0 0 8px 0', fontSize: '18px' }}>
+            <FiBook style={{ fontSize: '48px', marginBottom: '16px', color: '#A0AEC0' }} />
+            <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '600', color: '#2D3748' }}>
               {subjects.length === 0 ? 'No Subjects Found' : 'No Subjects Match Your Filters'}
             </h3>
-            <p style={{ margin: 0, fontSize: '14px' }}>
+            <p style={{ margin: 0, fontSize: '14px', color: '#718096' }}>
               {subjects.length === 0 
                 ? 'Create your first subject to get started' 
                 : 'Try changing your search or filter criteria'
@@ -574,14 +608,18 @@ const ManageSubjects = () => {
                 style={{
                   marginTop: '16px',
                   padding: '10px 20px',
-                  backgroundColor: '#D4A017',
-                  color: '#4B5320',
+                  backgroundColor: '#2D5016',
+                  color: '#FFFFFF',
                   border: 'none',
                   borderRadius: '6px',
                   cursor: 'pointer',
                   fontSize: '14px',
-                  fontWeight: '500'
+                  fontWeight: '600',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                  transition: 'background-color 0.2s'
                 }}
+                onMouseOver={(e) => e.target.style.backgroundColor = '#244011'}
+                onMouseOut={(e) => e.target.style.backgroundColor = '#2D5016'}
               >
                 Create Your First Subject
               </button>
@@ -601,8 +639,8 @@ const ManageSubjects = () => {
                   backgroundColor: '#FFFFFF',
                   padding: '24px',
                   borderRadius: '8px',
-                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-                  border: `1px solid ${categoryColor}`,
+                  boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+                  border: `2px solid ${categoryColor}`,
                   transition: 'transform 0.2s, box-shadow 0.2s'
                 }}>
                   {/* Subject Header */}
@@ -615,8 +653,8 @@ const ManageSubjects = () => {
                     <div style={{ flex: 1 }}>
                       <h3 style={{
                         fontSize: '18px',
-                        fontWeight: '600',
-                        color: '#4B5320',
+                        fontWeight: '700',
+                        color: '#1A202C',
                         margin: '0 0 8px 0',
                         lineHeight: '1.4'
                       }}>
@@ -629,18 +667,19 @@ const ManageSubjects = () => {
                         alignItems: 'center'
                       }}>
                         <span style={{
-                          padding: '4px 8px',
+                          padding: '4px 12px',
                           backgroundColor: categoryColor,
                           color: 'white',
                           borderRadius: '4px',
                           fontSize: '12px',
-                          fontWeight: '500'
+                          fontWeight: '600'
                         }}>
                           {getCategoryName(subject.category)}
                         </span>
                         <span style={{
-                          color: '#6B7280',
-                          fontSize: '14px'
+                          color: '#4A5568',
+                          fontSize: '14px',
+                          fontWeight: '500'
                         }}>
                           Code: {subject.code || 'N/A'}
                         </span>
@@ -653,7 +692,7 @@ const ManageSubjects = () => {
                     marginBottom: '20px'
                   }}>
                     <p style={{
-                      color: '#6B7280',
+                      color: '#4A5568',
                       fontSize: '14px',
                       lineHeight: '1.5',
                       margin: '0 0 16px 0'
@@ -665,16 +704,28 @@ const ManageSubjects = () => {
                       display: 'flex',
                       alignItems: 'center',
                       gap: '12px',
-                      color: '#6B7280',
+                      color: '#4A5568',
                       fontSize: '14px'
                     }}>
                       <div style={{
-                        padding: '4px 8px',
-                        backgroundColor: '#F8F9FA',
+                        padding: '6px 12px',
+                        backgroundColor: subject.isActive !== false ? '#C6F6D5' : '#FED7D7',
                         borderRadius: '4px',
-                        fontSize: '12px'
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        color: subject.isActive !== false ? '#22543D' : '#9B2C2C'
                       }}>
                         Status: {subject.isActive !== false ? 'Active' : 'Inactive'}
+                      </div>
+                      <div style={{
+                        padding: '6px 12px',
+                        backgroundColor: subject.isCore ? '#BEE3F8' : '#FED7D7',
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        color: subject.isCore ? '#2C5282' : '#9B2C2C'
+                      }}>
+                        Core: {subject.isCore ? 'Yes' : 'No'}
                       </div>
                     </div>
                   </div>
@@ -693,15 +744,18 @@ const ManageSubjects = () => {
                         justifyContent: 'center',
                         gap: '8px',
                         padding: '10px 16px',
-                        backgroundColor: '#17a2b8',
+                        backgroundColor: '#2D5016',
                         color: '#FFFFFF',
                         border: 'none',
                         borderRadius: '6px',
                         cursor: 'pointer',
                         fontSize: '14px',
-                        fontWeight: '500',
-                        width: '100%'
+                        fontWeight: '600',
+                        width: '100%',
+                        transition: 'background-color 0.2s'
                       }}
+                      onMouseOver={(e) => e.target.style.backgroundColor = '#244011'}
+                      onMouseOut={(e) => e.target.style.backgroundColor = '#2D5016'}
                     >
                       <FiEdit /> Edit Subject
                     </button>
@@ -714,15 +768,18 @@ const ManageSubjects = () => {
                         justifyContent: 'center',
                         gap: '8px',
                         padding: '10px 16px',
-                        backgroundColor: '#dc3545',
+                        backgroundColor: '#C53030',
                         color: '#FFFFFF',
                         border: 'none',
                         borderRadius: '6px',
                         cursor: 'pointer',
                         fontSize: '14px',
-                        fontWeight: '500',
-                        width: '100%'
+                        fontWeight: '600',
+                        width: '100%',
+                        transition: 'background-color 0.2s'
                       }}
+                      onMouseOver={(e) => e.target.style.backgroundColor = '#9B2C2C'}
+                      onMouseOut={(e) => e.target.style.backgroundColor = '#C53030'}
                     >
                       <FiTrash2 /> Delete Subject
                     </button>
@@ -741,7 +798,7 @@ const ManageSubjects = () => {
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -751,17 +808,17 @@ const ManageSubjects = () => {
             <div style={{
               backgroundColor: '#FFFFFF',
               borderRadius: '8px',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+              boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
               maxWidth: '500px',
               width: '100%',
-              padding: '24px',
+              padding: '32px',
               maxHeight: '90vh',
               overflowY: 'auto'
             }}>
               <h2 style={{
                 fontSize: '24px',
                 fontWeight: '700',
-                color: '#4B5320',
+                color: '#1A202C',
                 margin: '0 0 24px 0'
               }}>
                 {editingSubject ? 'Edit Subject' : 'Create New Subject'}
@@ -773,7 +830,7 @@ const ManageSubjects = () => {
                     display: 'block',
                     fontSize: '14px',
                     fontWeight: '600',
-                    color: '#4B5320',
+                    color: '#2D3748',
                     marginBottom: '8px'
                   }}>
                     Subject Name *
@@ -787,12 +844,17 @@ const ManageSubjects = () => {
                     style={{
                       width: '100%',
                       padding: '12px 16px',
-                      border: '1px solid #D3D3D3',
+                      border: '2px solid #CBD5E0',
                       borderRadius: '6px',
                       fontSize: '14px',
                       outline: 'none',
-                      boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                      backgroundColor: '#FFFFFF',
+                      color: '#2D3748',
+                      fontWeight: '500'
                     }}
+                    onFocus={(e) => e.target.style.borderColor = '#2D5016'}
+                    onBlur={(e) => e.target.style.borderColor = '#CBD5E0'}
                     required
                   />
                 </div>
@@ -802,7 +864,7 @@ const ManageSubjects = () => {
                     display: 'block',
                     fontSize: '14px',
                     fontWeight: '600',
-                    color: '#4B5320',
+                    color: '#2D3748',
                     marginBottom: '8px'
                   }}>
                     Subject Code *
@@ -816,12 +878,17 @@ const ManageSubjects = () => {
                     style={{
                       width: '100%',
                       padding: '12px 16px',
-                      border: '1px solid #D3D3D3',
+                      border: '2px solid #CBD5E0',
                       borderRadius: '6px',
                       fontSize: '14px',
                       outline: 'none',
-                      boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                      backgroundColor: '#FFFFFF',
+                      color: '#2D3748',
+                      fontWeight: '500'
                     }}
+                    onFocus={(e) => e.target.style.borderColor = '#2D5016'}
+                    onBlur={(e) => e.target.style.borderColor = '#CBD5E0'}
                     required
                   />
                 </div>
@@ -831,7 +898,7 @@ const ManageSubjects = () => {
                     display: 'block',
                     fontSize: '14px',
                     fontWeight: '600',
-                    color: '#4B5320',
+                    color: '#2D3748',
                     marginBottom: '8px'
                   }}>
                     Category
@@ -843,29 +910,65 @@ const ManageSubjects = () => {
                     style={{
                       width: '100%',
                       padding: '12px 16px',
-                      border: '1px solid #D3D3D3',
+                      border: '2px solid #CBD5E0',
                       borderRadius: '6px',
                       fontSize: '14px',
                       outline: 'none',
-                      boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
-                      backgroundColor: 'white'
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                      backgroundColor: '#FFFFFF',
+                      color: '#2D3748',
+                      fontWeight: '500',
+                      cursor: 'pointer'
                     }}
+                    onFocus={(e) => e.target.style.borderColor = '#2D5016'}
+                    onBlur={(e) => e.target.style.borderColor = '#CBD5E0'}
                     required
                   >
-                    <option value="Core">Core Subject</option>
-                    <option value="Science">Science</option>
-                    <option value="Arts">Arts & Humanities</option>
-                    <option value="Elective">Elective</option>
-                    <option value="Other">Other</option>
+                    <option value="Core" style={{ color: '#2D3748', backgroundColor: '#FFFFFF', fontWeight: '500' }}>Core Subject</option>
+                    <option value="Elective" style={{ color: '#2D3748', backgroundColor: '#FFFFFF', fontWeight: '500' }}>Elective</option>
+                    <option value="Optional" style={{ color: '#2D3748', backgroundColor: '#FFFFFF', fontWeight: '500' }}>Optional</option>
+                    <option value="General" style={{ color: '#2D3748', backgroundColor: '#FFFFFF', fontWeight: '500' }}>General</option>
                   </select>
                 </div>
+
+                {formData.category !== 'Core' && (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    padding: '12px',
+                    backgroundColor: '#F7FAFC',
+                    borderRadius: '6px',
+                    border: '1px solid #E2E8F0'
+                  }}>
+                    <input
+                      type="checkbox"
+                      name="isCore"
+                      checked={formData.isCore}
+                      onChange={handleInputChange}
+                      style={{
+                        width: '18px',
+                        height: '18px',
+                        cursor: 'pointer'
+                      }}
+                    />
+                    <label style={{
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      color: '#2D3748',
+                      cursor: 'pointer'
+                    }}>
+                      Mark as Core Subject (for new class assignments)
+                    </label>
+                  </div>
+                )}
 
                 <div>
                   <label style={{
                     display: 'block',
                     fontSize: '14px',
                     fontWeight: '600',
-                    color: '#4B5320',
+                    color: '#2D3748',
                     marginBottom: '8px'
                   }}>
                     Description
@@ -878,15 +981,20 @@ const ManageSubjects = () => {
                     style={{
                       width: '100%',
                       padding: '12px 16px',
-                      border: '1px solid #D3D3D3',
+                      border: '2px solid #CBD5E0',
                       borderRadius: '6px',
                       fontSize: '14px',
                       outline: 'none',
-                      boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
                       minHeight: '100px',
                       resize: 'vertical',
-                      fontFamily: 'inherit'
+                      fontFamily: 'inherit',
+                      backgroundColor: '#FFFFFF',
+                      color: '#2D3748',
+                      fontWeight: '500'
                     }}
+                    onFocus={(e) => e.target.style.borderColor = '#2D5016'}
+                    onBlur={(e) => e.target.style.borderColor = '#CBD5E0'}
                   />
                 </div>
 
@@ -897,15 +1005,19 @@ const ManageSubjects = () => {
                     style={{
                       flex: 1,
                       padding: '12px 16px',
-                      backgroundColor: '#28a745',
+                      backgroundColor: '#2D5016',
                       color: '#FFFFFF',
                       border: 'none',
                       borderRadius: '6px',
                       cursor: loading ? 'not-allowed' : 'pointer',
                       fontSize: '14px',
                       fontWeight: '600',
-                      opacity: loading ? 0.7 : 1
+                      opacity: loading ? 0.7 : 1,
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                      transition: 'background-color 0.2s'
                     }}
+                    onMouseOver={(e) => !loading && (e.target.style.backgroundColor = '#244011')}
+                    onMouseOut={(e) => !loading && (e.target.style.backgroundColor = '#2D5016')}
                   >
                     {loading ? 'Saving...' : (editingSubject ? 'Update Subject' : 'Create Subject')}
                   </button>
@@ -915,14 +1027,18 @@ const ManageSubjects = () => {
                     style={{
                       flex: 1,
                       padding: '12px 16px',
-                      backgroundColor: '#6c757d',
+                      backgroundColor: '#718096',
                       color: '#FFFFFF',
                       border: 'none',
                       borderRadius: '6px',
                       cursor: 'pointer',
                       fontSize: '14px',
-                      fontWeight: '600'
+                      fontWeight: '600',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                      transition: 'background-color 0.2s'
                     }}
+                    onMouseOver={(e) => e.target.style.backgroundColor = '#4A5568'}
+                    onMouseOut={(e) => e.target.style.backgroundColor = '#718096'}
                   >
                     Cancel
                   </button>
@@ -932,6 +1048,25 @@ const ManageSubjects = () => {
           </div>
         )}
       </main>
+      <style>
+        {`
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          
+          select option {
+            background-color: white !important;
+            color: #2D3748 !important;
+            font-weight: 500 !important;
+            padding: 8px !important;
+          }
+          
+          select option:hover {
+            background-color: #F7FAFC !important;
+          }
+        `}
+      </style>
     </div>
   );
 };

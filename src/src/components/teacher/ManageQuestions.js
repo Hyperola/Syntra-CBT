@@ -18,6 +18,16 @@ const ManageQuestions = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  
+  // Pagination state
+  const [pagination, setPagination] = useState({
+    currentPage: 1,
+    totalPages: 1,
+    totalQuestions: 0,
+    hasNext: false,
+    hasPrev: false
+  });
+  const [itemsPerPage] = useState(20); // Fixed at 20 per page
 
   // Helper function to extract subject string from object or string
   const getSubjectString = (subject) => {
@@ -39,8 +49,8 @@ const ManageQuestions = () => {
     return token ? token.replace('Bearer ', '').trim() : null;
   };
 
-  // Fetch questions from API
-  const fetchQuestions = async () => {
+  // Fetch questions from API with pagination
+  const fetchQuestions = async (page = 1) => {
     setLoading(true);
     setError(null);
     try {
@@ -53,13 +63,28 @@ const ManageQuestions = () => {
         headers: { 
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json'
+        },
+        params: {
+          page: page,
+          limit: itemsPerPage,
+          subject: filterSubject || undefined,
+          class: filterClass || undefined
         }
       });
 
       if (response.data.success && Array.isArray(response.data.questions)) {
         setQuestions(response.data.questions);
-      } else if (Array.isArray(response.data)) {
-        setQuestions(response.data);
+        
+        // Update pagination info from backend
+        if (response.data.pagination) {
+          setPagination({
+            currentPage: response.data.pagination.currentPage || page,
+            totalPages: response.data.pagination.totalPages || 1,
+            totalQuestions: response.data.pagination.totalQuestions || 0,
+            hasNext: response.data.pagination.hasNext || false,
+            hasPrev: response.data.pagination.hasPrev || false
+          });
+        }
       } else {
         throw new Error('Invalid response format from server');
       }
@@ -79,12 +104,12 @@ const ManageQuestions = () => {
     }
   };
 
-  // Fetch questions on component mount
+  // Fetch questions on component mount or when filters change
   useEffect(() => {
     if (user && user.role === 'teacher') {
-      fetchQuestions();
+      fetchQuestions(1); // Always start from page 1 when filters change
     }
-  }, [user]);
+  }, [user, filterSubject, filterClass]); // Refetch when filters change
 
   // Trigger MathJax typesetting when questions load
   useEffect(() => {
@@ -92,6 +117,23 @@ const ManageQuestions = () => {
       window.MathJax.typesetPromise();
     }
   }, [questions]);
+
+  // Pagination handlers
+  const handleNextPage = () => {
+    if (pagination.hasNext) {
+      fetchQuestions(pagination.currentPage + 1);
+    }
+  };
+
+  const handlePrevPage = () => {
+    if (pagination.hasPrev) {
+      fetchQuestions(pagination.currentPage - 1);
+    }
+  };
+
+  const handlePageClick = (page) => {
+    fetchQuestions(page);
+  };
 
   // Get unique subjects from questions and user data
   const getSubjectOptions = () => {
@@ -196,8 +238,8 @@ const ManageQuestions = () => {
       });
 
       setSuccess('Question deleted successfully.');
-      // Remove the question from local state
-      setQuestions(prevQuestions => prevQuestions.filter(q => q._id !== id));
+      // Refresh the current page after deletion
+      fetchQuestions(pagination.currentPage);
       
     } catch (err) {
       console.error('Delete question error:', err);
@@ -211,7 +253,7 @@ const ManageQuestions = () => {
       } else if (err.response?.status === 404) {
         setError('Question not found. It may have already been deleted.');
         // Refresh the list
-        fetchQuestions();
+        fetchQuestions(pagination.currentPage);
       } else {
         setError(err.response?.data?.error || 'Failed to delete question. Please try again.');
       }
@@ -225,6 +267,7 @@ const ManageQuestions = () => {
     setSuccess(null);
     
     try {
+      // Export all questions (not just current page)
       const filteredQuestions = questions
         .filter(q => {
           const subjectValue = getSubjectString(q.subject);
@@ -271,23 +314,50 @@ const ManageQuestions = () => {
       link.remove();
       window.URL.revokeObjectURL(url);
       
-      setSuccess(`Exported ${filteredQuestions.length} questions successfully.`);
+      setSuccess(`Exported ${filteredQuestions.length} questions from current page successfully.`);
     } catch (err) {
       console.error('Export questions error:', err);
       setError('Failed to export questions. Please try again.');
     }
   };
 
-  // Filter questions based on selected filters
-  const filteredQuestions = questions.filter(q => {
-    const subjectValue = getSubjectString(q.subject);
-    const classValue = getClassString(q.class);
+  // Generate page numbers for pagination
+  const generatePageNumbers = () => {
+    const pages = [];
+    const maxPagesToShow = 5;
     
-    return (
-      (!filterSubject || subjectValue === filterSubject) &&
-      (!filterClass || classValue === filterClass)
-    );
-  });
+    if (pagination.totalPages <= maxPagesToShow) {
+      // Show all pages
+      for (let i = 1; i <= pagination.totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      // Show limited pages with ellipsis
+      let startPage = Math.max(1, pagination.currentPage - Math.floor(maxPagesToShow / 2));
+      let endPage = startPage + maxPagesToShow - 1;
+      
+      if (endPage > pagination.totalPages) {
+        endPage = pagination.totalPages;
+        startPage = Math.max(1, endPage - maxPagesToShow + 1);
+      }
+      
+      if (startPage > 1) {
+        pages.push(1);
+        if (startPage > 2) pages.push('...');
+      }
+      
+      for (let i = startPage; i <= endPage; i++) {
+        pages.push(i);
+      }
+      
+      if (endPage < pagination.totalPages) {
+        if (endPage < pagination.totalPages - 1) pages.push('...');
+        pages.push(pagination.totalPages);
+      }
+    }
+    
+    return pages;
+  };
 
   // Get safe string values for display
   const safeUserRole = user?.role || 'Unknown';
@@ -506,7 +576,8 @@ const ManageQuestions = () => {
               Manage Questions
             </h2>
             <p style={{ color: '#6C757D', margin: '0', fontSize: '14px' }}>
-              Total questions: {questions.length} | Filtered: {filteredQuestions.length}
+              Showing {questions.length} questions on page {pagination.currentPage} of {pagination.totalPages}
+              {pagination.totalQuestions > 0 && ` (Total: ${pagination.totalQuestions} questions)`}
             </p>
           </div>
           
@@ -516,7 +587,7 @@ const ManageQuestions = () => {
             flexWrap: 'wrap'
           }}>
             <button
-              onClick={fetchQuestions}
+              onClick={() => fetchQuestions(pagination.currentPage)}
               style={{
                 backgroundColor: '#6c757d',
                 color: 'white',
@@ -721,213 +792,320 @@ const ManageQuestions = () => {
             </button>
           </div>
         ) : (
-          <div style={{ overflowX: 'auto', borderRadius: '6px', border: '1px solid #E9ECEF' }}>
-            <table style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              minWidth: '800px'
-            }}>
-              <thead>
-                <tr style={{
-                  backgroundColor: '#4B5320',
-                  color: 'white'
-                }}>
-                  <th style={{ padding: '15px', textAlign: 'left', fontWeight: '600', fontSize: '14px' }}>Question</th>
-                  <th style={{ padding: '15px', textAlign: 'left', fontWeight: '600', fontSize: '14px' }}>Subject</th>
-                  <th style={{ padding: '15px', textAlign: 'left', fontWeight: '600', fontSize: '14px' }}>Class</th>
-                  <th style={{ padding: '15px', textAlign: 'left', fontWeight: '600', fontSize: '14px' }}>Options</th>
-                  <th style={{ padding: '15px', textAlign: 'left', fontWeight: '600', fontSize: '14px' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredQuestions.map(question => (
-                  <tr 
-                    key={question._id} 
-                    style={{
-                      borderBottom: '1px solid #E9ECEF',
-                      transition: 'background-color 0.2s ease'
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#F8F9FA'}
-                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                  >
-                    <td style={{ padding: '15px', verticalAlign: 'top', maxWidth: '350px', wordBreak: 'break-word' }}>
-                      <div style={{ 
-                        fontWeight: '500', 
-                        color: '#4B5320',
-                        marginBottom: '5px',
-                        fontSize: '14px'
-                      }}>
-                        {question.text || 'No question text'}
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#6C757D' }}>
-                        <span style={{ 
-                          backgroundColor: '#E8F5E9', 
-                          padding: '2px 6px', 
-                          borderRadius: '3px',
-                          marginRight: '8px'
+          <>
+            <div style={{ overflowX: 'auto', borderRadius: '6px', border: '1px solid #E9ECEF' }}>
+              <table style={{
+                width: '100%',
+                borderCollapse: 'collapse',
+                minWidth: '800px'
+              }}>
+                <thead>
+                  <tr style={{
+                    backgroundColor: '#4B5320',
+                    color: 'white'
+                  }}>
+                    <th style={{ padding: '15px', textAlign: 'left', fontWeight: '600', fontSize: '14px' }}>Question</th>
+                    <th style={{ padding: '15px', textAlign: 'left', fontWeight: '600', fontSize: '14px' }}>Subject</th>
+                    <th style={{ padding: '15px', textAlign: 'left', fontWeight: '600', fontSize: '14px' }}>Class</th>
+                    <th style={{ padding: '15px', textAlign: 'left', fontWeight: '600', fontSize: '14px' }}>Options</th>
+                    <th style={{ padding: '15px', textAlign: 'left', fontWeight: '600', fontSize: '14px' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {questions.map(question => (
+                    <tr 
+                      key={question._id} 
+                      style={{
+                        borderBottom: '1px solid #E9ECEF',
+                        transition: 'background-color 0.2s ease'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#F8F9FA'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                    >
+                      <td style={{ padding: '15px', verticalAlign: 'top', maxWidth: '350px', wordBreak: 'break-word' }}>
+                        <div style={{ 
+                          fontWeight: '500', 
+                          color: '#4B5320',
+                          marginBottom: '5px',
+                          fontSize: '14px'
                         }}>
-                          {question.marks || 1} mark{question.marks !== 1 ? 's' : ''}
-                        </span>
-                        <span style={{ 
-                          backgroundColor: '#E3F2FD', 
-                          padding: '2px 6px', 
-                          borderRadius: '3px'
-                        }}>
-                          {question.difficulty || 'medium'}
-                        </span>
-                      </div>
-                      {question.formula && (
-                        <div style={{ marginTop: '8px', fontSize: '12px', color: '#6C757D' }}>
-                          <strong>Formula:</strong> <span>{question.formula}</span>
+                          {question.text || 'No question text'}
                         </div>
-                      )}
-                    </td>
-                    
-                    <td style={{ padding: '15px', verticalAlign: 'top' }}>
-                      <span style={{
-                        backgroundColor: '#E8F5E9',
-                        color: '#4B5320',
-                        padding: '6px 12px',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        fontWeight: '600',
-                        display: 'inline-block'
-                      }}>
-                        {getSubjectString(question.subject) || 'N/A'}
-                      </span>
-                    </td>
-                    
-                    <td style={{ padding: '15px', verticalAlign: 'top' }}>
-                      <span style={{
-                        backgroundColor: '#FFF8E1',
-                        color: '#4B5320',
-                        padding: '6px 12px',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        fontWeight: '600',
-                        display: 'inline-block'
-                      }}>
-                        {getClassString(question.class) || 'N/A'}
-                      </span>
-                    </td>
-                    
-                    <td style={{ padding: '15px', verticalAlign: 'top', maxWidth: '200px' }}>
-                      <div style={{ fontSize: '12px', color: '#6C757D' }}>
-                        {question.options && Array.isArray(question.options) ? (
-                          question.options.map((option, index) => (
-                            <div 
-                              key={index} 
-                              style={{ 
-                                marginBottom: '4px',
-                                padding: '4px 8px',
-                                borderRadius: '3px',
-                                backgroundColor: question.correctAnswer === option ? '#D4EDDA' : '#F8F9FA',
-                                borderLeft: question.correctAnswer === option ? '3px solid #28A745' : '3px solid #DEE2E6'
-                              }}
-                            >
-                              <span style={{ fontWeight: '600', marginRight: '5px' }}>
-                                {String.fromCharCode(65 + index)}:
-                              </span>
-                              {option || `Option ${String.fromCharCode(65 + index)}`}
-                              {question.correctAnswer === option && (
-                                <span style={{ 
-                                  marginLeft: '8px', 
-                                  color: '#28A745',
-                                  fontSize: '11px',
-                                  fontWeight: '600'
-                                }}>
-                                  ✓ Correct
-                                </span>
-                              )}
-                            </div>
-                          ))
-                        ) : (
-                          <div style={{ color: '#DC3545', fontStyle: 'italic' }}>
-                            No options available
+                        <div style={{ fontSize: '12px', color: '#6C757D' }}>
+                          <span style={{ 
+                            backgroundColor: '#E8F5E9', 
+                            padding: '2px 6px', 
+                            borderRadius: '3px',
+                            marginRight: '8px'
+                          }}>
+                            {question.marks || 1} mark{question.marks !== 1 ? 's' : ''}
+                          </span>
+                          <span style={{ 
+                            backgroundColor: '#E3F2FD', 
+                            padding: '2px 6px', 
+                            borderRadius: '3px'
+                          }}>
+                            {question.difficulty || 'medium'}
+                          </span>
+                        </div>
+                        {question.formula && (
+                          <div style={{ marginTop: '8px', fontSize: '12px', color: '#6C757D' }}>
+                            <strong>Formula:</strong> <span>{question.formula}</span>
                           </div>
                         )}
-                      </div>
-                    </td>
-                    
-                    <td style={{ padding: '15px', verticalAlign: 'top' }}>
-                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      </td>
+                      
+                      <td style={{ padding: '15px', verticalAlign: 'top' }}>
+                        <span style={{
+                          backgroundColor: '#E8F5E9',
+                          color: '#4B5320',
+                          padding: '6px 12px',
+                          borderRadius: '4px',
+                          fontSize: '13px',
+                          fontWeight: '600',
+                          display: 'inline-block'
+                        }}>
+                          {getSubjectString(question.subject) || 'N/A'}
+                        </span>
+                      </td>
+                      
+                      <td style={{ padding: '15px', verticalAlign: 'top' }}>
+                        <span style={{
+                          backgroundColor: '#FFF8E1',
+                          color: '#4B5320',
+                          padding: '6px 12px',
+                          borderRadius: '4px',
+                          fontSize: '13px',
+                          fontWeight: '600',
+                          display: 'inline-block'
+                        }}>
+                          {getClassString(question.class) || 'N/A'}
+                        </span>
+                      </td>
+                      
+                      <td style={{ padding: '15px', verticalAlign: 'top', maxWidth: '200px' }}>
+                        <div style={{ fontSize: '12px', color: '#6C757D' }}>
+                          {question.options && Array.isArray(question.options) ? (
+                            question.options.map((option, index) => (
+                              <div 
+                                key={index} 
+                                style={{ 
+                                  marginBottom: '4px',
+                                  padding: '4px 8px',
+                                  borderRadius: '3px',
+                                  backgroundColor: question.correctAnswer === option ? '#D4EDDA' : '#F8F9FA',
+                                  borderLeft: question.correctAnswer === option ? '3px solid #28A745' : '3px solid #DEE2E6'
+                                }}
+                              >
+                                <span style={{ fontWeight: '600', marginRight: '5px' }}>
+                                  {String.fromCharCode(65 + index)}:
+                                </span>
+                                {option || `Option ${String.fromCharCode(65 + index)}`}
+                                {question.correctAnswer === option && (
+                                  <span style={{ 
+                                    marginLeft: '8px', 
+                                    color: '#28A745',
+                                    fontSize: '11px',
+                                    fontWeight: '600'
+                                  }}>
+                                    ✓ Correct
+                                  </span>
+                                )}
+                              </div>
+                            ))
+                          ) : (
+                            <div style={{ color: '#DC3545', fontStyle: 'italic' }}>
+                              No options available
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      
+                      <td style={{ padding: '15px', verticalAlign: 'top' }}>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                          <button
+                            onClick={() => handleEditQuestion(question)}
+                            style={{
+                              backgroundColor: '#FFD700',
+                              color: '#4B5320',
+                              border: 'none',
+                              padding: '8px 12px',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              fontWeight: '600',
+                              fontSize: '13px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              transition: 'all 0.2s ease'
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#FFC107'}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#FFD700'}
+                            title="Edit Question"
+                          >
+                            <span style={{ marginRight: '5px', fontSize: '14px' }}>✏️</span>
+                            Edit
+                          </button>
+                          
+                          <button
+                            onClick={() => handleDeleteQuestion(question._id)}
+                            disabled={loading}
+                            style={{
+                              backgroundColor: loading ? '#CED4DA' : '#FF6B6B',
+                              color: 'white',
+                              border: 'none',
+                              padding: '8px 12px',
+                              borderRadius: '4px',
+                              cursor: loading ? 'not-allowed' : 'pointer',
+                              fontWeight: '600',
+                              fontSize: '13px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              transition: 'all 0.2s ease'
+                            }}
+                            onMouseEnter={(e) => {
+                              if (!loading) {
+                                e.currentTarget.style.backgroundColor = '#DC3545';
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!loading) {
+                                e.currentTarget.style.backgroundColor = '#FF6B6B';
+                              }
+                            }}
+                            title="Delete Question"
+                          >
+                            <span style={{ marginRight: '5px', fontSize: '14px' }}>🗑️</span>
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Controls */}
+            {pagination.totalPages > 1 && (
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginTop: '20px',
+                padding: '15px',
+                backgroundColor: '#F8F9FA',
+                borderRadius: '6px',
+                border: '1px solid #E9ECEF'
+              }}>
+                <div style={{ color: '#6C757D', fontSize: '14px' }}>
+                  Showing {questions.length} of {pagination.totalQuestions} questions
+                </div>
+                
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <button
+                    onClick={handlePrevPage}
+                    disabled={!pagination.hasPrev || loading}
+                    style={{
+                      backgroundColor: pagination.hasPrev ? '#6c757d' : '#CED4DA',
+                      color: 'white',
+                      border: 'none',
+                      padding: '8px 16px',
+                      borderRadius: '4px',
+                      cursor: pagination.hasPrev && !loading ? 'pointer' : 'not-allowed',
+                      fontWeight: '600',
+                      fontSize: '13px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      transition: 'all 0.2s ease'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (pagination.hasPrev && !loading) {
+                        e.currentTarget.style.backgroundColor = '#5a6268';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (pagination.hasPrev && !loading) {
+                        e.currentTarget.style.backgroundColor = '#6c757d';
+                      }
+                    }}
+                  >
+                    ← Previous
+                  </button>
+                  
+                  <div style={{ display: 'flex', gap: '5px' }}>
+                    {generatePageNumbers().map((page, index) => (
+                      page === '...' ? (
+                        <span key={`ellipsis-${index}`} style={{ padding: '8px 12px' }}>...</span>
+                      ) : (
                         <button
-                          onClick={() => handleEditQuestion(question)}
+                          key={page}
+                          onClick={() => handlePageClick(page)}
                           style={{
-                            backgroundColor: '#FFD700',
-                            color: '#4B5320',
-                            border: 'none',
+                            backgroundColor: page === pagination.currentPage ? '#4B5320' : 'transparent',
+                            color: page === pagination.currentPage ? 'white' : '#4B5320',
+                            border: `1px solid ${page === pagination.currentPage ? '#4B5320' : '#DEE2E6'}`,
                             padding: '8px 12px',
                             borderRadius: '4px',
                             cursor: 'pointer',
                             fontWeight: '600',
                             fontSize: '13px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            transition: 'all 0.2s ease'
-                          }}
-                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#FFC107'}
-                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#FFD700'}
-                          title="Edit Question"
-                        >
-                          <span style={{ marginRight: '5px', fontSize: '14px' }}>✏️</span>
-                          Edit
-                        </button>
-                        
-                        <button
-                          onClick={() => handleDeleteQuestion(question._id)}
-                          disabled={loading}
-                          style={{
-                            backgroundColor: loading ? '#CED4DA' : '#FF6B6B',
-                            color: 'white',
-                            border: 'none',
-                            padding: '8px 12px',
-                            borderRadius: '4px',
-                            cursor: loading ? 'not-allowed' : 'pointer',
-                            fontWeight: '600',
-                            fontSize: '13px',
-                            display: 'flex',
-                            alignItems: 'center',
+                            minWidth: '40px',
                             transition: 'all 0.2s ease'
                           }}
                           onMouseEnter={(e) => {
-                            if (!loading) {
-                              e.currentTarget.style.backgroundColor = '#DC3545';
+                            if (page !== pagination.currentPage) {
+                              e.currentTarget.style.backgroundColor = '#F8F9FA';
                             }
                           }}
                           onMouseLeave={(e) => {
-                            if (!loading) {
-                              e.currentTarget.style.backgroundColor = '#FF6B6B';
+                            if (page !== pagination.currentPage) {
+                              e.currentTarget.style.backgroundColor = 'transparent';
                             }
                           }}
-                          title="Delete Question"
                         >
-                          <span style={{ marginRight: '5px', fontSize: '14px' }}>🗑️</span>
-                          Delete
+                          {page}
                         </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* Results Summary */}
-        {questions.length > 0 && filteredQuestions.length === 0 && (
-          <div style={{
-            backgroundColor: '#FFF3CD',
-            borderLeft: '4px solid #FFC107',
-            padding: '20px',
-            borderRadius: '6px',
-            marginTop: '20px',
-            textAlign: 'center'
-          }}>
-            <p style={{ margin: '0', color: '#856404' }}>
-              No questions match the selected filters. Try adjusting your filter criteria.
-            </p>
-          </div>
+                      )
+                    ))}
+                  </div>
+                  
+                  <button
+                    onClick={handleNextPage}
+                    disabled={!pagination.hasNext || loading}
+                    style={{
+                      backgroundColor: pagination.hasNext ? '#6c757d' : '#CED4DA',
+                      color: 'white',
+                      border: 'none',
+                      padding: '8px 16px',
+                      borderRadius: '4px',
+                      cursor: pagination.hasNext && !loading ? 'pointer' : 'not-allowed',
+                      fontWeight: '600',
+                      fontSize: '13px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      transition: 'all 0.2s ease'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (pagination.hasNext && !loading) {
+                        e.currentTarget.style.backgroundColor = '#5a6268';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (pagination.hasNext && !loading) {
+                        e.currentTarget.style.backgroundColor = '#6c757d';
+                      }
+                    }}
+                  >
+                    Next →
+                  </button>
+                </div>
+                
+                <div style={{ color: '#6C757D', fontSize: '14px' }}>
+                  Page {pagination.currentPage} of {pagination.totalPages}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -949,7 +1127,7 @@ const ManageQuestions = () => {
           }}>
             <div>
               <div style={{ fontSize: '24px', color: '#4B5320', fontWeight: '700' }}>
-                {questions.length}
+                {pagination.totalQuestions}
               </div>
               <div style={{ color: '#6C757D', fontSize: '14px' }}>
                 Total Questions
@@ -958,10 +1136,10 @@ const ManageQuestions = () => {
             
             <div>
               <div style={{ fontSize: '24px', color: '#4B5320', fontWeight: '700' }}>
-                {filteredQuestions.length}
+                {pagination.totalPages}
               </div>
               <div style={{ color: '#6C757D', fontSize: '14px' }}>
-                Filtered Questions
+                Total Pages
               </div>
             </div>
             

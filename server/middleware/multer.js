@@ -1,42 +1,35 @@
+// middleware/multer.js - UPDATED FOR BETTER IMAGE UPLOAD HANDLING
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// Ensure uploads directory exists
-const uploadsDir = 'uploads/';
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-// Configure storage
-const storage = multer.diskStorage({
+// ==================== PROFILE IMAGE CONFIGURATION ====================
+const profileStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Create user-specific directory if user is authenticated
-    let userDir = uploadsDir;
-    if (req.user && req.user.id) {
-      userDir = path.join(uploadsDir, req.user.id.toString());
-      if (!fs.existsSync(userDir)) {
-        fs.mkdirSync(userDir, { recursive: true });
-      }
+    const profileDir = 'uploads/profiles/';
+    
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(profileDir)) {
+      fs.mkdirSync(profileDir, { recursive: true });
+      console.log('📁 Created profiles directory:', profileDir);
     }
     
-    cb(null, userDir);
+    cb(null, profileDir);
   },
   filename: (req, file, cb) => {
     // Generate unique filename with timestamp and random string
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const fileExtension = path.extname(file.originalname);
-    const baseName = path.basename(file.originalname, fileExtension)
+    const ext = path.extname(file.originalname).toLowerCase();
+    const baseName = path.basename(file.originalname, ext)
       .replace(/[^a-zA-Z0-9]/g, '_')
-      .substring(0, 50); // Limit filename length
+      .substring(0, 50);
     
-    const filename = `${baseName}-${uniqueSuffix}${fileExtension}`;
+    const filename = `profile_${uniqueSuffix}${ext}`;
     
-    console.log('Multer - File upload initiated', {
+    console.log('📸 Profile image upload:', {
       userId: req.user?.id,
       originalName: file.originalname,
       generatedName: filename,
-      mimeType: file.mimetype,
       size: file.size
     });
     
@@ -44,194 +37,333 @@ const storage = multer.diskStorage({
   }
 });
 
-// File filter configuration
-const fileFilter = (req, file, cb) => {
-  const allowedMimes = {
-    'image/jpeg': true,
-    'image/jpg': true,
-    'image/png': true,
-    'image/gif': true,
-    'image/webp': true,
-    'application/pdf': true,
-    'application/msword': true,
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': true,
-    'text/plain': true,
-    'application/vnd.ms-excel': true,
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': true
-  };
-
-  if (allowedMimes[file.mimetype]) {
-    cb(null, true);
-  } else {
-    console.warn('Multer - File type rejected', {
-      userId: req.user?.id,
-      filename: file.originalname,
-      mimeType: file.mimetype,
-      allowedTypes: Object.keys(allowedMimes)
-    });
+// ==================== GENERAL UPLOAD CONFIGURATION ====================
+const generalStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = 'uploads/general/';
     
-    cb(new Error(`File type '${file.mimetype}' is not allowed. Allowed types: ${Object.keys(allowedMimes).join(', ')}`), false);
-  }
-};
-
-// File size limits (5MB for images, 10MB for documents)
-const limits = {
-  fileSize: 10 * 1024 * 1024, // 10MB
-  files: 5 // Maximum number of files
-};
-
-// Create multer instance
-const upload = multer({
-  storage,
-  fileFilter,
-  limits,
-  onError: (error, next) => {
-    console.error('Multer - Upload error', {
-      error: error.message,
-      code: error.code
-    });
-    next(error);
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname).toLowerCase();
+    const baseName = path.basename(file.originalname, ext)
+      .replace(/[^a-zA-Z0-9]/g, '_')
+      .substring(0, 50);
+    
+    const filename = `${baseName}_${uniqueSuffix}${ext}`;
+    cb(null, filename);
   }
 });
 
-// Custom middleware for different file types
-const uploadImage = upload.fields([
-  { name: 'profilePicture', maxCount: 1 },
-  { name: 'questionImage', maxCount: 1 },
-  { name: 'examDocument', maxCount: 1 }
-]);
-
-const uploadDocuments = upload.fields([
-  { name: 'documents', maxCount: 5 },
-  { name: 'bulkUpload', maxCount: 1 }
-]);
-
-const uploadSingleImage = upload.single('image');
-const uploadSingleDocument = upload.single('document');
-
-// Middleware to validate file uploads
-const validateFileUpload = (req, res, next) => {
-  if (!req.file && (!req.files || Object.keys(req.files).length === 0)) {
-    return next(); // No files to validate
-  }
-
-  // Validate individual file
-  const validateFile = (file) => {
-    const maxSizes = {
-      'image/': 5 * 1024 * 1024, // 5MB for images
-      'application/pdf': 10 * 1024 * 1024, // 10MB for PDFs
-      'application/msword': 10 * 1024 * 1024,
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 10 * 1024 * 1024,
-      'text/plain': 1 * 1024 * 1024, // 1MB for text files
-      'application/vnd.ms-excel': 5 * 1024 * 1024,
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 5 * 1024 * 1024
-    };
-
-    // Find matching file type
-    const fileType = Object.keys(maxSizes).find(type => file.mimetype.startsWith(type));
-    const maxSize = fileType ? maxSizes[fileType] : 5 * 1024 * 1024; // Default 5MB
-
-    if (file.size > maxSize) {
-      throw new Error(`File '${file.originalname}' exceeds maximum size of ${maxSize / (1024 * 1024)}MB`);
-    }
-
-    // Additional image validation
-    if (file.mimetype.startsWith('image/')) {
-      const allowedDimensions = {
-        profilePicture: { width: 500, height: 500 },
-        questionImage: { width: 800, height: 600 },
-        default: { width: 1200, height: 1200 }
-      };
-      
-      // Note: Actual dimension validation would require image processing
-      console.log('File validation - Image uploaded', {
-        filename: file.originalname,
-        size: file.size,
-        fieldname: file.fieldname
-      });
-    }
-  };
-
-  try {
-    if (req.file) {
-      validateFile(req.file);
-    }
-
-    if (req.files) {
-      Object.values(req.files).flat().forEach(validateFile);
-    }
-
-    console.log('File validation - All files validated successfully', {
-      userId: req.user?.id,
-      fileCount: req.file ? 1 : (req.files ? Object.values(req.files).flat().length : 0)
-    });
-
-    next();
-  } catch (error) {
-    console.error('File validation - Validation failed', {
-      error: error.message,
-      userId: req.user?.id
-    });
-
-    // Clean up uploaded files on validation failure
-    if (req.file) {
-      fs.unlinkSync(req.file.path);
-    }
-
-    if (req.files) {
-      Object.values(req.files).flat().forEach(file => {
-        if (fs.existsSync(file.path)) {
-          fs.unlinkSync(file.path);
-        }
-      });
-    }
-
-    res.status(400).json({ 
-      error: error.message,
-      code: 'FILE_VALIDATION_FAILED'
-    });
+// ==================== FILE FILTERS ====================
+const imageFilter = (req, file, cb) => {
+  const allowedImageTypes = /jpeg|jpg|png|gif|webp/;
+  const extname = allowedImageTypes.test(path.extname(file.originalname).toLowerCase());
+  const mimetype = allowedImageTypes.test(file.mimetype);
+  
+  if (extname && mimetype) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only image files are allowed (jpeg, jpg, png, gif, webp)'));
   }
 };
 
-// Middleware to clean up files on error
-const cleanupUploadedFiles = (req, res, next) => {
-  const cleanup = () => {
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-      console.log('File cleanup - Removed file', { path: req.file.path });
-    }
+const documentFilter = (req, file, cb) => {
+  const allowedDocTypes = /pdf|doc|docx|txt|xls|xlsx/;
+  const extname = allowedDocTypes.test(path.extname(file.originalname).toLowerCase());
+  const mimetype = /pdf|msword|openxmlformats-officedocument|text|spreadsheetml/.test(file.mimetype);
+  
+  if (extname && mimetype) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only document files are allowed (pdf, doc, docx, txt, xls, xlsx)'));
+  }
+};
 
-    if (req.files) {
-      Object.values(req.files).flat().forEach(file => {
-        if (fs.existsSync(file.path)) {
-          fs.unlinkSync(file.path);
-          console.log('File cleanup - Removed file', { path: file.path });
-        }
+const anyFileFilter = (req, file, cb) => {
+  const allowedTypes = /jpeg|jpg|png|gif|webp|pdf|doc|docx|txt|xls|xlsx/;
+  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+  const mimetype = allowedTypes.test(file.mimetype);
+  
+  if (extname && mimetype) {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid file type. Allowed: images, pdf, docs, spreadsheets'));
+  }
+};
+
+// ==================== UPLOAD INSTANCES ====================
+const uploadProfileImage = multer({
+  storage: profileStorage,
+  fileFilter: imageFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB for profile images
+    files: 1
+  }
+});
+
+const uploadDocument = multer({
+  storage: generalStorage,
+  fileFilter: documentFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB for documents
+    files: 5
+  }
+});
+
+const uploadAnyFile = multer({
+  storage: generalStorage,
+  fileFilter: anyFileFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB max
+    files: 5
+  }
+});
+
+// ==================== MIDDLEWARE FUNCTIONS ====================
+const handleProfileImageUpload = (req, res, next) => {
+  const upload = uploadProfileImage.single('profileImage');
+  
+  upload(req, res, function(err) {
+    if (err instanceof multer.MulterError) {
+      console.error('❌ Multer error:', err);
+      
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({
+          success: false,
+          message: 'File size too large. Maximum size is 5MB for profile images.'
+        });
+      }
+      
+      if (err.code === 'LIMIT_FILE_COUNT') {
+        return res.status(400).json({
+          success: false,
+          message: 'Only one profile image can be uploaded at a time.'
+        });
+      }
+      
+      return res.status(400).json({
+        success: false,
+        message: `Upload error: ${err.message}`
+      });
+      
+    } else if (err) {
+      console.error('❌ File filter error:', err);
+      return res.status(400).json({
+        success: false,
+        message: err.message
       });
     }
-  };
-
-  // Cleanup on response finish if there's an error
-  const originalSend = res.send;
-  res.send = function(data) {
-    if (res.statusCode >= 400) {
-      cleanup();
+    
+    // Log successful upload
+    if (req.file) {
+      console.log('✅ File uploaded successfully:', {
+        filename: req.file.filename,
+        originalname: req.file.originalname,
+        size: req.file.size,
+        mimetype: req.file.mimetype,
+        destination: req.file.destination
+      });
     }
-    originalSend.call(this, data);
-  };
+    
+    next();
+  });
+};
 
-  // Cleanup on request error
-  req.on('error', cleanup);
+const handleDocumentUpload = (req, res, next) => {
+  const upload = uploadDocument.array('documents', 5);
+  
+  upload(req, res, function(err) {
+    if (err instanceof multer.MulterError) {
+      console.error('❌ Multer error:', err);
+      
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({
+          success: false,
+          message: 'File size too large. Maximum size is 10MB per document.'
+        });
+      }
+      
+      return res.status(400).json({
+        success: false,
+        message: `Upload error: ${err.message}`
+      });
+      
+    } else if (err) {
+      console.error('❌ File filter error:', err);
+      return res.status(400).json({
+        success: false,
+        message: err.message
+      });
+    }
+    
+    next();
+  });
+};
+
+const handleBulkUpload = (req, res, next) => {
+  const upload = uploadAnyFile.single('bulkFile');
+  
+  upload(req, res, function(err) {
+    if (err) {
+      console.error('❌ Bulk upload error:', err);
+      return res.status(400).json({
+        success: false,
+        message: err.message
+      });
+    }
+    
+    next();
+  });
+};
+
+// ==================== FILE VALIDATION MIDDLEWARE ====================
+const validateUploadedFile = (req, res, next) => {
+  if (!req.file && (!req.files || req.files.length === 0)) {
+    return next(); // No files to validate
+  }
+
+  const files = req.file ? [req.file] : req.files;
+
+  for (const file of files) {
+    // Check file size based on type
+    const isImage = file.mimetype.startsWith('image/');
+    const maxSize = isImage ? 5 * 1024 * 1024 : 10 * 1024 * 1024;
+    
+    if (file.size > maxSize) {
+      // Clean up uploaded file
+      if (fs.existsSync(file.path)) {
+        fs.unlinkSync(file.path);
+      }
+      
+      const sizeType = isImage ? '5MB' : '10MB';
+      return res.status(400).json({
+        success: false,
+        message: `File '${file.originalname}' exceeds maximum size of ${sizeType}`
+      });
+    }
+
+    // Additional security checks
+    const ext = path.extname(file.originalname).toLowerCase();
+    const allowedExts = isImage 
+      ? ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+      : ['.pdf', '.doc', '.docx', '.txt', '.xls', '.xlsx'];
+    
+    if (!allowedExts.includes(ext)) {
+      if (fs.existsSync(file.path)) {
+        fs.unlinkSync(file.path);
+      }
+      
+      return res.status(400).json({
+        success: false,
+        message: `File extension '${ext}' is not allowed for this upload type`
+      });
+    }
+  }
 
   next();
 };
 
+// ==================== FILE CLEANUP MIDDLEWARE ====================
+const cleanupUploadedFiles = (req, res, next) => {
+  // Store original send function
+  const originalSend = res.send;
+  
+  // Override send to clean up files on error
+  res.send = function(data) {
+    // If status code indicates error, clean up files
+    if (res.statusCode >= 400) {
+      cleanupFiles(req);
+    }
+    originalSend.call(this, data);
+  };
+
+  // Clean up on request error
+  req.on('error', () => {
+    cleanupFiles(req);
+  });
+
+  next();
+};
+
+const cleanupFiles = (req) => {
+  const files = req.file ? [req.file] : (req.files || []);
+  
+  files.forEach(file => {
+    if (file && file.path && fs.existsSync(file.path)) {
+      try {
+        fs.unlinkSync(file.path);
+        console.log('🧹 Cleaned up file:', file.path);
+      } catch (err) {
+        console.error('❌ Error cleaning up file:', err.message);
+      }
+    }
+  });
+};
+
+// ==================== DIRECTORY CLEANUP UTILITY ====================
+const cleanupOldFiles = (directory, maxAgeHours = 24) => {
+  if (!fs.existsSync(directory)) return;
+  
+  const now = Date.now();
+  const maxAge = maxAgeHours * 60 * 60 * 1000;
+  
+  fs.readdir(directory, (err, files) => {
+    if (err) return;
+    
+    files.forEach(file => {
+      const filePath = path.join(directory, file);
+      fs.stat(filePath, (err, stats) => {
+        if (err) return;
+        
+        const fileAge = now - stats.mtime.getTime();
+        if (fileAge > maxAge) {
+          fs.unlink(filePath, err => {
+            if (!err) {
+              console.log('🧹 Cleaned up old file:', filePath);
+            }
+          });
+        }
+      });
+    });
+  });
+};
+
+// Schedule regular cleanup (every 6 hours)
+setInterval(() => {
+  cleanupOldFiles('uploads/profiles', 24); // Keep profile images for 24 hours
+  cleanupOldFiles('uploads/general', 6);   // Keep general uploads for 6 hours
+  cleanupOldFiles('uploads/temp', 1);      // Keep temp files for 1 hour
+}, 6 * 60 * 60 * 1000);
+
+// Initial cleanup
+cleanupOldFiles('uploads/profiles', 24);
+cleanupOldFiles('uploads/general', 6);
+cleanupOldFiles('uploads/temp', 1);
+
+// ==================== EXPORTS ====================
 module.exports = {
-  upload,
-  uploadImage,
-  uploadDocuments,
-  uploadSingleImage,
-  uploadSingleDocument,
-  validateFileUpload,
-  cleanupUploadedFiles
+  // Upload handlers
+  handleProfileImageUpload,
+  handleDocumentUpload,
+  handleBulkUpload,
+  
+  // Validation middleware
+  validateUploadedFile,
+  
+  // Cleanup middleware
+  cleanupUploadedFiles,
+  
+  // Utility functions
+  cleanupOldFiles,
+  
+  // Upload instances (for direct use if needed)
+  uploadProfileImage,
+  uploadDocument,
+  uploadAnyFile
 };

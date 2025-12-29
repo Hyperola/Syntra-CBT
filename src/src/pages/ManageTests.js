@@ -7,7 +7,7 @@ import {
   FiSearch, FiTrash2, FiClock, FiUsers, FiEdit, FiCheck, FiX, 
   FiRefreshCw, FiCheckSquare, FiChevronDown, FiChevronUp, 
   FiUser, FiList, FiFileText, FiSend, FiArchive, FiExternalLink,
-  FiBookOpen, FiFilter
+  FiBookOpen, FiFilter, FiUpload
 } from 'react-icons/fi';
 
 const ManageTests = () => {
@@ -29,8 +29,8 @@ const ManageTests = () => {
   const [batchDetails, setBatchDetails] = useState({});
   const [loadingBatches, setLoadingBatches] = useState({});
   const [testStatuses, setTestStatuses] = useState({});
-  const [submissions, setSubmissions] = useState({});
-
+  const [submissionStats, setSubmissionStats] = useState({}); // NEW: Store submission stats
+  
   // Get current academic year and term for default filtering
   const currentYear = new Date().getFullYear();
   const currentMonth = new Date().getMonth() + 1; // 1-12
@@ -68,13 +68,14 @@ const ManageTests = () => {
   useEffect(() => {
     if (tests.length === 0) return;
     
-    // Fetch submissions for completed/active tests
+    // 🔥 FETCH SUBMISSION STATS FOR ALL TESTS
     tests.forEach(test => {
       if (test.status === 'completed' || test.status === 'scheduled' || test.status === 'active') {
-        fetchTestSubmissions(test._id);
+        fetchTestSubmissionStats(test._id);
       }
     });
     
+    // Real-time status updates
     const interval = setInterval(() => {
       const updatedStatuses = {};
       tests.forEach(test => {
@@ -86,14 +87,39 @@ const ManageTests = () => {
     return () => clearInterval(interval);
   }, [tests]);
 
-  useEffect(() => {
-    tests.forEach(test => {
-      const computedStatus = testStatuses[test._id];
-      if (computedStatus && computedStatus.allBatchesElapsed && test.status !== 'completed') {
-        autoCompleteTest(test._id);
+  // 🔥 NEW FUNCTION: Fetch submission stats for a test
+  const fetchTestSubmissionStats = async (testId) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`http://localhost:5000/api/tests/${testId}/submission-stats`, {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+      });
+      
+      if (res.data.success) {
+        setSubmissionStats(prev => ({
+          ...prev,
+          [testId]: res.data.stats
+        }));
+        
+        console.log('📊 Submission stats loaded for test:', testId, res.data.stats);
       }
-    });
-  }, [tests, testStatuses]);
+    } catch (err) {
+      console.error(`Error fetching submission stats for test ${testId}:`, err);
+      // Set default stats if API fails
+      setSubmissionStats(prev => ({
+        ...prev,
+        [testId]: {
+          totalAssignedStudents: 0,
+          submittedCount: 0,
+          pendingCount: 0,
+          submissionRate: 0
+        }
+      }));
+    }
+  };
 
   const fetchClasses = async () => {
     try {
@@ -161,38 +187,34 @@ const ManageTests = () => {
     setLoading(false);
   };
 
-  const fetchTestSubmissions = async (testId) => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await axios.get(`http://localhost:5000/api/results/test/${testId}/submissions`, {
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-      });
-      
-      if (res.data.success) {
-        setSubmissions(prev => ({
-          ...prev,
-          [testId]: res.data.submissions || []
-        }));
-      }
-    } catch (err) {
-      console.error(`Error fetching submissions for test ${testId}:`, err);
-    }
-  };
-
   const calculateRealTimeStatus = (test) => {
     const now = new Date();
     
-    if (test.status === 'completed') {
-      const testSubmissions = submissions[test._id] || [];
-      const submittedCount = new Set(testSubmissions.map(s => s.student?._id || s.student)).size;
+    // Get stats from submissionStats if available
+    const stats = submissionStats[test._id];
+    if (stats) {
+      const totalStudents = stats.totalAssignedStudents;
+      const submittedCount = stats.submittedCount;
       
+      return {
+        status: test.status,
+        activeStudents: stats.pendingCount,
+        submittedStudents: submittedCount,
+        totalStudents: totalStudents,
+        isActive: test.status === 'active',
+        hasActiveBatches: test.status === 'active',
+        hasUpcomingBatches: test.status === 'scheduled',
+        allBatchesElapsed: test.status === 'completed',
+        submissionRate: stats.submissionRate
+      };
+    }
+    
+    // Fallback to old logic if stats not available
+    if (test.status === 'completed') {
       return {
         status: 'completed',
         activeStudents: 0,
-        submittedStudents: submittedCount,
+        submittedStudents: 0,
         totalStudents: getTotalStudents(test),
         isActive: false,
         hasActiveBatches: false,
@@ -219,18 +241,6 @@ const ManageTests = () => {
     let allBatchesElapsed = true;
     let activeStudentsCount = 0;
     
-    // Get submitted students from batches
-    const submittedStudents = new Set();
-    test.batches.forEach(batch => {
-      if (batch.submittedStudents) {
-        batch.submittedStudents.forEach(studentId => {
-          submittedStudents.add(studentId.toString());
-        });
-      }
-    });
-    
-    const submittedStudentsCount = submittedStudents.size;
-    
     test.batches.forEach(batch => {
       if (!batch.isActive) return;
       
@@ -241,8 +251,7 @@ const ManageTests = () => {
         hasActiveBatches = true;
         allBatchesElapsed = false;
         const batchStudents = batch.students?.length || 0;
-        const batchSubmitted = batch.submittedStudents?.length || 0;
-        activeStudentsCount += (batchStudents - batchSubmitted);
+        activeStudentsCount += batchStudents;
       } else if (now < start) {
         hasUpcomingBatches = true;
         allBatchesElapsed = false;
@@ -262,7 +271,7 @@ const ManageTests = () => {
     return {
       status: overallStatus,
       activeStudents: activeStudentsCount,
-      submittedStudents: submittedStudentsCount,
+      submittedStudents: 0, // Will be updated by submissionStats
       totalStudents: getTotalStudents(test),
       isActive: hasActiveBatches,
       hasActiveBatches,
@@ -278,32 +287,43 @@ const ManageTests = () => {
     }, 0);
   };
 
-  const getTotalSubmittedStudents = (test) => {
-    // Use the submissions data if available
-    if (submissions[test._id]) {
-      const uniqueStudents = new Set();
-      submissions[test._id].forEach(submission => {
-        const studentId = submission.student?._id || submission.student;
-        if (studentId) {
-          uniqueStudents.add(studentId.toString());
-        }
-      });
-      return uniqueStudents.size;
+  // 🔥 UPDATED: Get submission stats directly from submissionStats
+  const getSubmissionStats = (test) => {
+    const stats = submissionStats[test._id];
+    
+    if (stats) {
+      return {
+        submitted: stats.submittedCount,
+        active: stats.pendingCount,
+        total: stats.totalAssignedStudents,
+        percentage: stats.submissionRate,
+        totalAssigned: stats.totalAssignedStudents,
+        pendingCount: stats.pendingCount,
+        submissionRate: stats.submissionRate
+      };
     }
     
-    // Fallback to batch data
-    if (!test.batches || test.batches.length === 0) return 0;
+    // Fallback if stats not loaded yet
+    const computed = testStatuses[test._id];
+    if (computed) {
+      return {
+        submitted: computed.submittedStudents,
+        active: computed.activeStudents,
+        total: computed.totalStudents,
+        percentage: computed.totalStudents > 0 ? 
+          Math.round((computed.submittedStudents / computed.totalStudents) * 100) : 0
+      };
+    }
     
-    const allSubmittedStudents = new Set();
-    test.batches.forEach(batch => {
-      if (batch.submittedStudents) {
-        batch.submittedStudents.forEach(studentId => {
-          allSubmittedStudents.add(studentId.toString());
-        });
-      }
-    });
-    
-    return allSubmittedStudents.size;
+    return { 
+      submitted: 0, 
+      active: 0, 
+      total: 0, 
+      percentage: 0,
+      totalAssigned: 0,
+      pendingCount: 0,
+      submissionRate: 0
+    };
   };
 
   const fetchBatchDetails = async (testId, batch) => {
@@ -339,8 +359,7 @@ const ManageTests = () => {
             return {
               ...res.data.user,
               hasSubmitted,
-              submittedAt: submissionDetails?.submittedAt || 
-                          (hasSubmitted ? getSubmissionTime(studentId, batch) : null),
+              submittedAt: submissionDetails?.submittedAt || null,
               score: submissionDetails?.score || null,
               totalScore: submissionDetails?.totalScore || null
             };
@@ -363,13 +382,6 @@ const ManageTests = () => {
     }
   };
 
-  const getSubmissionTime = (studentId, batch) => {
-    if (batch.submissionTimes && batch.submissionTimes[studentId]) {
-      return batch.submissionTimes[studentId];
-    }
-    return batch.submittedAt || new Date().toISOString();
-  };
-
   const toggleTestExpansion = async (testId) => {
     if (expandedTestId === testId) {
       setExpandedTestId(null);
@@ -380,8 +392,8 @@ const ManageTests = () => {
       if (test && test.batches && test.batches.length > 0) {
         setLoadingBatches(prev => ({ ...prev, [testId]: true }));
         
-        // Refresh submissions data when expanding
-        await fetchTestSubmissions(testId);
+        // 🔥 Refresh submission stats when expanding
+        await fetchTestSubmissionStats(testId);
         
         const details = {};
         for (const batch of test.batches) {
@@ -408,44 +420,32 @@ const ManageTests = () => {
     
     if (!batch.isActive) return { status: 'cancelled', label: 'Cancelled', color: '#DC2626', bg: '#FEE2E2' };
     
-    const submittedCount = batch.submittedStudents?.length || 0;
-    const totalStudents = batch.students?.length || 0;
-    
     if (now < start) return { 
       status: 'upcoming', 
       label: 'Upcoming', 
       color: '#D97706', 
-      bg: '#FEF3C7',
-      submitted: submittedCount,
-      total: totalStudents
+      bg: '#FEF3C7'
     };
     
     if (now >= start && now <= end) return { 
       status: 'active', 
       label: 'Active', 
       color: '#059669', 
-      bg: '#D1FAE5',
-      submitted: submittedCount,
-      total: totalStudents,
-      remaining: totalStudents - submittedCount
+      bg: '#D1FAE5'
     };
     
     if (now > end) return { 
       status: 'completed', 
       label: 'Completed', 
       color: '#6B7280', 
-      bg: '#F3F4F6',
-      submitted: submittedCount,
-      total: totalStudents
+      bg: '#F3F4F6'
     };
     
     return { 
       status: 'unknown', 
       label: 'Unknown', 
       color: '#6B7280', 
-      bg: '#F3F4F6',
-      submitted: submittedCount,
-      total: totalStudents
+      bg: '#F3F4F6'
     };
   };
 
@@ -503,14 +503,8 @@ const ManageTests = () => {
           : test
       ));
       
-      const updatedTest = tests.find(t => t._id === testId);
-      if (updatedTest) {
-        const computedStatus = calculateRealTimeStatus({ ...updatedTest, status: 'completed' });
-        setTestStatuses(prev => ({
-          ...prev,
-          [testId]: computedStatus
-        }));
-      }
+      // 🔥 Refresh submission stats after completion
+      await fetchTestSubmissionStats(testId);
       
     } catch (err) {
       console.error('Error auto-completing test:', err);
@@ -633,14 +627,8 @@ const ManageTests = () => {
       );
       setTests(updatedTests);
       
-      const updatedTest = updatedTests.find(t => t._id === testId);
-      if (updatedTest) {
-        const computedStatus = calculateRealTimeStatus(updatedTest);
-        setTestStatuses(prev => ({
-          ...prev,
-          [testId]: computedStatus
-        }));
-      }
+      // 🔥 Refresh submission stats after completion
+      await fetchTestSubmissionStats(testId);
       
     } catch (err) {
       console.error('Complete test error:', err);
@@ -699,6 +687,14 @@ const ManageTests = () => {
         },
       });
       setTests(tests.filter(test => test._id !== testId));
+      
+      // Remove submission stats for deleted test
+      setSubmissionStats(prev => {
+        const newStats = { ...prev };
+        delete newStats[testId];
+        return newStats;
+      });
+      
       setSuccess(`"${testTitle}" deleted successfully.`);
       setError(null);
     } catch (err) {
@@ -844,19 +840,9 @@ const ManageTests = () => {
     });
   };
 
-  const getSubmissionStats = (test) => {
-    const computed = testStatuses[test._id];
-    if (computed) {
-      const submitted = getTotalSubmittedStudents(test);
-      const total = computed.totalStudents;
-      return {
-        submitted: submitted,
-        active: computed.activeStudents,
-        total: total,
-        percentage: total > 0 ? Math.round((submitted / total) * 100) : 0
-      };
-    }
-    return { submitted: 0, active: 0, total: 0, percentage: 0 };
+  // 🔥 UPDATED: Get submission stats from submissionStats state
+  const getTestSubmissionStats = (test) => {
+    return getSubmissionStats(test);
   };
 
   const getTestStats = () => {
@@ -877,6 +863,34 @@ const ManageTests = () => {
     return stats;
   };
 
+  // 🔥 CALCULATE TOTAL SUBMISSIONS FOR CARDS
+  const calculateCardStats = () => {
+    let totalAssigned = 0;
+    let totalSubmitted = 0;
+    let totalActive = 0;
+    
+    // Only count for scheduled, active, and completed tests
+    tests.forEach(test => {
+      const status = getDisplayStatus(test);
+      if (status === 'scheduled' || status === 'active' || status === 'completed') {
+        const stats = getSubmissionStats(test);
+        totalAssigned += stats.totalAssigned || 0;
+        totalSubmitted += stats.submitted || 0;
+        totalActive += stats.active || 0;
+      }
+    });
+    
+    const submissionRate = totalAssigned > 0 ? Math.round((totalSubmitted / totalAssigned) * 100) : 0;
+    
+    return {
+      totalAssigned,
+      totalSubmitted,
+      totalActive,
+      submissionRate
+    };
+  };
+
+  const cardStats = calculateCardStats();
   const testStats = getTestStats();
 
   if (!user || !canManageTests()) {
@@ -1095,13 +1109,14 @@ const ManageTests = () => {
           </div>
         )}
 
-        {/* Test Stats */}
+        {/* 🔥 UPDATED TEST STATS WITH SUBMISSION COUNTS */}
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
           gap: '16px',
           marginBottom: '24px'
         }}>
+          {/* Draft Tests Card */}
           <div style={{
             backgroundColor: '#FFFFFF',
             padding: '16px',
@@ -1114,6 +1129,8 @@ const ManageTests = () => {
               {testStats.draft}
             </div>
           </div>
+          
+          {/* Submitted Card */}
           <div style={{
             backgroundColor: '#FFFFFF',
             padding: '16px',
@@ -1126,6 +1143,8 @@ const ManageTests = () => {
               {testStats.submitted}
             </div>
           </div>
+          
+          {/* Approved Card */}
           <div style={{
             backgroundColor: '#FFFFFF',
             padding: '16px',
@@ -1138,6 +1157,8 @@ const ManageTests = () => {
               {testStats.approved}
             </div>
           </div>
+          
+          {/* 🔥 TOTAL ASSIGNED STUDENTS CARD */}
           <div style={{
             backgroundColor: '#FFFFFF',
             padding: '16px',
@@ -1145,11 +1166,16 @@ const ManageTests = () => {
             boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
             borderLeft: '4px solid #0C5460'
           }}>
-            <div style={{ fontSize: '14px', color: '#6B7280', marginBottom: '8px' }}>Scheduled</div>
+            <div style={{ fontSize: '14px', color: '#6B7280', marginBottom: '8px' }}>Total Assigned</div>
             <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#0C5460' }}>
-              {testStats.scheduled}
+              {cardStats.totalAssigned}
+            </div>
+            <div style={{ fontSize: '12px', color: '#6B7280', marginTop: '4px' }}>
+              Students assigned to tests
             </div>
           </div>
+          
+          {/* 🔥 TOTAL SUBMISSIONS CARD */}
           <div style={{
             backgroundColor: '#FFFFFF',
             padding: '16px',
@@ -1157,19 +1183,16 @@ const ManageTests = () => {
             boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
             borderLeft: '4px solid #155724'
           }}>
-            <div style={{ fontSize: '14px', color: '#6B7280', marginBottom: '8px' }}>Active</div>
+            <div style={{ fontSize: '14px', color: '#6B7280', marginBottom: '8px' }}>Submissions</div>
             <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#155724' }}>
-              {testStats.active}
+              {cardStats.totalSubmitted}
             </div>
-            {testStats.active > 0 && (
-              <div style={{ fontSize: '12px', color: '#6B7280', marginTop: '4px' }}>
-                {tests.filter(t => getDisplayStatus(t) === 'active').reduce((acc, test) => {
-                  const stats = getSubmissionStats(test);
-                  return acc + stats.active;
-                }, 0)} students taking tests
-              </div>
-            )}
+            <div style={{ fontSize: '12px', color: '#6B7280', marginTop: '4px' }}>
+              {cardStats.submissionRate}% submission rate
+            </div>
           </div>
+          
+          {/* Active Tests Card */}
           <div style={{
             backgroundColor: '#FFFFFF',
             padding: '16px',
@@ -1177,16 +1200,13 @@ const ManageTests = () => {
             boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
             borderLeft: '4px solid #383D41'
           }}>
-            <div style={{ fontSize: '14px', color: '#6B7280', marginBottom: '8px' }}>Completed</div>
+            <div style={{ fontSize: '14px', color: '#6B7280', marginBottom: '8px' }}>Active Tests</div>
             <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#383D41' }}>
-              {testStats.completed}
+              {testStats.active}
             </div>
-            {testStats.completed > 0 && (
+            {cardStats.totalActive > 0 && (
               <div style={{ fontSize: '12px', color: '#6B7280', marginTop: '4px' }}>
-                {tests.filter(t => getDisplayStatus(t) === 'completed').reduce((acc, test) => {
-                  const stats = getSubmissionStats(test);
-                  return acc + stats.submitted;
-                }, 0)} total submissions
+                {cardStats.totalActive} students taking tests
               </div>
             )}
           </div>
@@ -1404,7 +1424,7 @@ const ManageTests = () => {
             {filteredTests.map(test => {
               const displayStatus = getDisplayStatus(test);
               const statusInfo = getStatusColor(displayStatus);
-              const submissionStats = getSubmissionStats(test);
+              const stats = getTestSubmissionStats(test); // 🔥 Get updated stats
               const isTestOwner = user.role === 'teacher' && test.createdBy?._id === user._id;
               const isEligibleForApproval = canBeApproved(test);
               const approvalMessage = getApprovalMessage(test);
@@ -1504,8 +1524,8 @@ const ManageTests = () => {
                           )}
                         </div>
 
-                        {/* Submission progress for active/completed tests */}
-                        {(displayStatus === 'active' || displayStatus === 'completed') && submissionStats.total > 0 && (
+                        {/* 🔥 Submission progress for scheduled/active/completed tests */}
+                        {(displayStatus === 'scheduled' || displayStatus === 'active' || displayStatus === 'completed') && stats.total > 0 && (
                           <div style={{
                             marginBottom: '12px',
                             maxWidth: '300px'
@@ -1517,8 +1537,8 @@ const ManageTests = () => {
                               color: '#6B7280',
                               marginBottom: '4px'
                             }}>
-                              <span>Submissions: {submissionStats.submitted}/{submissionStats.total}</span>
-                              <span>{submissionStats.percentage}%</span>
+                              <span>Submissions: {stats.submitted}/{stats.total}</span>
+                              <span>{stats.percentage}%</span>
                             </div>
                             <div style={{
                               height: '6px',
@@ -1527,19 +1547,20 @@ const ManageTests = () => {
                               overflow: 'hidden'
                             }}>
                               <div style={{
-                                width: `${submissionStats.percentage}%`,
+                                width: `${stats.percentage}%`,
                                 height: '100%',
-                                backgroundColor: displayStatus === 'active' ? '#059669' : '#383D41',
+                                backgroundColor: displayStatus === 'active' ? '#059669' : 
+                                              displayStatus === 'completed' ? '#383D41' : '#0C5460',
                                 transition: 'width 0.3s ease'
                               }}></div>
                             </div>
-                            {displayStatus === 'active' && submissionStats.active > 0 && (
+                            {displayStatus === 'active' && stats.active > 0 && (
                               <div style={{
                                 fontSize: '12px',
                                 color: '#D97706',
                                 marginTop: '4px'
                               }}>
-                                {submissionStats.active} student{submissionStats.active !== 1 ? 's' : ''} currently taking test
+                                {stats.active} student{stats.active !== 1 ? 's' : ''} currently taking test
                               </div>
                             )}
                           </div>
@@ -1583,9 +1604,9 @@ const ManageTests = () => {
                             }}>
                               <FiUsers size={14} />
                               {test.batches.length} Batch{test.batches.length !== 1 ? 'es' : ''}
-                              {submissionStats.total > 0 && (
+                              {stats.total > 0 && (
                                 <span style={{ marginLeft: '4px', color: '#059669' }}>
-                                  ({submissionStats.submitted}/{submissionStats.total})
+                                  ({stats.submitted}/{stats.total})
                                 </span>
                               )}
                             </span>
@@ -1659,7 +1680,8 @@ const ManageTests = () => {
                         </span>
                       </div>
                       
-                      {hasBatches && (
+                      {/* 🔥 Show submission stats for scheduled/active/completed tests */}
+                      {(displayStatus === 'scheduled' || displayStatus === 'active' || displayStatus === 'completed') && (
                         <div style={{
                           display: 'flex',
                           alignItems: 'center',
@@ -1667,10 +1689,10 @@ const ManageTests = () => {
                           color: '#6B7280',
                           fontSize: '14px'
                         }}>
-                          <FiList style={{ flexShrink: 0 }} />
-                          <span>Total Students: {
-                            test.batches.reduce((total, batch) => total + (batch.students?.length || 0), 0)
-                          }</span>
+                          <FiUpload style={{ flexShrink: 0, color: stats.percentage > 50 ? '#228B22' : '#D97706' }} />
+                          <span style={{ fontWeight: '500', color: stats.percentage > 50 ? '#228B22' : '#D97706' }}>
+                            {stats.submitted}/{stats.totalAssigned || stats.total} submitted
+                          </span>
                         </div>
                       )}
                     </div>
@@ -1929,7 +1951,6 @@ const ManageTests = () => {
                             const batchKey = batch._id || batch.name;
                             const batchDetailsData = batchDetails[test._id]?.[batchKey];
                             const studentCount = batch.students?.length || 0;
-                            const submittedCount = batch.submittedStudents?.length || 0;
                             
                             return (
                               <div key={batchKey} style={{
@@ -1969,7 +1990,6 @@ const ManageTests = () => {
                                         borderRadius: '4px'
                                       }}>
                                         {batchStatus.label}
-                                        {batchStatus.total > 0 && ` (${submittedCount}/${studentCount})`}
                                       </span>
                                     </div>
                                     
@@ -2010,20 +2030,6 @@ const ManageTests = () => {
                                         <FiClock size={12} />
                                         <span>End: {formatDate(batch.schedule.end)}</span>
                                       </div>
-                                      
-                                      {batchStatus.status === 'active' && batchStatus.remaining > 0 && (
-                                        <div style={{
-                                          display: 'flex',
-                                          alignItems: 'center',
-                                          gap: '4px',
-                                          color: '#D97706',
-                                          fontSize: '13px',
-                                          fontWeight: '500'
-                                        }}>
-                                          <FiClock size={12} />
-                                          <span>{batchStatus.remaining} remaining</span>
-                                        </div>
-                                      )}
                                     </div>
                                   </div>
                                   

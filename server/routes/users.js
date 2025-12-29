@@ -1,7 +1,9 @@
-// routes/users.js - UPDATED WITH TEACHER AND STUDENT SUBJECT MANAGEMENT
+// routes/users.js - UPDATED WITH COMPLETE TEACHER MANAGEMENT
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
+const path = require('path');
+const fs = require('fs');
 const User = require('../models/User');
 const Class = require('../models/Class');
 const Subject = require('../models/Subject');
@@ -14,12 +16,12 @@ const router = express.Router();
 
 // Input validation middleware
 const validateUserInput = (req, res, next) => {
-  const { name, username, role } = req.body;
+  const { firstName, lastName, username, role } = req.body;
   
-  if (!name || !username || !role) {
+  if (!firstName || !lastName || !username || !role) {
     return res.status(400).json({ 
       success: false,
-      message: 'Name, username, and role are required' 
+      message: 'First name, last name, username, and role are required' 
     });
   }
   
@@ -63,35 +65,529 @@ const getClassName = async (classId) => {
   }
 };
 
-// Get all permissions
-router.get('/permissions', auth, async (req, res) => {
-  try {
-    if (req.user.role !== 'super_admin') {
-      return res.status(403).json({ 
-        success: false,
-        message: 'Access denied. Super admin access required.' 
-      });
-    }
+// ============================================================
+// TEACHER-SPECIFIC ENDPOINTS
+// ============================================================
 
-    const permissions = await Permission.find().sort({ category: 1, name: 1 });
+// Get all teachers (for dropdowns and assignment)
+router.get('/teachers/list', auth, async (req, res) => {
+  try {
+    console.log('👨‍🏫 GET /api/users/teachers/list - Fetching all teachers');
     
+    const teachers = await User.find({ 
+      role: 'teacher',
+      active: true 
+    })
+      .select('_id firstName lastName middleName username email phone specialization qualifications')
+      .sort({ firstName: 1, lastName: 1 })
+      .lean();
+
+    // Format for dropdowns
+    const formattedTeachers = teachers.map(teacher => ({
+      id: teacher._id,
+      _id: teacher._id,
+      name: `${teacher.firstName || ''} ${teacher.lastName || ''}`.trim(),
+      firstName: teacher.firstName,
+      lastName: teacher.lastName,
+      middleName: teacher.middleName,
+      username: teacher.username,
+      email: teacher.email,
+      phone: teacher.phone || '',
+      displayName: `${teacher.firstName || ''} ${teacher.lastName || ''}`.trim() || teacher.username,
+      specialization: teacher.specialization || 'General',
+      qualifications: teacher.qualifications || []
+    }));
+
+    console.log('✅ Teachers fetched:', formattedTeachers.length);
+
     res.json({
       success: true,
-      permissions,
-      count: permissions.length,
-      generatedAt: new Date().toISOString()
+      teachers: formattedTeachers,
+      total: formattedTeachers.length
     });
-  } catch (error) {
-    console.error('❌ Get permissions error:', error);
-    res.status(500).json({ 
+  } catch (err) {
+    console.error('❌ GET /users/teachers/list error:', err);
+    res.status(500).json({
       success: false,
-      message: 'Server error fetching permissions' 
+      message: 'Failed to fetch teachers',
+      error: err.message
     });
   }
 });
 
-// ==================== FIXED GET / ROUTE ====================
-// Get all users with pagination and filtering - FIXED WITH TIMEOUT
+// Get teachers with their current assignments
+router.get('/teachers/with-assignments', auth, async (req, res) => {
+  try {
+    console.log('👨‍🏫 GET /api/users/teachers/with-assignments - Fetching teachers with assignments');
+    
+    const teachers = await User.find({ 
+      role: 'teacher',
+      active: true 
+    })
+      .populate({
+        path: 'teacherAssignments.class',
+        select: 'name shortName level',
+        model: 'Class'
+      })
+      .populate({
+        path: 'teacherAssignments.subjects.subject',
+        select: 'name code category',
+        model: 'Subject'
+      })
+      .select('_id firstName lastName middleName username email phone teacherAssignments')
+      .sort({ firstName: 1, lastName: 1 })
+      .lean();
+
+    // Calculate statistics for each teacher
+    const teachersWithStats = teachers.map(teacher => {
+      const totalClasses = teacher.teacherAssignments?.length || 0;
+      const totalSubjects = teacher.teacherAssignments?.reduce(
+        (sum, assignment) => sum + (assignment.subjects?.length || 0), 
+        0
+      ) || 0;
+
+      // Get unique classes and subjects
+      const uniqueClasses = new Set();
+      const uniqueSubjects = new Set();
+      
+      teacher.teacherAssignments?.forEach(assignment => {
+        if (assignment.class) {
+          uniqueClasses.add(assignment.class._id.toString());
+        }
+        assignment.subjects?.forEach(subjectItem => {
+          if (subjectItem.subject) {
+            uniqueSubjects.add(subjectItem.subject._id.toString());
+          }
+        });
+      });
+
+      return {
+        ...teacher,
+        name: `${teacher.firstName || ''} ${teacher.lastName || ''}`.trim() || teacher.username,
+        stats: {
+          totalClasses,
+          totalSubjects,
+          uniqueClasses: uniqueClasses.size,
+          uniqueSubjects: uniqueSubjects.size
+        }
+      };
+    });
+
+    console.log('✅ Teachers with assignments fetched:', teachersWithStats.length);
+
+    res.json({
+      success: true,
+      teachers: teachersWithStats,
+      summary: {
+        totalTeachers: teachersWithStats.length,
+        totalClasses: teachersWithStats.reduce((sum, t) => sum + t.stats.totalClasses, 0),
+        totalSubjects: teachersWithStats.reduce((sum, t) => sum + t.stats.totalSubjects, 0),
+        averageClassesPerTeacher: (teachersWithStats.reduce((sum, t) => sum + t.stats.totalClasses, 0) / teachersWithStats.length).toFixed(1),
+        averageSubjectsPerTeacher: (teachersWithStats.reduce((sum, t) => sum + t.stats.totalSubjects, 0) / teachersWithStats.length).toFixed(1)
+      }
+    });
+  } catch (err) {
+    console.error('❌ GET /users/teachers/with-assignments error:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch teachers with assignments',
+      error: err.message
+    });
+  }
+});
+
+// Get available teachers for a class and subject
+router.get('/teachers/available/:classId/:subjectId', auth, async (req, res) => {
+  try {
+    const { classId, subjectId } = req.params;
+
+    console.log('👨‍🏫 GET /api/users/teachers/available/:classId/:subjectId - Available teachers for subject:', {
+      classId,
+      subjectId
+    });
+
+    // Verify class and subject exist
+    const classData = await Class.findById(classId).populate('subjectAssignments.subject');
+    if (!classData) {
+      return res.status(404).json({
+        success: false,
+        message: 'Class not found'
+      });
+    }
+
+    const subjectExists = classData.subjectAssignments?.some(
+      assignment => assignment.subject?._id.toString() === subjectId
+    );
+    
+    if (!subjectExists) {
+      return res.status(404).json({
+        success: false,
+        message: 'Subject not found in this class'
+      });
+    }
+
+    // Get all teachers
+    const allTeachers = await User.find({ 
+      role: 'teacher',
+      active: true 
+    })
+      .select('_id firstName lastName username email phone specialization qualifications teacherAssignments')
+      .lean();
+
+    // Get teachers who are already assigned to this subject
+    const assignedTeachers = [];
+    const availableTeachers = [];
+
+    for (const teacher of allTeachers) {
+      const teachesSubject = teacher.teacherAssignments?.some(assignment => 
+        assignment.class?.toString() === classId &&
+        assignment.subjects?.some(subjectItem => subjectItem.subject?.toString() === subjectId)
+      );
+
+      if (teachesSubject) {
+        assignedTeachers.push({
+          id: teacher._id,
+          name: `${teacher.firstName || ''} ${teacher.lastName || ''}`.trim() || teacher.username,
+          username: teacher.username,
+          email: teacher.email,
+          phone: teacher.phone || 'N/A',
+          specialization: teacher.specialization || 'General',
+          qualifications: teacher.qualifications || []
+        });
+      } else {
+        // Count current assignments
+        const currentAssignments = teacher.teacherAssignments?.length || 0;
+        const currentSubjects = teacher.teacherAssignments?.reduce(
+          (sum, assignment) => sum + (assignment.subjects?.length || 0), 
+          0
+        ) || 0;
+
+        availableTeachers.push({
+          id: teacher._id,
+          name: `${teacher.firstName || ''} ${teacher.lastName || ''}`.trim() || teacher.username,
+          username: teacher.username,
+          email: teacher.email,
+          phone: teacher.phone || 'N/A',
+          specialization: teacher.specialization || 'General',
+          qualifications: teacher.qualifications || [],
+          currentAssignments,
+          currentSubjects,
+          workload: currentSubjects > 10 ? 'High' : currentSubjects > 5 ? 'Medium' : 'Low'
+        });
+      }
+    }
+
+    console.log('✅ Available teachers fetched:', {
+      class: classData.name,
+      totalTeachers: allTeachers.length,
+      assigned: assignedTeachers.length,
+      available: availableTeachers.length
+    });
+
+    res.json({
+      success: true,
+      class: {
+        id: classData._id,
+        name: classData.name,
+        level: classData.level
+      },
+      subject: {
+        id: subjectId,
+        name: classData.subjectAssignments?.find(a => a.subject?._id.toString() === subjectId)?.subject?.name || 'Unknown'
+      },
+      assignedTeachers,
+      availableTeachers,
+      summary: {
+        total: allTeachers.length,
+        assigned: assignedTeachers.length,
+        available: availableTeachers.length
+      }
+    });
+  } catch (err) {
+    console.error('❌ GET /users/teachers/available/:classId/:subjectId error:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch available teachers',
+      error: err.message
+    });
+  }
+});
+
+// Bulk assign teachers to subjects
+router.post('/teachers/bulk-assign', auth, checkPermission('manage_users'), async (req, res) => {
+  try {
+    const { assignments } = req.body; // Array of { teacherId, classId, subjectIds[] }
+
+    console.log('👨‍🏫 POST /api/users/teachers/bulk-assign - Bulk assigning teachers:', {
+      assignmentCount: assignments?.length
+    });
+
+    if (!Array.isArray(assignments) || assignments.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Assignments array is required'
+      });
+    }
+
+    const results = [];
+    const errors = [];
+
+    for (const assignment of assignments) {
+      const { teacherId, classId, subjectIds } = assignment;
+
+      try {
+        // Verify teacher exists
+        const teacher = await User.findById(teacherId);
+        if (!teacher || teacher.role !== 'teacher') {
+          errors.push({
+            teacherId,
+            error: 'Teacher not found'
+          });
+          continue;
+        }
+
+        // Verify class exists
+        const classExists = await Class.exists({ _id: classId });
+        if (!classExists) {
+          errors.push({
+            teacherId,
+            classId,
+            error: 'Class not found'
+          });
+          continue;
+        }
+
+        // Verify subjects exist and are assigned to the class
+        const classData = await Class.findById(classId).populate('subjectAssignments.subject');
+        const classSubjectIds = classData.subjectAssignments.map(a => a.subject._id.toString());
+        
+        const invalidSubjects = subjectIds.filter(
+          subjectId => !classSubjectIds.includes(subjectId.toString())
+        );
+        
+        if (invalidSubjects.length > 0) {
+          errors.push({
+            teacherId,
+            classId,
+            error: 'Some subjects are not assigned to this class',
+            invalidSubjects
+          });
+          continue;
+        }
+
+        // Assign subjects to teacher
+        await teacher.addTeacherAssignment(classId, subjectIds);
+
+        results.push({
+          teacherId,
+          teacherName: `${teacher.firstName} ${teacher.lastName}`.trim(),
+          classId,
+          classData: classData.name,
+          subjectsAssigned: subjectIds.length,
+          success: true
+        });
+
+      } catch (err) {
+        errors.push({
+          teacherId: assignment.teacherId,
+          classId: assignment.classId,
+          error: err.message
+        });
+      }
+    }
+
+    console.log('✅ Bulk assignment completed:', {
+      successful: results.length,
+      failed: errors.length
+    });
+
+    res.json({
+      success: true,
+      message: `Bulk assignment completed: ${results.length} successful, ${errors.length} failed`,
+      results,
+      errors: errors.length > 0 ? errors : undefined
+    });
+
+  } catch (err) {
+    console.error('❌ POST /users/teachers/bulk-assign error:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to bulk assign teachers',
+      error: err.message
+    });
+  }
+});
+
+// Remove teacher from all assignments
+router.delete('/teachers/:teacherId/clear-assignments', auth, checkPermission('manage_users'), async (req, res) => {
+  try {
+    const { teacherId } = req.params;
+
+    console.log('👨‍🏫 DELETE /api/users/teachers/:teacherId/clear-assignments - Clearing all assignments for teacher:', teacherId);
+
+    const teacher = await User.findById(teacherId);
+    if (!teacher || teacher.role !== 'teacher') {
+      return res.status(404).json({
+        success: false,
+        message: 'Teacher not found'
+      });
+    }
+
+    // Count assignments before clearing
+    const assignmentCount = teacher.teacherAssignments?.length || 0;
+    const subjectCount = teacher.teacherAssignments?.reduce(
+      (sum, assignment) => sum + (assignment.subjects?.length || 0), 
+      0
+    ) || 0;
+
+    // Clear assignments
+    teacher.teacherAssignments = [];
+    await teacher.save();
+
+    console.log('✅ Cleared assignments for teacher:', {
+      teacher: teacher.username,
+      assignmentsRemoved: assignmentCount,
+      subjectsRemoved: subjectCount
+    });
+
+    res.json({
+      success: true,
+      message: `Cleared ${assignmentCount} assignments (${subjectCount} subjects) from teacher`,
+      teacher: {
+        id: teacher._id,
+        name: `${teacher.firstName} ${teacher.lastName}`.trim(),
+        username: teacher.username
+      },
+      stats: {
+        assignmentsRemoved: assignmentCount,
+        subjectsRemoved: subjectCount
+      }
+    });
+  } catch (err) {
+    console.error('❌ DELETE /users/teachers/:teacherId/clear-assignments error:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to clear teacher assignments',
+      error: err.message
+    });
+  }
+});
+
+// Get teacher's workload summary
+router.get('/teachers/:teacherId/workload', auth, async (req, res) => {
+  try {
+    const { teacherId } = req.params;
+
+    console.log('👨‍🏫 GET /api/users/teachers/:teacherId/workload - Workload summary for teacher:', teacherId);
+
+    const teacher = await User.findById(teacherId)
+      .populate({
+        path: 'teacherAssignments.class',
+        select: 'name shortName level studentCount',
+        model: 'Class'
+      })
+      .populate({
+        path: 'teacherAssignments.subjects.subject',
+        select: 'name code category periodCount',
+        model: 'Subject'
+      })
+      .select('_id firstName lastName username email teacherAssignments')
+      .lean();
+
+    if (!teacher || teacher.role !== 'teacher') {
+      return res.status(404).json({
+        success: false,
+        message: 'Teacher not found'
+      });
+    }
+
+    // Calculate workload
+    let totalPeriods = 0;
+    let totalStudents = 0;
+    const classWorkloads = [];
+
+    teacher.teacherAssignments?.forEach(assignment => {
+      const classStudentCount = assignment.class?.studentCount || 0;
+      let classPeriods = 0;
+      let classSubjects = 0;
+
+      assignment.subjects?.forEach(subjectItem => {
+        const periodCount = subjectItem.subject?.periodCount || 3;
+        classPeriods += periodCount;
+        classSubjects++;
+        totalPeriods += periodCount;
+      });
+
+      totalStudents += classStudentCount;
+
+      if (assignment.class) {
+        classWorkloads.push({
+          class: {
+            id: assignment.class._id,
+            name: assignment.class.name,
+            shortName: assignment.class.shortName,
+            level: assignment.class.level,
+            studentCount: classStudentCount
+          },
+          subjects: assignment.subjects?.map(s => ({
+            id: s.subject?._id,
+            name: s.subject?.name,
+            code: s.subject?.code,
+            periodCount: s.subject?.periodCount || 3
+          })) || [],
+          totalPeriods: classPeriods,
+          totalSubjects: classSubjects
+        });
+      }
+    });
+
+    const workloadLevel = totalPeriods > 30 ? 'High' : totalPeriods > 20 ? 'Medium' : 'Low';
+
+    console.log('✅ Teacher workload calculated:', {
+      teacher: teacher.username,
+      totalPeriods,
+      totalStudents,
+      totalClasses: classWorkloads.length
+    });
+
+    res.json({
+      success: true,
+      teacher: {
+        id: teacher._id,
+        name: `${teacher.firstName || ''} ${teacher.lastName || ''}`.trim() || teacher.username,
+        username: teacher.username,
+        email: teacher.email
+      },
+      workload: {
+        totalClasses: classWorkloads.length,
+        totalPeriods,
+        totalStudents,
+        workloadLevel,
+        averagePeriodsPerClass: classWorkloads.length > 0 ? (totalPeriods / classWorkloads.length).toFixed(1) : 0,
+        averageStudentsPerClass: classWorkloads.length > 0 ? (totalStudents / classWorkloads.length).toFixed(1) : 0
+      },
+      classWorkloads,
+      recommendations: workloadLevel === 'High' 
+        ? 'Consider reducing workload or adding another teacher'
+        : workloadLevel === 'Medium'
+        ? 'Workload is manageable'
+        : 'Can take on additional assignments'
+    });
+  } catch (err) {
+    console.error('❌ GET /users/teachers/:teacherId/workload error:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to calculate teacher workload',
+      error: err.message
+    });
+  }
+});
+
+// ============================================================
+// EXISTING ENDPOINTS (with fixes for teacher fetching)
+// ============================================================
+
+// Get all users with pagination and filtering
 router.get('/', auth, checkPermission('view_users'), async (req, res) => {
   try {
     console.log('👥 GET /api/users API CALLED:', {
@@ -115,21 +611,19 @@ router.get('/', auth, checkPermission('view_users'), async (req, res) => {
     if (role) filter.role = role;
     if (active !== undefined) filter.active = active === 'true';
     
-    // Filter by class - FIXED
+    // Filter by class
     if (classId) {
-      // Try to parse as ObjectId first
       if (mongoose.Types.ObjectId.isValid(classId)) {
         filter.$or = [
           { class: new mongoose.Types.ObjectId(classId) },
           { 'teacherAssignments.class': new mongoose.Types.ObjectId(classId) }
         ];
       } else {
-        // Search by className
         filter.className = { $regex: classId, $options: 'i' };
       }
     }
     
-    // Filter by subject (for teachers) - FIXED
+    // Filter by subject (for teachers)
     if (subject) {
       if (mongoose.Types.ObjectId.isValid(subject)) {
         filter['teacherAssignments.subjects.subject'] = new mongoose.Types.ObjectId(subject);
@@ -138,23 +632,22 @@ router.get('/', auth, checkPermission('view_users'), async (req, res) => {
     
     if (search) {
       filter.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { surname: { $regex: search, $options: 'i' } },
+        { firstName: { $regex: search, $options: 'i' } },
+        { lastName: { $regex: search, $options: 'i' } },
         { username: { $regex: search, $options: 'i' } },
         { email: { $regex: search, $options: 'i' } },
         { studentId: { $regex: search, $options: 'i' } }
       ];
     }
 
-    // FIXED: Add timeout and limit to prevent timeouts
-    // First, get users without population to avoid CastError
+    // Get users without population to avoid CastError
     const users = await User.find(filter)
       .select('-password -loginAttempts -lockUntil')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(Math.min(parseInt(limit), 100)) // Max 100 per page
+      .limit(Math.min(parseInt(limit), 100))
       .lean()
-      .maxTimeMS(15000); // 15 second timeout
+      .maxTimeMS(15000);
 
     const totalUsers = await User.countDocuments(filter).maxTimeMS(10000);
     const totalPages = Math.ceil(totalUsers / limit);
@@ -164,7 +657,7 @@ router.get('/', auth, checkPermission('view_users'), async (req, res) => {
       total: totalUsers 
     });
 
-    // Now manually populate class and clean up subjects
+    // Manually populate class and clean up subjects
     const populatedUsers = await Promise.all(users.map(async (user) => {
       // Populate class if it's a valid ObjectId
       if (user.class && mongoose.Types.ObjectId.isValid(user.class)) {
@@ -248,7 +741,7 @@ router.get('/', auth, checkPermission('view_users'), async (req, res) => {
     
     if (error.name === 'MongooseError' || error.message.includes('timeout')) {
       errorMessage = 'Database query timeout. Please try with fewer filters or contact administrator.';
-      statusCode = 504; // Gateway timeout
+      statusCode = 504;
     } else if (error.name === 'CastError') {
       errorMessage = 'Invalid data in database. Running cleanup...';
       
@@ -256,7 +749,7 @@ router.get('/', auth, checkPermission('view_users'), async (req, res) => {
       try {
         const totalUsers = await User.countDocuments({}).maxTimeMS(5000);
         const simpleUsers = await User.find({})
-          .select('_id username name surname role active')
+          .select('_id username firstName lastName role active')
           .limit(50)
           .lean()
           .maxTimeMS(5000);
@@ -291,7 +784,7 @@ router.get('/', auth, checkPermission('view_users'), async (req, res) => {
   }
 });
 
-// Get user by ID - FIXED WITH TIMEOUT
+// Get user by ID
 router.get('/:id', auth, checkPermission('view_users'), async (req, res) => {
   try {
     console.log('👤 GET /api/users/:id - User ID:', req.params.id);
@@ -300,7 +793,7 @@ router.get('/:id', auth, checkPermission('view_users'), async (req, res) => {
     const user = await User.findById(req.params.id)
       .select('-password -loginAttempts -lockUntil')
       .lean()
-      .maxTimeMS(10000); // 10 second timeout
+      .maxTimeMS(10000);
 
     if (!user) {
       return res.status(404).json({ 
@@ -396,7 +889,7 @@ router.get('/:id', auth, checkPermission('view_users'), async (req, res) => {
   }
 });
 
-// Create new user - UPDATED WITH ROLE-SPECIFIC HANDLING
+// Create new user - UPDATED WITH PROPER TEACHER HANDLING
 router.post('/', auth, checkPermission('create_users'), validateUserInput, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -407,10 +900,14 @@ router.post('/', auth, checkPermission('create_users'), validateUserInput, async
       user: req.user.id
     });
 
-    const { 
+    // Handle backward compatibility
+    let { 
+      firstName, 
+      lastName, 
+      middleName,
+      name, // For backward compatibility
+      surname, // For backward compatibility
       username: rawUsername, 
-      name, 
-      surname, 
       email, 
       password, 
       role, 
@@ -426,6 +923,14 @@ router.post('/', auth, checkPermission('create_users'), validateUserInput, async
       teacherAssignments = [],
       enrolledSubjects = []
     } = req.body;
+
+    // Backward compatibility: if firstName/lastName not provided, use name/surname
+    if (!firstName && name) {
+      firstName = name;
+    }
+    if (!lastName && surname) {
+      lastName = surname;
+    }
 
     // Clean and validate username
     const username = cleanUsername(rawUsername);
@@ -497,41 +1002,55 @@ router.post('/', auth, checkPermission('create_users'), validateUserInput, async
       className = await getClassName(classId);
     }
 
-    // For teachers, process assignments if provided
+    // For teachers, process assignments if provided - FIXED VERSION
     let processedTeacherAssignments = [];
-    if (role === 'teacher' && Array.isArray(teacherAssignments)) {
+    if (role === 'teacher' && teacherAssignments && Array.isArray(teacherAssignments)) {
+      console.log('👨‍🏫 Processing teacher assignments during creation:', teacherAssignments);
+      
       for (const assignment of teacherAssignments) {
-        if (assignment.classId && assignment.subjectIds && assignment.subjectIds.length > 0) {
+        console.log('Processing assignment:', assignment);
+        
+        // Handle different assignment structures from frontend
+        const classId = assignment.class || assignment.classId;
+        const subjects = assignment.subjects || [];
+        
+        if (classId && subjects.length > 0) {
           // Verify class exists
-          const classExists = await Class.exists({ _id: assignment.classId }).session(session);
+          const classExists = await Class.exists({ _id: classId }).session(session);
           if (classExists) {
-            // Verify subjects are assigned to class
-            const classData = await Class.findById(assignment.classId)
-              .populate('subjectAssignments.subject')
-              .session(session);
-            
-            if (classData) {
-              const classSubjectIds = classData.subjectAssignments.map(a => a.subject._id.toString());
-              const validSubjectIds = assignment.subjectIds.filter(
-                subjectId => classSubjectIds.includes(subjectId.toString())
-              );
+            // Process subjects
+            const validSubjects = [];
+            for (const subjectItem of subjects) {
+              const subjectId = subjectItem.subject || subjectItem.subjectId;
               
-              if (validSubjectIds.length > 0) {
-                processedTeacherAssignments.push({
-                  class: assignment.classId,
-                  subjects: validSubjectIds.map(subjectId => ({
+              if (subjectId && mongoose.Types.ObjectId.isValid(subjectId)) {
+                // Verify subject exists and get its name
+                const subject = await Subject.findById(subjectId).session(session);
+                if (subject) {
+                  validSubjects.push({
                     subject: subjectId,
+                    subjectName: subject.name,
                     assignedAt: new Date()
-                  }))
-                });
+                  });
+                }
               }
+            }
+            
+            if (validSubjects.length > 0) {
+              processedTeacherAssignments.push({
+                class: classId,
+                subjects: validSubjects,
+                assignedAt: new Date()
+              });
+              console.log('✅ Added assignment:', { classId, subjects: validSubjects.length });
             }
           }
         }
       }
     }
+    console.log('📦 Final processed assignments:', processedTeacherAssignments);
 
-    // For students, process enrolled subjects if provided - FIXED WITH SUBJECTNAME
+    // For students, process enrolled subjects if provided
     let processedEnrolledSubjects = [];
     if (role === 'student' && classId && Array.isArray(enrolledSubjects)) {
       // Get class to identify core subjects
@@ -551,7 +1070,7 @@ router.post('/', auth, checkPermission('create_users'), validateUserInput, async
         // Remove duplicates
         const uniqueSubjectIds = [...new Set(allSubjectIds.map(id => id.toString()))];
         
-        // FIX: Get subject names for each subject ID
+        // Get subject names for each subject ID
         processedEnrolledSubjects = await Promise.all(
           uniqueSubjectIds.map(async (subjectId) => {
             const subject = await Subject.findById(subjectId).session(session);
@@ -559,7 +1078,7 @@ router.post('/', auth, checkPermission('create_users'), validateUserInput, async
             
             return {
               subject: subjectId,
-              subjectName: subject ? subject.name : `Subject ${subjectId}`, // ADDED: subjectName field
+              subjectName: subject ? subject.name : `Subject ${subjectId}`,
               class: classId,
               isCore: isCore,
               enrolledAt: new Date()
@@ -572,8 +1091,9 @@ router.post('/', auth, checkPermission('create_users'), validateUserInput, async
     // Create new user - password will be hashed by User model
     const userData = {
       username,
-      name,
-      surname,
+      firstName,
+      lastName,
+      middleName,
       email: email ? email.toLowerCase() : undefined,
       password: password, // Raw password - will be hashed by model
       role,
@@ -586,15 +1106,25 @@ router.post('/', auth, checkPermission('create_users'), validateUserInput, async
       phoneNumber: phoneNumber || undefined,
       sex: sex || undefined,
       age: age ? parseInt(age) : undefined,
-      teacherAssignments: processedTeacherAssignments,
+      teacherAssignments: processedTeacherAssignments,  // This is now properly set
       enrolledSubjects: processedEnrolledSubjects,
       createdBy: req.user.id
     };
 
-    console.log('💾 Creating user with data:', { ...userData, password: '***' });
+    console.log('💾 Creating user with data:', { 
+      ...userData, 
+      password: '***',
+      teacherAssignments: userData.teacherAssignments 
+    });
 
     const user = new User(userData);
     await user.save({ session });
+
+    console.log('✅ User saved with assignments:', {
+      userId: user._id,
+      assignmentCount: user.teacherAssignments?.length || 0,
+      assignments: user.teacherAssignments
+    });
 
     await session.commitTransaction();
     session.endSession();
@@ -667,7 +1197,7 @@ router.post('/', auth, checkPermission('create_users'), validateUserInput, async
   }
 });
 
-// Update user - UPDATED WITH NEW TEACHER/STUDENT HANDLING
+// Update user - UPDATED WITH PROPER TEACHER ASSIGNMENT HANDLING
 router.put('/:id', auth, checkPermission('edit_users'), async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -675,14 +1205,22 @@ router.put('/:id', auth, checkPermission('edit_users'), async (req, res) => {
   try {
     console.log('🔄 PUT /api/users/:id - UPDATE USER API CALLED:', {
       userId: req.params.id,
-      body: { ...req.body, password: req.body.password ? '***' : 'not provided' },
+      body: { 
+        ...req.body, 
+        password: req.body.password ? '***' : 'not provided',
+        profileImage: req.body.profileImage ? 'BASE64_IMAGE_PROVIDED' : 'no_image'
+      },
       user: req.user.id
     });
 
-    const { 
+    // Handle backward compatibility
+    let { 
+      firstName, 
+      lastName, 
+      middleName,
+      name,
+      surname,
       username: rawUsername, 
-      name, 
-      surname, 
       email, 
       role, 
       studentId, 
@@ -715,6 +1253,54 @@ router.put('/:id', auth, checkPermission('edit_users'), async (req, res) => {
       username: user.username,
       role: user.role
     });
+
+    // Handle base64 profile image if provided
+    if (req.body.profileImage && req.body.profileImage.startsWith('data:image')) {
+      try {
+        console.log('📸 Handling base64 profile image update');
+        
+        // Extract base64 data
+        const matches = req.body.profileImage.match(/^data:image\/(\w+);base64,/);
+        if (!matches || matches.length < 2) {
+          throw new Error('Invalid base64 image format');
+        }
+        
+        const mimeType = matches[1];
+        const extension = mimeType === 'jpeg' ? 'jpg' : mimeType;
+        const base64Data = req.body.profileImage.replace(/^data:image\/\w+;base64,/, '');
+        const buffer = Buffer.from(base64Data, 'base64');
+        
+        // Generate filename
+        const fileName = `profile_${req.params.id}_${Date.now()}.${extension}`;
+        const uploadDir = path.join(__dirname, '../../uploads/profiles');
+        
+        // Ensure directory exists
+        if (!fs.existsSync(uploadDir)) {
+          fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        
+        // Delete old image if exists
+        if (user.profileImage) {
+          const oldPath = path.join(uploadDir, user.profileImage);
+          if (fs.existsSync(oldPath)) {
+            fs.unlinkSync(oldPath);
+          }
+        }
+        
+        // Save new image
+        const filePath = path.join(uploadDir, fileName);
+        fs.writeFileSync(filePath, buffer);
+        
+        // Update user with new image filename
+        user.profileImage = fileName;
+        user.profilePicture = fileName;
+        
+        console.log('✅ Base64 image saved to:', filePath);
+        
+      } catch (imageError) {
+        console.error('❌ Error saving base64 image:', imageError.message);
+      }
+    }
 
     // Prevent modifying super_admin users unless current user is super_admin
     if (user.role === 'super_admin' && req.user.role !== 'super_admin') {
@@ -794,9 +1380,24 @@ router.put('/:id', auth, checkPermission('edit_users'), async (req, res) => {
       user.email = email.toLowerCase();
     }
 
-    // Update basic fields
-    if (name !== undefined) user.name = name;
-    if (surname !== undefined) user.surname = surname;
+    // Update name fields with backward compatibility
+    if (firstName !== undefined) {
+      user.firstName = firstName;
+    } else if (name !== undefined) {
+      user.firstName = name;
+    }
+    
+    if (lastName !== undefined) {
+      user.lastName = lastName;
+    } else if (surname !== undefined) {
+      user.lastName = surname;
+    }
+    
+    if (middleName !== undefined) {
+      user.middleName = middleName;
+    }
+
+    // Update other basic fields
     if (role !== undefined) user.role = role;
     if (studentId !== undefined) user.studentId = studentId;
     if (active !== undefined) user.active = active;
@@ -825,54 +1426,75 @@ router.put('/:id', auth, checkPermission('edit_users'), async (req, res) => {
 
     // Handle password update
     if (req.body.password !== undefined && req.body.password !== '') {
-      user.password = req.body.password; // Raw password - model will hash it
+      user.password = req.body.password;
       console.log('✅ Password updated');
     }
 
-    // Handle teacher assignments
+    // Handle teacher assignments - USING NEW HELPER METHOD
     if (role === 'teacher' && teacherAssignments !== undefined) {
-      if (Array.isArray(teacherAssignments)) {
+      console.log('👨‍🏫 Processing teacher assignments:', teacherAssignments);
+      
+      if (Array.isArray(teacherAssignments) && teacherAssignments.length > 0) {
         const processedAssignments = [];
+        
         for (const assignment of teacherAssignments) {
-          if (assignment.classId && assignment.subjectIds && assignment.subjectIds.length > 0) {
+          console.log('Processing assignment:', assignment);
+          
+          // Handle different assignment structures from frontend
+          const classId = assignment.class || assignment.classId;
+          const subjects = assignment.subjects || [];
+          
+          if (classId && subjects.length > 0) {
             // Verify class exists
-            const classExists = await Class.exists({ _id: assignment.classId }).session(session);
+            const classExists = await Class.exists({ _id: classId }).session(session);
             if (classExists) {
-              // Verify subjects are assigned to class
-              const classData = await Class.findById(assignment.classId)
-                .populate('subjectAssignments.subject')
-                .session(session);
-              
-              if (classData) {
-                const classSubjectIds = classData.subjectAssignments.map(a => a.subject._id.toString());
-                const validSubjectIds = assignment.subjectIds.filter(
-                  subjectId => classSubjectIds.includes(subjectId.toString())
-                );
+              // Process subjects with subject names
+              const validSubjects = [];
+              for (const subjectItem of subjects) {
+                const subjectId = subjectItem.subject || subjectItem.subjectId || subjectItem;
                 
-                if (validSubjectIds.length > 0) {
-                  processedAssignments.push({
-                    class: assignment.classId,
-                    subjects: validSubjectIds.map(subjectId => ({
+                if (mongoose.Types.ObjectId.isValid(subjectId)) {
+                  // Verify subject exists and get its name
+                  const subject = await Subject.findById(subjectId).session(session);
+                  if (subject) {
+                    validSubjects.push({
                       subject: subjectId,
+                      subjectName: subject.name,
                       assignedAt: new Date()
-                    }))
-                  });
+                    });
+                  }
                 }
+              }
+              
+              if (validSubjects.length > 0) {
+                processedAssignments.push({
+                  class: classId,
+                  subjects: validSubjects
+                });
               }
             }
           }
         }
+        
         user.teacherAssignments = processedAssignments;
-        console.log('✅ Updated teacher assignments:', user.teacherAssignments.length);
+        console.log('✅ Updated teacher assignments:', {
+          count: processedAssignments.length,
+          assignments: processedAssignments.map(a => ({
+            class: a.class,
+            subjects: a.subjects.map(s => ({ subject: s.subject, subjectName: s.subjectName }))
+          }))
+        });
       } else {
+        // If empty array is sent, clear assignments
         user.teacherAssignments = [];
+        console.log('✅ Cleared teacher assignments (empty array provided)');
       }
     } else if (role !== 'teacher') {
       // Clear assignments for non-teachers
       user.teacherAssignments = [];
     }
 
-    // Handle enrolled subjects for students - FIXED WITH SUBJECTNAME
+    // Handle enrolled subjects for students
     if (role === 'student' && enrolledSubjects !== undefined && user.class) {
       if (Array.isArray(enrolledSubjects)) {
         // Get class to identify core subjects
@@ -892,15 +1514,17 @@ router.put('/:id', auth, checkPermission('edit_users'), async (req, res) => {
           // Remove duplicates
           const uniqueSubjectIds = [...new Set(allSubjectIds.map(id => id.toString()))];
           
-          // FIX: Add subjectName field
+          // Add subjectName field by fetching from Subject model
           user.enrolledSubjects = await Promise.all(
             uniqueSubjectIds.map(async (subjectId) => {
               const subject = await Subject.findById(subjectId).session(session);
+              const isCore = coreSubjectIds.some(coreId => coreId.toString() === subjectId);
+              
               return {
                 subject: subjectId,
                 subjectName: subject ? subject.name : `Subject ${subjectId}`,
                 class: user.class,
-                isCore: coreSubjectIds.some(coreId => coreId.toString() === subjectId),
+                isCore: isCore,
                 enrolledAt: new Date()
               };
             })
@@ -1006,9 +1630,11 @@ router.put('/:id', auth, checkPermission('edit_users'), async (req, res) => {
   }
 });
 
-// ──────────────────────────────────────────────────────────────
-// NEW: Get classes for assignment dropdown
-// ──────────────────────────────────────────────────────────────
+// ============================================================
+// ASSIGNMENT MANAGEMENT ENDPOINTS
+// ============================================================
+
+// Get classes for assignment dropdown
 router.get('/assignment/classes', auth, async (req, res) => {
   try {
     console.log('📚 GET /api/users/assignment/classes - Fetching classes for assignment');
@@ -1041,9 +1667,7 @@ router.get('/assignment/classes', auth, async (req, res) => {
   }
 });
 
-// ──────────────────────────────────────────────────────────────
-// NEW: Get subjects for a specific class (for teacher assignment)
-// ──────────────────────────────────────────────────────────────
+// Get subjects for a specific class (for teacher assignment)
 router.get('/assignment/classes/:classId/subjects', auth, async (req, res) => {
   try {
     const { classId } = req.params;
@@ -1098,9 +1722,7 @@ router.get('/assignment/classes/:classId/subjects', auth, async (req, res) => {
   }
 });
 
-// ──────────────────────────────────────────────────────────────
-// NEW: Assign subjects to teacher
-// ──────────────────────────────────────────────────────────────
+// Assign subjects to teacher
 router.post('/teachers/:teacherId/assign-subjects', auth, checkPermission('manage_users'), async (req, res) => {
   try {
     const { teacherId } = req.params;
@@ -1176,9 +1798,7 @@ router.post('/teachers/:teacherId/assign-subjects', auth, checkPermission('manag
   }
 });
 
-// ──────────────────────────────────────────────────────────────
-// NEW: Remove subject assignment from teacher
-// ──────────────────────────────────────────────────────────────
+// Remove subject assignment from teacher
 router.delete('/teachers/:teacherId/remove-assignment', auth, checkPermission('manage_users'), async (req, res) => {
   try {
     const { teacherId } = req.params;
@@ -1233,9 +1853,386 @@ router.delete('/teachers/:teacherId/remove-assignment', auth, checkPermission('m
   }
 });
 
-// ──────────────────────────────────────────────────────────────
-// NEW: Enroll student in subjects
-// ──────────────────────────────────────────────────────────────
+// ============================================================
+// SUBJECT TEACHER MANAGEMENT ENDPOINTS
+// ============================================================
+
+// Get subject teachers for a specific class
+router.get('/subject-teachers/class/:classId', auth, async (req, res) => {
+  try {
+    const { classId } = req.params;
+    
+    console.log('👨‍🏫 GET /api/users/subject-teachers/class/:classId - Fetching subject teachers for class:', classId);
+
+    // Verify class exists
+    const classData = await Class.findById(classId)
+      .populate('subjectAssignments.subject', 'name code category isCore')
+      .lean();
+    
+    if (!classData) {
+      return res.status(404).json({
+        success: false,
+        message: 'Class not found',
+        classId
+      });
+    }
+
+    // Get all teachers using the new endpoint
+    const teachersResponse = await User.find({ 
+      role: 'teacher',
+      active: true 
+    })
+      .select('_id firstName lastName username email phone teacherAssignments')
+      .populate('teacherAssignments.class', 'name shortName level')
+      .populate('teacherAssignments.subjects.subject', 'name code')
+      .lean();
+
+    const subjectTeachers = [];
+    
+    for (const teacher of teachersResponse) {
+      // Check if teacher has assignments for this class
+      const classAssignments = teacher.teacherAssignments?.filter(
+        assignment => assignment.class && assignment.class._id.toString() === classId
+      ) || [];
+      
+      if (classAssignments.length > 0) {
+        // Get all subjects this teacher teaches in this class
+        const subjects = [];
+        classAssignments.forEach(assignment => {
+          if (assignment.subjects) {
+            assignment.subjects.forEach(subjectItem => {
+              if (subjectItem.subject) {
+                subjects.push({
+                  id: subjectItem.subject._id,
+                  name: subjectItem.subject.name,
+                  code: subjectItem.subject.code,
+                  assignmentId: assignment._id
+                });
+              }
+            });
+          }
+        });
+        
+        if (subjects.length > 0) {
+          subjectTeachers.push({
+            teacher: {
+              id: teacher._id,
+              name: `${teacher.firstName || ''} ${teacher.lastName || ''}`.trim() || teacher.username,
+              username: teacher.username,
+              email: teacher.email,
+              phone: teacher.phone || 'N/A'
+            },
+            subjects,
+            totalSubjects: subjects.length
+          });
+        }
+      }
+    }
+
+    // Also get class's subject assignments for reference
+    const classSubjects = classData.subjectAssignments?.map(assignment => ({
+      id: assignment.subject?._id,
+      name: assignment.subject?.name,
+      code: assignment.subject?.code,
+      category: assignment.subject?.category,
+      isCore: assignment.isCore || false,
+      teacherAssigned: false
+    })) || [];
+
+    console.log('✅ Subject teachers fetched:', {
+      class: classData.name,
+      teachers: subjectTeachers.length,
+      totalSubjects: classSubjects.length
+    });
+
+    res.json({
+      success: true,
+      class: {
+        id: classData._id,
+        name: classData.name,
+        shortName: classData.shortName,
+        level: classData.level,
+        stream: classData.stream,
+        fullName: classData.fullName || `${classData.level}${classData.stream ? ` ${classData.stream}` : ''}`
+      },
+      subjectTeachers,
+      classSubjects,
+      summary: {
+        totalTeachers: subjectTeachers.length,
+        totalSubjects: classSubjects.length,
+        subjectsWithTeachers: subjectTeachers.reduce((sum, teacher) => sum + teacher.subjects.length, 0),
+        subjectsWithoutTeachers: classSubjects.length - subjectTeachers.reduce((sum, teacher) => sum + teacher.subjects.length, 0)
+      }
+    });
+
+  } catch (err) {
+    console.error('❌ GET /users/subject-teachers/class/:classId error:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch subject teachers',
+      error: err.message
+    });
+  }
+});
+
+// Assign teacher to multiple subjects in a class (bulk assignment)
+router.post('/subject-teachers/assign', auth, checkPermission('manage_users'), async (req, res) => {
+  try {
+    const { teacherId, classId, subjectIds } = req.body;
+
+    console.log('👨‍🏫 POST /api/users/subject-teachers/assign - Assigning teacher to subjects:', {
+      teacherId,
+      classId,
+      subjectCount: subjectIds?.length
+    });
+
+    if (!teacherId || !classId || !subjectIds || !Array.isArray(subjectIds) || subjectIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'teacherId, classId, and subjectIds (non-empty array) are required'
+      });
+    }
+
+    // Verify teacher exists
+    const teacher = await User.findById(teacherId);
+    if (!teacher || teacher.role !== 'teacher') {
+      return res.status(404).json({
+        success: false,
+        message: 'Teacher not found'
+      });
+    }
+
+    // Verify class exists
+    const classExists = await Class.exists({ _id: classId });
+    if (!classExists) {
+      return res.status(404).json({
+        success: false,
+        message: 'Class not found'
+      });
+    }
+
+    // Verify subjects exist and are assigned to the class
+    const classData = await Class.findById(classId).populate('subjectAssignments.subject');
+    const classSubjectIds = classData.subjectAssignments.map(a => a.subject._id.toString());
+    
+    const invalidSubjects = subjectIds.filter(
+      subjectId => !classSubjectIds.includes(subjectId.toString())
+    );
+    
+    if (invalidSubjects.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Some subjects are not assigned to this class',
+        invalidSubjects
+      });
+    }
+
+    // Check if teacher already has assignments for this class
+    const existingClassAssignment = teacher.teacherAssignments?.find(
+      assignment => assignment.class?.toString() === classId
+    );
+
+    if (existingClassAssignment) {
+      // Add new subjects to existing assignment
+      const existingSubjectIds = existingClassAssignment.subjects?.map(s => s.subject.toString()) || [];
+      const newSubjectIds = subjectIds.filter(
+        subjectId => !existingSubjectIds.includes(subjectId.toString())
+      );
+
+      if (newSubjectIds.length > 0) {
+        // Get subject details for new subjects
+        const newSubjects = await Promise.all(
+          newSubjectIds.map(async (subjectId) => {
+            const subject = await Subject.findById(subjectId);
+            return {
+              subject: subjectId,
+              subjectName: subject ? subject.name : `Subject ${subjectId}`,
+              assignedAt: new Date()
+            };
+          })
+        );
+
+        existingClassAssignment.subjects = [...(existingClassAssignment.subjects || []), ...newSubjects];
+      }
+    } else {
+      // Create new assignment
+      const subjects = await Promise.all(
+        subjectIds.map(async (subjectId) => {
+          const subject = await Subject.findById(subjectId);
+          return {
+            subject: subjectId,
+            subjectName: subject ? subject.name : `Subject ${subjectId}`,
+            assignedAt: new Date()
+          };
+        })
+      );
+
+      teacher.teacherAssignments = teacher.teacherAssignments || [];
+      teacher.teacherAssignments.push({
+        class: classId,
+        subjects,
+        assignedAt: new Date()
+      });
+    }
+
+    await teacher.save();
+
+    // Get updated teacher
+    const updatedTeacher = await User.findById(teacherId)
+      .populate('teacherAssignments.class', 'name shortName level')
+      .populate('teacherAssignments.subjects.subject', 'name code')
+      .select('-password -loginAttempts -lockUntil');
+
+    console.log('✅ Teacher assigned to subjects:', {
+      teacher: teacher.username,
+      class: classData.name,
+      subjects: subjectIds.length
+    });
+
+    res.json({
+      success: true,
+      message: `Successfully assigned ${subjectIds.length} subjects to teacher`,
+      teacher: updatedTeacher
+    });
+
+  } catch (err) {
+    console.error('❌ POST /users/subject-teachers/assign error:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to assign teacher to subjects',
+      error: err.message
+    });
+  }
+});
+
+// Get all subject assignments across all classes
+router.get('/subject-teachers/all-assignments', auth, async (req, res) => {
+  try {
+    console.log('👨‍🏫 GET /api/users/subject-teachers/all-assignments - Fetching all subject assignments');
+
+    // Get all teachers with assignments
+    const teachers = await User.find({ 
+      role: 'teacher',
+      active: true 
+    })
+      .select('_id firstName lastName username email teacherAssignments')
+      .populate('teacherAssignments.class', 'name shortName level')
+      .populate('teacherAssignments.subjects.subject', 'name code')
+      .sort('firstName lastName')
+      .lean();
+
+    // Process assignments
+    const assignments = [];
+    
+    for (const teacher of teachers) {
+      if (teacher.teacherAssignments && teacher.teacherAssignments.length > 0) {
+        for (const assignment of teacher.teacherAssignments) {
+          if (assignment.class && assignment.subjects) {
+            assignment.subjects.forEach(subjectItem => {
+              if (subjectItem.subject) {
+                assignments.push({
+                  teacher: {
+                    id: teacher._id,
+                    name: `${teacher.firstName || ''} ${teacher.lastName || ''}`.trim() || teacher.username,
+                    username: teacher.username,
+                    email: teacher.email
+                  },
+                  class: {
+                    id: assignment.class._id,
+                    name: assignment.class.name,
+                    shortName: assignment.class.shortName,
+                    level: assignment.class.level
+                  },
+                  subject: {
+                    id: subjectItem.subject._id,
+                    name: subjectItem.subject.name,
+                    code: subjectItem.subject.code
+                  },
+                  assignedAt: assignment.assignedAt || new Date()
+                });
+              }
+            });
+          }
+        }
+      }
+    }
+
+    // Group by class for summary
+    const summaryByClass = {};
+    const summaryByTeacher = {};
+    
+    assignments.forEach(assignment => {
+      // By class
+      const classKey = assignment.class.id;
+      if (!summaryByClass[classKey]) {
+        summaryByClass[classKey] = {
+          class: assignment.class,
+          teachers: new Set(),
+          subjects: new Set(),
+          assignments: 0
+        };
+      }
+      summaryByClass[classKey].teachers.add(assignment.teacher.id);
+      summaryByClass[classKey].subjects.add(assignment.subject.id);
+      summaryByClass[classKey].assignments++;
+      
+      // By teacher
+      const teacherKey = assignment.teacher.id;
+      if (!summaryByTeacher[teacherKey]) {
+        summaryByTeacher[teacherKey] = {
+          teacher: assignment.teacher,
+          classes: new Set(),
+          subjects: new Set(),
+          assignments: 0
+        };
+      }
+      summaryByTeacher[teacherKey].classes.add(assignment.class.id);
+      summaryByTeacher[teacherKey].subjects.add(assignment.subject.id);
+      summaryByTeacher[teacherKey].assignments++;
+    });
+
+    console.log('✅ All subject assignments fetched:', {
+      totalAssignments: assignments.length,
+      teachers: teachers.length,
+      classesWithAssignments: Object.keys(summaryByClass).length
+    });
+
+    res.json({
+      success: true,
+      assignments,
+      summary: {
+        totalAssignments: assignments.length,
+        totalTeachers: teachers.length,
+        byClass: Object.values(summaryByClass).map(item => ({
+          class: item.class,
+          teacherCount: item.teachers.size,
+          subjectCount: item.subjects.size,
+          assignmentCount: item.assignments
+        })),
+        byTeacher: Object.values(summaryByTeacher).map(item => ({
+          teacher: item.teacher,
+          classCount: item.classes.size,
+          subjectCount: item.subjects.size,
+          assignmentCount: item.assignments
+        }))
+      }
+    });
+
+  } catch (err) {
+    console.error('❌ GET /users/subject-teachers/all-assignments error:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch all subject assignments',
+      error: err.message
+    });
+  }
+});
+
+// ============================================================
+// STUDENT MANAGEMENT ENDPOINTS
+// ============================================================
+
+// Enroll student in subjects
 router.post('/students/:studentId/enroll-subjects', auth, checkPermission('manage_users'), async (req, res) => {
   try {
     const { studentId } = req.params;
@@ -1333,9 +2330,7 @@ router.post('/students/:studentId/enroll-subjects', auth, checkPermission('manag
   }
 });
 
-// ──────────────────────────────────────────────────────────────
-// NEW: Get student's enrolled subjects
-// ──────────────────────────────────────────────────────────────
+// Get student's enrolled subjects
 router.get('/students/:studentId/enrolled-subjects', auth, async (req, res) => {
   try {
     const { studentId } = req.params;
@@ -1345,7 +2340,7 @@ router.get('/students/:studentId/enrolled-subjects', auth, async (req, res) => {
     const student = await User.findById(studentId)
       .populate('enrolledSubjects.subject', 'name code category')
       .populate('enrolledSubjects.class', 'name shortName')
-      .select('enrolledSubjects name surname username');
+      .select('enrolledSubjects firstName lastName middleName username');
 
     if (!student) {
       return res.status(404).json({
@@ -1361,8 +2356,9 @@ router.get('/students/:studentId/enrolled-subjects', auth, async (req, res) => {
       success: true,
       student: {
         id: student._id,
-        name: student.name,
-        surname: student.surname,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        middleName: student.middleName,
         username: student.username
       },
       enrolledSubjects: student.enrolledSubjects,
@@ -1384,9 +2380,11 @@ router.get('/students/:studentId/enrolled-subjects', auth, async (req, res) => {
   }
 });
 
-// ──────────────────────────────────────────────────────────────
-// FIXED: Get teacher's assignments - UPDATED TO MATCH TEACHERHOME.JS
-// ──────────────────────────────────────────────────────────────
+// ============================================================
+// EXISTING ENDPOINTS (keeping for compatibility)
+// ============================================================
+
+// Get teacher's assignments
 router.get('/teachers/:teacherId/assignments', auth, async (req, res) => {
   try {
     const { teacherId } = req.params;
@@ -1394,7 +2392,7 @@ router.get('/teachers/:teacherId/assignments', auth, async (req, res) => {
     console.log('👨‍🏫 GET /api/users/teachers/:teacherId/assignments - Fetching assignments for teacher:', teacherId);
 
     // Verify teacher exists
-    const teacher = await User.findById(teacherId).select('_id name surname username role');
+    const teacher = await User.findById(teacherId).select('_id firstName lastName middleName username role');
     
     if (!teacher || teacher.role !== 'teacher') {
       return res.status(404).json({
@@ -1403,7 +2401,7 @@ router.get('/teachers/:teacherId/assignments', auth, async (req, res) => {
       });
     }
 
-    // Get teacher with assignments - FIXED: Use proper population
+    // Get teacher with assignments
     const teacherWithAssignments = await User.findById(teacherId)
       .populate({
         path: 'teacherAssignments.class',
@@ -1415,7 +2413,7 @@ router.get('/teachers/:teacherId/assignments', auth, async (req, res) => {
         select: 'name code category isCore',
         model: 'Subject'
       })
-      .select('teacherAssignments name surname username role')
+      .select('teacherAssignments firstName lastName middleName username role')
       .lean();
 
     if (!teacherWithAssignments) {
@@ -1425,7 +2423,7 @@ router.get('/teachers/:teacherId/assignments', auth, async (req, res) => {
       });
     }
 
-    // Format assignments to match TeacherHome.js expectations
+    // Format assignments
     const assignments = teacherWithAssignments.teacherAssignments || [];
     
     // Calculate statistics
@@ -1480,13 +2478,14 @@ router.get('/teachers/:teacherId/assignments', auth, async (req, res) => {
       })
     );
 
-    // Prepare response matching TeacherHome.js structure
+    // Prepare response
     const response = {
       success: true,
       teacher: {
         id: teacherWithAssignments._id,
-        name: teacherWithAssignments.name,
-        surname: teacherWithAssignments.surname,
+        firstName: teacherWithAssignments.firstName,
+        lastName: teacherWithAssignments.lastName,
+        middleName: teacherWithAssignments.middleName,
         username: teacherWithAssignments.username,
         role: teacherWithAssignments.role
       },
@@ -1515,8 +2514,8 @@ router.get('/teachers/:teacherId/assignments', auth, async (req, res) => {
     const { teacherId } = req.params;
     console.error('❌ GET /users/teachers/:teacherId/assignments error:', err);
     
-    // Return minimal data on error to prevent TeacherHome from crashing
-    const teacher = await User.findById(teacherId).select('_id name surname username role').lean();
+    // Return minimal data on error
+    const teacher = await User.findById(teacherId).select('_id firstName lastName middleName username role').lean();
     
     if (!teacher) {
       return res.status(404).json({
@@ -1525,13 +2524,13 @@ router.get('/teachers/:teacherId/assignments', auth, async (req, res) => {
       });
     }
 
-    // Return empty assignments with teacher info
     res.json({
       success: true,
       teacher: {
         id: teacher._id,
-        name: teacher.name,
-        surname: teacher.surname,
+        firstName: teacher.firstName,
+        lastName: teacher.lastName,
+        middleName: teacher.middleName,
         username: teacher.username,
         role: teacher.role
       },
@@ -1545,9 +2544,7 @@ router.get('/teachers/:teacherId/assignments', auth, async (req, res) => {
   }
 });
 
-// ──────────────────────────────────────────────────────────────
-// NEW: Get teacher's classes (simplified version for dropdowns)
-// ──────────────────────────────────────────────────────────────
+// Get teacher's classes (simplified version for dropdowns)
 router.get('/teachers/:teacherId/classes', auth, async (req, res) => {
   try {
     const { teacherId } = req.params;
@@ -1558,7 +2555,7 @@ router.get('/teachers/:teacherId/classes', auth, async (req, res) => {
     const teacher = await User.findById(teacherId)
       .populate('teacherAssignments.class', 'name shortName level')
       .populate('teacherAssignments.subjects.subject', 'name code')
-      .select('teacherAssignments name username')
+      .select('teacherAssignments firstName lastName middleName username')
       .lean();
 
     if (!teacher || teacher.role !== 'teacher') {
@@ -1607,7 +2604,9 @@ router.get('/teachers/:teacherId/classes', auth, async (req, res) => {
       success: true,
       teacher: {
         id: teacher._id,
-        name: teacher.name,
+        firstName: teacher.firstName,
+        lastName: teacher.lastName,
+        middleName: teacher.middleName,
         username: teacher.username
       },
       classes,
@@ -1671,7 +2670,8 @@ router.delete('/:id', auth, checkPermission('delete_users'), async (req, res) =>
       message: 'User deleted successfully',
       deletedUser: {
         id: user._id,
-        name: user.name,
+        firstName: user.firstName,
+        lastName: user.lastName,
         username: user.username
       }
     });
@@ -1688,7 +2688,7 @@ router.delete('/:id', auth, checkPermission('delete_users'), async (req, res) =>
   }
 });
 
-// Get current user profile - FIXED WITH TIMEOUT
+// Get current user profile
 router.get('/profile/me', auth, async (req, res) => {
   try {
     console.log('👤 GET /api/users/profile/me - User ID:', req.user.id);
@@ -1696,7 +2696,7 @@ router.get('/profile/me', auth, async (req, res) => {
     const user = await User.findById(req.user.id)
       .select('-password -loginAttempts -lockUntil')
       .lean()
-      .maxTimeMS(10000); // 10 second timeout
+      .maxTimeMS(10000);
 
     if (!user) {
       return res.status(404).json({ 
@@ -1738,13 +2738,14 @@ router.put('/profile/me', auth, async (req, res) => {
   try {
     console.log('📝 PUT /api/users/profile/me - User ID:', req.user.id, 'Data:', req.body);
     
-    const { name, surname, email, phoneNumber, address, dateOfBirth, sex, age } = req.body;
+    const { firstName, lastName, middleName, email, phoneNumber, address, dateOfBirth, sex, age } = req.body;
     
     const user = await User.findByIdAndUpdate(
       req.user.id,
       { 
-        name, 
-        surname, 
+        firstName, 
+        lastName,
+        middleName,
         email: email ? email.toLowerCase() : undefined, 
         phoneNumber, 
         address, 
@@ -1778,83 +2779,137 @@ router.put('/profile/me', auth, async (req, res) => {
   }
 });
 
-// Add this route to fix existing invalid data
-router.get('/fix/invalid-data', auth, async (req, res) => {
+// Upload profile image
+router.post('/:id/upload-profile-image', auth, checkPermission('edit_users'), async (req, res) => {
   try {
-    if (req.user.role !== 'super_admin') {
-      return res.status(403).json({
+    console.log('🖼️ POST /api/users/:id/upload-profile-image - User ID:', req.params.id);
+    
+    if (!req.files || !req.files.profileImage) {
+      console.log('❌ No profile image uploaded');
+      return res.status(400).json({
         success: false,
-        message: 'Super admin access required'
+        message: 'No profile image uploaded'
       });
     }
 
-    // Find all users and fix invalid subject references
-    const users = await User.find({});
-    const results = [];
+    const profileImage = req.files.profileImage;
     
-    for (const user of users) {
-      let fixed = false;
-      let fixedSubjects = 0;
-      let fixedEnrolledSubjects = 0;
+    console.log('📄 File upload details:', {
+      name: profileImage.name,
+      size: profileImage.size,
+      mimetype: profileImage.mimetype,
+      tempFilePath: profileImage.tempFilePath
+    });
 
-      // Fix subjects (old format)
-      if (user.subjects && user.subjects.length > 0) {
-        for (const subjectItem of user.subjects) {
-          if (typeof subjectItem.subject === 'string' && !mongoose.Types.ObjectId.isValid(subjectItem.subject)) {
-            // Save the string as subjectName
-            if (!subjectItem.subjectName) {
-              subjectItem.subjectName = subjectItem.subject;
-            }
-            subjectItem.subject = null;
-            fixedSubjects++;
-            fixed = true;
-          }
-        }
-      }
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(profileImage.mimetype)) {
+      console.log('❌ Invalid file type:', profileImage.mimetype);
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid file type. Only JPG, PNG, GIF, and WebP are allowed.'
+      });
+    }
 
-      // Fix enrolledSubjects (old format)
-      if (user.enrolledSubjects && user.enrolledSubjects.length > 0) {
-        for (const enrolledSubject of user.enrolledSubjects) {
-          if (typeof enrolledSubject.subject === 'string' && !mongoose.Types.ObjectId.isValid(enrolledSubject.subject)) {
-            if (!enrolledSubject.subjectName) {
-              enrolledSubject.subjectName = enrolledSubject.subject;
-            }
-            enrolledSubject.subject = null;
-            fixedEnrolledSubjects++;
-            fixed = true;
-          }
-        }
-      }
+    // Validate file size (5MB max)
+    if (profileImage.size > 5 * 1024 * 1024) {
+      console.log('❌ File too large:', profileImage.size);
+      return res.status(400).json({
+        success: false,
+        message: 'File size too large. Maximum size is 5MB.'
+      });
+    }
 
-      if (fixed) {
-        await user.save();
-        results.push({
-          username: user.username,
-          id: user._id,
-          fixedSubjects,
-          fixedEnrolledSubjects
-        });
+    // Generate unique filename
+    const fileExtension = profileImage.name.split('.').pop();
+    const timestamp = Date.now();
+    const randomString = Math.random().toString(36).substring(2, 8);
+    const fileName = `profile_${req.params.id}_${timestamp}_${randomString}.${fileExtension}`;
+    
+    // Define upload path
+    const uploadDir = path.join(__dirname, '../../uploads/profiles');
+    
+    // Ensure upload directory exists
+    console.log('📁 Checking upload directory:', uploadDir);
+    if (!fs.existsSync(uploadDir)) {
+      console.log('📁 Creating upload directory');
+      fs.mkdirSync(uploadDir, { recursive: true });
+      console.log('✅ Upload directory created');
+    } else {
+      console.log('✅ Upload directory exists');
+    }
+
+    const filePath = path.join(uploadDir, fileName);
+    console.log('💾 Saving file to:', filePath);
+    
+    // Move file to upload directory
+    await profileImage.mv(filePath);
+    console.log('✅ File moved successfully');
+    
+    // Check if file exists after move
+    if (fs.existsSync(filePath)) {
+      console.log('✅ File exists on disk after move');
+      console.log('📊 File size:', fs.statSync(filePath).size, 'bytes');
+    } else {
+      console.log('❌ File not found after move!');
+    }
+    
+    // Update user in database
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      console.log('❌ User not found:', req.params.id);
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    console.log('👤 Found user:', user.username);
+
+    // Delete old profile image if exists
+    if (user.profileImage) {
+      const oldPath = path.join(uploadDir, user.profileImage);
+      console.log('🗑️ Checking old image:', oldPath);
+      if (fs.existsSync(oldPath)) {
+        fs.unlinkSync(oldPath);
+        console.log('✅ Old image deleted');
+      } else {
+        console.log('ℹ️ Old image not found');
       }
     }
 
+    // Update user with new profile image
+    console.log('💾 Updating user with profileImage:', fileName);
+    user.profileImage = fileName;
+    user.profilePicture = fileName;
+    
+    await user.save();
+    console.log('✅ User saved with profileImage:', fileName);
+
+    console.log('✅ Profile image uploaded for user:', user.username, 'File:', fileName);
+
     res.json({
       success: true,
-      message: 'Fixed invalid data in database',
-      totalUsersFixed: results.length,
-      results
+      message: 'Profile image uploaded successfully',
+      profileImage: fileName,
+      profileImageUrl: `/uploads/profiles/${fileName}`
     });
 
   } catch (error) {
-    console.error('❌ Fix invalid data error:', error);
+    console.error('❌ Profile image upload error:', error);
+    console.error('❌ Error details:', {
+      message: error.message,
+      stack: error.stack
+    });
     res.status(500).json({
       success: false,
-      message: 'Error fixing invalid data',
-      error: error.message
+      message: 'Failed to upload profile image',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
 
-// Simple user count for dashboard (doesn't need population)
+// Simple user count for dashboard
 router.get('/dashboard/counts', auth, async (req, res) => {
   try {
     if (!['admin', 'super_admin'].includes(req.user.role)) {
@@ -1896,7 +2951,7 @@ router.get('/dashboard/counts', auth, async (req, res) => {
   }
 });
 
-// Bulk create users - FIXED WITH TIMEOUT
+// Bulk create users
 router.post('/bulk', auth, checkPermission('create_users'), async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -1918,13 +2973,17 @@ router.post('/bulk', auth, checkPermission('create_users'), async (req, res) => 
 
     for (const userData of usersData) {
       try {
-        const { username: rawUsername, email, password, name, surname, role = 'student', class: classId } = userData;
+        const { username: rawUsername, email, password, firstName, lastName, middleName, name, surname, role = 'student', class: classId } = userData;
+
+        // Handle backward compatibility
+        const finalFirstName = firstName || name;
+        const finalLastName = lastName || surname;
 
         // Validate required fields
-        if (!rawUsername || !email || !password || !name || !surname) {
+        if (!rawUsername || !email || !password || !finalFirstName || !finalLastName) {
           errors.push({
             username: rawUsername || 'missing',
-            error: 'Missing required fields (username, email, password, name, surname)'
+            error: 'Missing required fields (username, email, password, first name, last name)'
           });
           continue;
         }
@@ -1961,9 +3020,10 @@ router.post('/bulk', auth, checkPermission('create_users'), async (req, res) => 
         const newUser = new User({
           username,
           email: email.toLowerCase(),
-          password: password, // Raw password - model will hash
-          name,
-          surname,
+          password: password,
+          firstName: finalFirstName,
+          lastName: finalLastName,
+          middleName,
           role,
           class: classId || null,
           active: true,

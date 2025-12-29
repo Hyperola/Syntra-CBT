@@ -36,7 +36,7 @@ import AddQuestion from '../components/teacher/AddQuestion';
 import BulkImport from '../components/teacher/BulkImport';
 import ManageQuestions from '../components/teacher/ManageQuestions';
 import ManageTests from '../components/teacher/ManageTests';
-import TeacherAnalytics from '../components/teacher/Analytics';
+import TeacherAnalytics from '../components/teacher/TeacherAnalytics';
 import TestCreation from '../pages/TestCreation';
 import TestPreview from '../pages/TestPreview';
 import AddTestQuestions from '../components/teacher/AddTestQuestions';
@@ -634,7 +634,7 @@ const TeacherHome = () => {
               <Route path="test-results" element={<TestResults teacherData={teacherData} />} />
               <Route path="test-results/:testId" element={<TestResults teacherData={teacherData} />} />
               <Route path="schedule" element={<TeacherSchedule teacherData={teacherData} />} />
-              <Route path="analytics" element={<TeacherAnalytics teacherData={teacherData} />} />
+             <Route path="analytics" element={<TeacherAnalytics teacherData={teacherData} />} />
               
               {/* Settings Routes */}
               <Route path="profile" element={<TeacherProfile teacherData={teacherData} />} />

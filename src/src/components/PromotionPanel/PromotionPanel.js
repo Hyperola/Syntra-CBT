@@ -5,7 +5,6 @@ const PromotionPanel = () => {
   const [classes, setClasses] = useState([]);
   const [selectedClass, setSelectedClass] = useState('');
   const [session, setSession] = useState('');
-  const [term, setTerm] = useState('');
   const [eligibilityResults, setEligibilityResults] = useState([]);
   const [selectedStudents, setSelectedStudents] = useState([]);
   const [targetClass, setTargetClass] = useState('');
@@ -21,7 +20,6 @@ const PromotionPanel = () => {
     checkPromotionStatus();
     const currentSession = getCurrentSession();
     setSession(currentSession);
-    setTerm('Third Term');
   }, []);
 
   const getCurrentSession = () => {
@@ -39,7 +37,7 @@ const PromotionPanel = () => {
     try {
       console.log('🔍 Checking promotion status...');
       const response = await promotionAPI.getPromotionStatus();
-      console.log('✅ Promotion status response:', response);
+      console.log('✅ Promotion status response:', response.data);
       setPromotionStatus(response.data);
     } catch (error) {
       console.error('❌ Error checking promotion status:', error);
@@ -51,35 +49,18 @@ const PromotionPanel = () => {
     try {
       console.log('🔍 Fetching classes from API...');
       const response = await promotionAPI.getClasses();
-      console.log('✅ Classes API response:', response);
       
-      // Debug: Log the exact structure
-      console.log('🔍 RAW API RESPONSE STRUCTURE:', {
-        fullResponse: response,
-        data: response.data,
-        dataType: typeof response.data,
-        isArray: Array.isArray(response.data),
-        keys: response.data ? Object.keys(response.data) : 'no data'
-      });
-      
-      // FIX: Handle different response structures
       let classesData = [];
       
-      if (response.data && Array.isArray(response.data)) {
-        // Case 1: Direct array response
-        classesData = response.data;
-      } else if (response.data && Array.isArray(response.data.classes)) {
-        // Case 2: Object with classes array
+      if (response.data && Array.isArray(response.data.classes)) {
         classesData = response.data.classes;
+      } else if (response.data && Array.isArray(response.data)) {
+        classesData = response.data;
       } else if (response.data && response.data.data && Array.isArray(response.data.data)) {
-        // Case 3: Nested data array
         classesData = response.data.data;
-      } else if (response.data && typeof response.data === 'object') {
-        // Case 4: Convert object values to array
-        classesData = Object.values(response.data);
       }
       
-      console.log(`✅ Processed ${classesData.length} classes:`, classesData);
+      console.log(`✅ Processed ${classesData.length} classes`);
       setClasses(classesData);
       
     } catch (error) {
@@ -89,43 +70,43 @@ const PromotionPanel = () => {
     }
   };
 
+  // Fetch eligibility based on SESSION AVERAGE
   const fetchEligibleStudents = async () => {
-    if (!selectedClass || !session || !term) return;
+    if (!selectedClass || !session) return;
     
     setLoading(true);
     setEligibilityResults([]);
     setSelectedStudents([]);
     
     try {
-      console.log('🔍 Fetching eligible students with:', { 
+      console.log('🔍 Fetching eligible students:', { 
         selectedClass, 
-        session, 
-        term 
+        session 
       });
       
-      const response = await promotionAPI.getEligibleStudents(selectedClass, session, term);
-      console.log('✅ Eligible students API response:', response);
+      const response = await promotionAPI.getSessionEligibility(selectedClass, session);
+      console.log('✅ Session eligibility API response:', response.data);
       
-      // FIX: Handle different response structures for eligibility results
       let resultsData = [];
       
       if (response.data && Array.isArray(response.data)) {
         resultsData = response.data;
-      } else if (response.data && Array.isArray(response.data.results)) {
-        resultsData = response.data.results;
-      } else if (response.data && response.data.data && Array.isArray(response.data.data)) {
-        resultsData = response.data.data;
-      } else if (response.data && typeof response.data === 'object') {
-        resultsData = Object.values(response.data);
       }
       
       setEligibilityResults(resultsData);
+      
+      // Count eligible students
       const eligibleCount = resultsData.filter(r => r.status === 'eligible').length;
-      showMessage(`Found ${resultsData.length} students - ${eligibleCount} eligible for promotion`, 'success');
+      const totalCount = resultsData.length;
+      
+      showMessage(
+        `Found ${totalCount} students - ${eligibleCount} eligible for promotion (based on session average)`, 
+        'success'
+      );
       
     } catch (error) {
       console.error('❌ Error fetching eligible students:', error);
-      const errorMessage = error.response?.data?.message || error.message;
+      const errorMessage = error.response?.data?.message || error.message || 'Unknown error';
       showMessage(`Error fetching students: ${errorMessage}`, 'error');
     }
     setLoading(false);
@@ -152,7 +133,7 @@ const PromotionPanel = () => {
     const eligibleStudents = getEligibleStudents();
     const allEligibleIds = eligibleStudents.map(result => 
       result.student._id || result.student.id
-    ).filter(id => id); // Filter out any undefined IDs
+    ).filter(id => id);
     setSelectedStudents(allEligibleIds);
   };
 
@@ -177,19 +158,19 @@ const PromotionPanel = () => {
         selectedStudents, 
         targetClass, 
         session, 
-        term 
+        term: 'Third Term'
       });
       
       const result = await promotionAPI.promoteStudents(
         selectedStudents, 
         targetClass, 
         session, 
-        term
+        'Third Term'
       );
       
-      console.log('✅ Promotion API response:', result);
+      console.log('✅ Promotion API response:', result.data);
       
-      if (result.data) {
+      if (result.data && result.data.success) {
         showMessage(
           `Successfully promoted ${selectedStudents.length} student${selectedStudents.length > 1 ? 's' : ''} to ${getClassName(targetClass)}`, 
           'success'
@@ -200,11 +181,11 @@ const PromotionPanel = () => {
         fetchEligibleStudents();
         checkPromotionStatus();
       } else {
-        showMessage('Promotion failed: Unexpected response format', 'error');
+        showMessage('Promotion failed: ' + (result.data?.message || 'Unknown error'), 'error');
       }
     } catch (error) {
       console.error('❌ Promotion error:', error);
-      const errorMessage = error.response?.data?.message || error.message;
+      const errorMessage = error.response?.data?.message || error.message || 'Unknown error';
       showMessage(`Promotion failed: ${errorMessage}`, 'error');
     }
     
@@ -294,24 +275,20 @@ const PromotionPanel = () => {
         
         <div style={styles.filterGroup}>
           <label style={styles.label}>Term:</label>
-          <select 
-            value={term} 
-            onChange={(e) => setTerm(e.target.value)}
-            style={styles.select}
-            disabled={!isPromotionAllowed}
-          >
-            <option value="First Term">First Term</option>
-            <option value="Second Term">Second Term</option>
-            <option value="Third Term">Third Term</option>
-          </select>
+          <input 
+            type="text" 
+            value="Third Term (Promotion Season)" 
+            style={{...styles.input, backgroundColor: '#f0f0f0', fontWeight: 'bold'}}
+            readOnly
+          />
         </div>
         
         <button 
           onClick={fetchEligibleStudents} 
-          disabled={!selectedClass || !session || !term || loading || !isPromotionAllowed}
+          disabled={!selectedClass || !session || loading || !isPromotionAllowed}
           style={{
             ...styles.button,
-            ...((!selectedClass || !session || !term || loading || !isPromotionAllowed) ? styles.buttonDisabled : {})
+            ...((!selectedClass || !session || loading || !isPromotionAllowed) ? styles.buttonDisabled : {})
           }}
         >
           {loading ? 'Loading...' : 'Check Eligibility'}
@@ -338,7 +315,6 @@ const PromotionPanel = () => {
                 <li>Active Session: {promotionStatus.session || 'None'}</li>
                 <li>Active Term: {promotionStatus.activeTerm || 'None'}</li>
                 <li>Promotion Completed: {promotionStatus.promotionCompleted ? 'Yes' : 'No'}</li>
-                <li>Is Third Term: {promotionStatus.details.isThirdTerm ? 'Yes' : 'No'}</li>
               </ul>
             </div>
           )}
@@ -352,6 +328,9 @@ const PromotionPanel = () => {
             <div style={styles.studentSection}>
               <h3 style={styles.sectionTitle}>
                 ✅ Eligible Students for Promotion ({eligibleStudents.length})
+                <small style={{fontSize: '0.8rem', marginLeft: '10px', color: '#666'}}>
+                  Based on Session Average (First + Second + Third Terms)
+                </small>
               </h3>
               <div style={styles.studentList}>
                 {eligibleStudents.map((result, index) => (
@@ -372,9 +351,16 @@ const PromotionPanel = () => {
                         </span>
                         {result.details && (
                           <div style={styles.performanceDetails}>
-                            <span>Score: {result.details.finalScore || result.details.score || 0}%</span>
-                            <span>Attendance: {result.details.attendancePercentage || result.details.attendance || 0}%</span>
-                            <span>Passing: {result.details.passingGrade || 60}%</span>
+                            <span><strong>Session Average:</strong> {result.details.sessionAverage || 0}%</span>
+                            {result.details.firstTermAverage && (
+                              <span><strong>1st Term:</strong> {result.details.firstTermAverage}%</span>
+                            )}
+                            {result.details.secondTermAverage && (
+                              <span><strong>2nd Term:</strong> {result.details.secondTermAverage}%</span>
+                            )}
+                            {result.details.thirdTermAverage && (
+                              <span><strong>3rd Term:</strong> {result.details.thirdTermAverage}%</span>
+                            )}
                           </div>
                         )}
                       </div>
@@ -406,9 +392,8 @@ const PromotionPanel = () => {
                           <strong>Reason:</strong> {result.reason || 'Not eligible'}
                           {result.details && (
                             <div style={styles.performanceDetails}>
-                              <span>Score: {result.details.finalScore || result.details.score || 0}%</span>
-                              <span>Attendance: {result.details.attendancePercentage || result.details.attendance || 0}%</span>
-                              <span>Required: {result.details.passingGrade || 60}% score, {result.details.minAttendance || 75}% attendance</span>
+                              <span>Session Average: {result.details.sessionAverage || 0}%</span>
+                              <span>Required: 50% average across all three terms</span>
                             </div>
                           )}
                         </div>
@@ -484,8 +469,9 @@ const PromotionPanel = () => {
                 <div style={styles.promotionSummary}>
                   <strong>Promotion Summary:</strong><br />
                   From: {selectedClassObj.name || selectedClassObj.fullName} → To: {targetClassObj.name || targetClassObj.fullName}<br />
-                  Session: {session} | Term: {term}<br />
-                  Students: {selectedStudents.length} selected
+                  Session: {session} | Term: Third Term (Promotion Season)<br />
+                  Students: {selectedStudents.length} selected<br />
+                  <small>Eligibility based on session average of all three terms</small>
                 </div>
               )}
             </div>
@@ -495,8 +481,8 @@ const PromotionPanel = () => {
 
       {Array.isArray(eligibilityResults) && eligibilityResults.length === 0 && !loading && selectedClass && isPromotionAllowed && (
         <div style={styles.noResults}>
-          <p>No students found or no academic records available for the selected criteria.</p>
-          <p><small>Try selecting a different class, session, or term.</small></p>
+          <p>No students found or no academic records available for the selected session.</p>
+          <p><small>Students must have completed records for First, Second, and Third Terms to be evaluated.</small></p>
         </div>
       )}
 

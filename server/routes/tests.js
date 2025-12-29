@@ -2851,4 +2851,49 @@ router.put('/:id/questions', [auth, validateObjectId('id')], async (req, res) =>
   }
 });
 
+
+// 🔥 GET SUBMISSION COUNTS FOR ADMIN DASHBOARD CARDS
+router.get('/:testId/submission-stats', [auth, validateObjectId('testId')], async (req, res) => {
+  try {
+    console.log('📊 Getting submission stats for test:', { testId: req.params.testId });
+
+    // Get test to find total assigned students
+    const test = await Test.findById(req.params.testId)
+      .select('batches title status');
+    
+    if (!test) {
+      return res.status(404).json({ success: false, error: 'Test not found' });
+    }
+
+    // Calculate total assigned students from all batches
+    let totalAssignedStudents = 0;
+    test.batches.forEach(batch => {
+      totalAssignedStudents += batch.students?.length || 0;
+    });
+
+    // Get total submissions count
+    const submissionCount = await Result.countDocuments({ 
+      testId: req.params.testId 
+    });
+
+    res.json({
+      success: true,
+      stats: {
+        testId: test._id,
+        testTitle: test.title,
+        testStatus: test.status,
+        totalAssignedStudents,
+        submittedCount: submissionCount,
+        pendingCount: totalAssignedStudents - submissionCount,
+        submissionRate: totalAssignedStudents > 0 ? 
+          Math.round((submissionCount / totalAssignedStudents) * 100) : 0
+      }
+    });
+
+  } catch (error) {
+    console.error('Submission stats error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
 module.exports = router;

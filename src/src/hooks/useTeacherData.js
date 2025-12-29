@@ -1,4 +1,4 @@
-// hooks/useTeacherData.js - COMPLETELY FIXED VERSION
+// hooks/useTeacherData.js - FINAL FIXED VERSION
 import { useState, useEffect, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/axios';
@@ -42,14 +42,16 @@ const useTeacherData = () => {
       
       logDebug('Tests fetched', { count: testsData.length });
       setTests(testsData);
+      return testsData;
       
     } catch (err) {
       console.error('❌ Fetch tests error:', err);
       setTests([]);
+      return [];
     }
   };
 
-  // Fetch teacher's analytics - COMPLETELY FIXED VERSION
+  // Fetch teacher's analytics - IMPROVED VERSION
   const fetchAnalytics = async (useMockData = false) => {
     try {
       setLoading(true);
@@ -62,212 +64,156 @@ const useTeacherData = () => {
         useMockData 
       });
       
-      // If mock data requested or development mode, try mock endpoint first
-      if (useMockData) {
-        try {
-          const mockRes = await api.get('/api/analytics/test');
-          if (mockRes.data && mockRes.data.success) {
-            logDebug('Mock analytics fetched', { 
-              count: mockRes.data.analytics?.length || 0 
-            });
-            
-            // Process mock data
-            const mockAnalytics = mockRes.data.analytics || [];
-            const mockSummary = mockRes.data.summary || null;
-            
-            setAnalytics(mockAnalytics);
-            setAnalyticsSummary(mockSummary);
-            setLastUpdated(new Date());
-            setSuccess('Mock analytics data loaded');
-            
-            console.log('📊 MOCK ANALYTICS DATA:', {
-              analyticsCount: mockAnalytics.length,
-              summary: mockSummary,
-              sample: mockAnalytics[0]
-            });
-            
-            return;
-          }
-        } catch (mockErr) {
-          console.log('Mock analytics endpoint not available, using real data');
-        }
-      }
+      // First, always fetch tests and results to have fallback data ready
+      const [testsData, resultsData] = await Promise.all([
+        fetchTests(),
+        fetchResults()
+      ]);
       
       // Try the real analytics endpoint
-      const res = await api.get('/api/analytics/teacher');
-      
-      console.log('📊 ANALYTICS API RAW RESPONSE:', res.data);
-      
-      if (res.data && res.data.success) {
-        // Handle different response structures
-        let analyticsData = [];
-        let summaryData = null;
+      try {
+        const res = await api.get('/api/analytics/teacher');
         
-        // STRUCTURE 1: Direct analytics and summary (most common)
-        if (res.data.analytics && Array.isArray(res.data.analytics)) {
-          analyticsData = res.data.analytics;
-          summaryData = res.data.summary || null;
-          console.log('✅ Using Structure 1: Direct analytics array');
-        }
-        // STRUCTURE 2: Wrapped in data object
-        else if (res.data.data && res.data.data.analytics && Array.isArray(res.data.data.analytics)) {
-          analyticsData = res.data.data.analytics;
-          summaryData = res.data.data.summary || null;
-          console.log('✅ Using Structure 2: Wrapped in data object');
-        }
-        // STRUCTURE 3: Just analytics array
-        else if (Array.isArray(res.data)) {
-          analyticsData = res.data;
-          console.log('✅ Using Structure 3: Direct array response');
-        }
-        // STRUCTURE 4: Data is the analytics array
-        else if (res.data.data && Array.isArray(res.data.data)) {
-          analyticsData = res.data.data;
-          console.log('✅ Using Structure 4: Data is array');
-        }
-        else {
-          console.log('⚠️ Unknown response structure:', res.data);
-          throw new Error('Unknown analytics response structure');
-        }
+        console.log('📊 ANALYTICS API RAW RESPONSE:', res.data);
         
-        // Process analytics data to ensure consistent format
-        const processedAnalytics = analyticsData.map(item => {
-          // Get class name - handle all possible formats
-          let className = 'Unknown Class';
+        if (res.data && res.data.success) {
+          // Handle different response structures
+          let analyticsData = [];
+          let summaryData = null;
           
-          if (item.class) {
-            if (typeof item.class === 'object') {
-              // Class is an object with name property
-              className = item.class.name || item.class.shortName || item.class.level || 'Unknown Class';
-            } else if (typeof item.class === 'string') {
-              // Check if it looks like an ObjectId
-              const isObjectId = /^[0-9a-fA-F]{24}$/.test(item.class);
-              if (isObjectId) {
-                // It's an ObjectId, use className if available
-                className = item.className || 'Unknown Class';
-              } else {
-                // It's already a class name string
-                className = item.class;
+          // STRUCTURE 1: Direct analytics and summary (most common)
+          if (res.data.analytics && Array.isArray(res.data.analytics)) {
+            analyticsData = res.data.analytics;
+            summaryData = res.data.summary || null;
+            console.log('✅ Using Structure 1: Direct analytics array');
+          }
+          // STRUCTURE 2: Wrapped in data object
+          else if (res.data.data && res.data.data.analytics && Array.isArray(res.data.data.analytics)) {
+            analyticsData = res.data.data.analytics;
+            summaryData = res.data.data.summary || null;
+            console.log('✅ Using Structure 2: Wrapped in data object');
+          }
+          // STRUCTURE 3: Just analytics array
+          else if (Array.isArray(res.data)) {
+            analyticsData = res.data;
+            console.log('✅ Using Structure 3: Direct array response');
+          }
+          // STRUCTURE 4: Data is the analytics array
+          else if (res.data.data && Array.isArray(res.data.data)) {
+            analyticsData = res.data.data;
+            console.log('✅ Using Structure 4: Data is array');
+          }
+          else {
+            console.log('⚠️ Unknown response structure:', res.data);
+            throw new Error('Unknown analytics response structure');
+          }
+          
+          // Process analytics data to ensure consistent format
+          const processedAnalytics = analyticsData.map(item => {
+            // Get class name - handle all possible formats
+            let className = 'Unknown Class';
+            
+            if (item.class) {
+              if (typeof item.class === 'object') {
+                // Class is an object with name property
+                className = item.class.name || item.class.shortName || item.class.level || 'Unknown Class';
+              } else if (typeof item.class === 'string') {
+                // Check if it looks like an ObjectId
+                const isObjectId = /^[0-9a-fA-F]{24}$/.test(item.class);
+                if (isObjectId) {
+                  // It's an ObjectId, use className if available
+                  className = item.className || 'Unknown Class';
+                } else {
+                  // It's already a class name string
+                  className = item.class;
+                }
               }
             }
-          }
-          
-          // Get class name from className field if available
-          if (item.className && typeof item.className === 'string') {
-            className = item.className;
-          }
-          
-          // Calculate average score percentage
-          let averageScore = 0;
-          if (item.averageScore !== undefined) {
-            averageScore = parseFloat(item.averageScore);
-            // If score seems to be out of total marks, convert to percentage
-            if (averageScore > 0 && averageScore <= (item.totalMarks || 100)) {
-              const totalMarks = item.totalMarks || 100;
-              averageScore = (averageScore / totalMarks) * 100;
+            
+            // Get class name from className field if available
+            if (item.className && typeof item.className === 'string') {
+              className = item.className;
             }
-          }
+            
+            // Calculate average score percentage
+            let averageScore = 0;
+            if (item.averageScore !== undefined) {
+              averageScore = parseFloat(item.averageScore);
+              // If score seems to be out of total marks, convert to percentage
+              if (averageScore > 0 && averageScore <= (item.totalMarks || 100)) {
+                const totalMarks = item.totalMarks || 100;
+                averageScore = (averageScore / totalMarks) * 100;
+              }
+            }
+            
+            // Ensure averageScore is a reasonable percentage
+            if (isNaN(averageScore) || averageScore < 0) averageScore = 0;
+            if (averageScore > 100) averageScore = 100;
+            
+            return {
+              testId: item.testId || item._id || `test-${Math.random()}`,
+              testTitle: item.testTitle || item.title || 'Untitled Test',
+              subject: item.subject || 'Unknown Subject',
+              class: className,
+              className: className,
+              averageScore: parseFloat(averageScore.toFixed(2)),
+              completionRate: parseFloat((item.completionRate || 0).toFixed(2)),
+              totalStudents: item.totalStudents || 0,
+              completedStudents: item.completedStudents || 0,
+              topStudent: item.topStudent || 'N/A',
+              createdAt: item.createdAt || new Date(),
+              updatedAt: item.updatedAt || item.createdAt,
+              session: item.session || 'Unknown',
+              term: item.term || 'Unknown',
+              status: item.status || 'unknown',
+              totalMarks: item.totalMarks || 100,
+              passingMarks: item.passingMarks || 50,
+              hasResults: item.totalStudents > 0
+            };
+          });
           
-          // Ensure averageScore is a reasonable percentage
-          if (isNaN(averageScore) || averageScore < 0) averageScore = 0;
-          if (averageScore > 100) averageScore = 100;
+          // Filter out tests with no data if needed
+          const filteredAnalytics = processedAnalytics.filter(test => 
+            test.totalStudents > 0 || test.averageScore > 0
+          );
           
-          return {
-            testId: item.testId || item._id || `test-${Math.random()}`,
-            testTitle: item.testTitle || item.title || 'Untitled Test',
-            subject: item.subject || 'Unknown Subject',
-            class: className, // This will show "JSS 1" not ObjectId
-            className: className,
-            averageScore: parseFloat(averageScore.toFixed(2)),
-            completionRate: parseFloat((item.completionRate || 0).toFixed(2)),
-            totalStudents: item.totalStudents || 0,
-            completedStudents: item.completedStudents || 0,
-            topStudent: item.topStudent || 'N/A',
-            createdAt: item.createdAt || new Date(),
-            updatedAt: item.updatedAt || item.createdAt,
-            session: item.session || 'Unknown',
-            term: item.term || 'Unknown',
-            status: item.status || 'unknown',
-            totalMarks: item.totalMarks || 100,
-            passingMarks: item.passingMarks || 50,
-            hasResults: item.totalStudents > 0
-          };
+          console.log('📊 PROCESSED ANALYTICS:', {
+            rawCount: analyticsData.length,
+            processedCount: filteredAnalytics.length,
+            summary: summaryData,
+            sample: filteredAnalytics[0],
+            allScores: filteredAnalytics.map(a => a.averageScore),
+            allClasses: filteredAnalytics.map(a => a.class)
+          });
+          
+          setAnalytics(filteredAnalytics);
+          setAnalyticsSummary(summaryData);
+          setLastUpdated(new Date());
+          setSuccess(`Analytics data loaded: ${filteredAnalytics.length} tests found`);
+          return;
+          
+        } else {
+          throw new Error(res.data?.error || 'Failed to fetch analytics');
+        }
+        
+      } catch (apiError) {
+        console.error('❌ ANALYTICS API ERROR:', {
+          message: apiError.message,
+          response: apiError.response?.data,
+          status: apiError.response?.status,
         });
         
-        // Filter out tests with no data if needed
-        const filteredAnalytics = processedAnalytics.filter(test => 
-          test.totalStudents > 0 || test.averageScore > 0
-        );
+        // If we have API error, use fallback from tests and results
+        console.log('🔄 Using fallback: Creating analytics from tests and results...');
         
-        console.log('📊 PROCESSED ANALYTICS:', {
-          rawCount: analyticsData.length,
-          processedCount: filteredAnalytics.length,
-          summary: summaryData,
-          sample: filteredAnalytics[0],
-          allScores: filteredAnalytics.map(a => a.averageScore),
-          allClasses: filteredAnalytics.map(a => a.class)
-        });
-        
-        setAnalytics(filteredAnalytics);
-        setAnalyticsSummary(summaryData);
-        setLastUpdated(new Date());
-        setSuccess(`Analytics data loaded: ${filteredAnalytics.length} tests found`);
-        
-      } else {
-        throw new Error(res.data?.error || 'Failed to fetch analytics');
-      }
-      
-    } catch (err) {
-      console.error('❌ FETCH ANALYTICS ERROR:', {
-        message: err.message,
-        response: err.response?.data,
-        status: err.response?.status,
-        url: err.config?.url
-      });
-      
-      // Set user-friendly error messages
-      if (err.response?.status === 403) {
-        setError('You do not have permission to view analytics');
-      } else if (err.response?.status === 404) {
-        setError('Analytics endpoint not found. Please check if the server route is configured.');
-      } else if (err.response?.status === 401) {
-        setError('Session expired. Please log in again.');
-        navigate('/login');
-      } else if (err.message.includes('Network Error')) {
-        setError('Cannot connect to server. Please check your internet connection.');
-      } else {
-        setError(`Failed to load analytics: ${err.message}`);
-      }
-      
-      // Set empty data
-      setAnalytics([]);
-      setAnalyticsSummary(null);
-      
-      // Try fallback: create analytics from tests and results
-      try {
-        console.log('🔄 Trying fallback: Creating analytics from tests and results...');
-        
-        // Fetch tests and results in parallel
-        const [testsRes, resultsRes] = await Promise.all([
-          api.get('/api/tests'),
-          api.get('/api/results/teacher').catch(() => ({ data: { results: [] } }))
-        ]);
-        
-        const testsData = testsRes.data?.tests || testsRes.data?.data || [];
-        const resultsData = resultsRes.data?.results || resultsRes.data?.data || [];
-        
-        console.log('📊 Fallback data:', {
-          testsCount: testsData.length,
-          resultsCount: resultsData.length
-        });
-        
-        if (Array.isArray(testsData) && testsData.length > 0) {
+        if (testsData.length > 0) {
           const fallbackAnalytics = testsData.map(test => {
             // Find results for this test
             const testResults = resultsData.filter(r => {
               if (!r.testId) return false;
               const testId = r.testId._id ? r.testId._id.toString() : r.testId.toString();
-              return testId === test._id.toString();
+              const currentTestId = test._id ? test._id.toString() : test.testId;
+              return testId === currentTestId;
             });
             
             // Calculate average score
@@ -293,8 +239,13 @@ const useTeacherData = () => {
               }
             }
             
+            // Get class name from className field if available
+            if (test.className && typeof test.className === 'string') {
+              className = test.className;
+            }
+            
             return {
-              testId: test._id,
+              testId: test._id || test.testId,
               testTitle: test.title || 'Untitled Test',
               subject: test.subject || 'Unknown Subject',
               class: className,
@@ -303,8 +254,9 @@ const useTeacherData = () => {
               completionRate: testResults.length > 0 ? 100 : 0,
               totalStudents: testResults.length,
               completedStudents: testResults.length,
-              topStudent: 'N/A',
-              createdAt: test.createdAt,
+              topStudent: testResults.length > 0 ? 
+                (testResults.sort((a, b) => (b.score || 0) - (a.score || 0))[0]?.studentName || 'N/A') : 'N/A',
+              createdAt: test.createdAt || new Date(),
               session: test.session || 'Unknown',
               term: test.term || 'Unknown',
               status: test.status || 'unknown',
@@ -323,12 +275,34 @@ const useTeacherData = () => {
           });
           
           setAnalytics(validAnalytics);
+          setAnalyticsSummary({
+            overallAverageScore: validAnalytics.length > 0 ? 
+              parseFloat((validAnalytics.reduce((sum, a) => sum + a.averageScore, 0) / validAnalytics.length).toFixed(2)) : 0,
+            totalStudents: validAnalytics.reduce((sum, a) => sum + a.totalStudents, 0),
+            totalTests: validAnalytics.length,
+            passRate: validAnalytics.length > 0 ? 
+              parseFloat(((validAnalytics.filter(a => a.averageScore >= 50).length / validAnalytics.length) * 100).toFixed(2)) : 0
+          });
           setError(null);
-          setSuccess(`Fallback analytics created from ${validAnalytics.length} tests`);
+
+          setLastUpdated(new Date());
+        } else {
+          setAnalytics([]);
+          setAnalyticsSummary(null);
+          setSuccess('No test data available for analytics');
         }
-      } catch (fallbackErr) {
-        console.log('❌ Fallback also failed:', fallbackErr.message);
       }
+      
+    } catch (err) {
+      console.error('❌ FETCH ANALYTICS ERROR:', err.message);
+      
+      // Set user-friendly error message
+      setError('Unable to load analytics. Showing available test data instead.');
+      
+      // Set empty data but don't navigate away
+      setAnalytics([]);
+      setAnalyticsSummary(null);
+      
     } finally {
       setLoading(false);
     }
@@ -352,16 +326,20 @@ const useTeacherData = () => {
             ...result,
             score: result.score || 0,
             percentage: result.percentage || 0,
-            timeSpent: result.timeSpent || 0
+            timeSpent: result.timeSpent || 0,
+            studentName: result.studentName || result.student?.name || 'Unknown Student',
+            testId: result.testId || result.test?._id
           }))
         : [];
       
       logDebug('Results fetched', { count: resultsData.length });
       setResults(resultsData);
+      return resultsData;
       
     } catch (err) {
       console.error('❌ Fetch results error:', err);
       setResults([]);
+      return [];
     }
   };
 
@@ -379,10 +357,12 @@ const useTeacherData = () => {
       questionsData = Array.isArray(questionsData) ? questionsData : [];
       logDebug('Questions fetched', { count: questionsData.length });
       setQuestions(questionsData);
+      return questionsData;
       
     } catch (err) {
       console.error('❌ Fetch questions error:', err);
       setQuestions([]);
+      return [];
     }
   };
 
@@ -399,10 +379,12 @@ const useTeacherData = () => {
       assignmentsData = Array.isArray(assignmentsData) ? assignmentsData : [];
       logDebug('Assignments fetched', { count: assignmentsData.length });
       setAssignments(assignmentsData);
+      return assignmentsData;
       
     } catch (err) {
       console.error('❌ Fetch assignments error:', err);
       setAssignments([]);
+      return [];
     }
   };
 
@@ -423,13 +405,13 @@ const useTeacherData = () => {
     try {
       logDebug('Loading all teacher data for', { username: user.username });
       
-      // Fetch all data in parallel but handle analytics specially
+      // Fetch all data in parallel
       await Promise.allSettled([
         fetchTests(),
         fetchQuestions(),
         fetchResults(),
         fetchAssignments(),
-        fetchAnalytics(forceRefresh) // This handles its own loading state
+        fetchAnalytics(forceRefresh)
       ]);
       
       logDebug('All data loaded', {
@@ -440,16 +422,14 @@ const useTeacherData = () => {
         assignments: assignments.length
       });
       
+   
+      
     } catch (err) {
       console.error('❌ Error in fetchAllData:', err);
       
-      if (err.response?.status === 401) {
-        setError('Session expired. Please log in again.');
-        navigate('/login');
-      } else if (err.response?.status === 403) {
-        setError('You do not have permission to access this data.');
-      } else {
-        setError('Failed to load data. Please try again.');
+      // Don't show error if analytics failed but other data loaded
+      if (err.message && !err.message.includes('analytics')) {
+        setError('Some data failed to load. Please try refreshing.');
       }
     } finally {
       setLoading(false);

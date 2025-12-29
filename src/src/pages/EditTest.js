@@ -66,7 +66,19 @@ const EditTest = () => {
           instructions: testData.instructions || '',
           status: testData.status || 'draft'
         });
-        setQuestions(testData.questions || []);
+        
+        // Ensure all questions have required fields
+        const questionsWithDefaults = (testData.questions || []).map(q => ({
+          _id: q._id || Date.now().toString(),
+          questionText: q.questionText || '',
+          type: q.type || 'mcq',
+          options: q.options || [],
+          marks: q.marks || 1,
+          difficulty: q.difficulty || 'medium',
+          explanation: q.explanation || '',
+          topics: q.topics || []
+        }));
+        setQuestions(questionsWithDefaults);
       } else {
         setError('Test not found or you don\'t have permission to edit it');
       }
@@ -140,7 +152,21 @@ const EditTest = () => {
 
   const openQuestionModal = (index = null) => {
     if (index !== null) {
-      setCurrentQuestion({ ...questions[index] });
+      const questionToEdit = questions[index];
+      setCurrentQuestion({ 
+        questionText: questionToEdit.questionText || '',
+        type: questionToEdit.type || 'mcq',
+        options: questionToEdit.options || [
+          { text: '', isCorrect: false },
+          { text: '', isCorrect: false },
+          { text: '', isCorrect: false },
+          { text: '', isCorrect: false }
+        ],
+        marks: questionToEdit.marks || 1,
+        difficulty: questionToEdit.difficulty || 'medium',
+        explanation: questionToEdit.explanation || '',
+        topics: questionToEdit.topics || []
+      });
       setEditQuestionIndex(index);
     } else {
       setCurrentQuestion({
@@ -221,7 +247,7 @@ const EditTest = () => {
     }
 
     if (currentQuestion.type === 'mcq') {
-      const validOptions = currentQuestion.options.filter(opt => opt.text.trim());
+      const validOptions = currentQuestion.options.filter(opt => opt.text && opt.text.trim());
       if (validOptions.length < 2) {
         alert('Please add at least 2 options');
         return;
@@ -674,7 +700,7 @@ const EditTest = () => {
                           {index + 1}
                         </span>
                         <h4 style={{ margin: 0, color: '#374151', flex: 1 }}>
-                          {question.questionText}
+                          {question.questionText || 'Untitled Question'}
                         </h4>
                       </div>
                       
@@ -686,7 +712,7 @@ const EditTest = () => {
                           borderRadius: '4px',
                           fontSize: '12px'
                         }}>
-                          {question.type.toUpperCase()}
+                          {question.type ? question.type.toUpperCase() : 'UNKNOWN'}
                         </span>
                         <span style={{
                           backgroundColor: '#D4A017',
@@ -695,7 +721,7 @@ const EditTest = () => {
                           borderRadius: '4px',
                           fontSize: '12px'
                         }}>
-                          {question.marks} marks
+                          {question.marks || 0} marks
                         </span>
                         {question.difficulty && (
                           <span style={{
@@ -743,11 +769,11 @@ const EditTest = () => {
                     </div>
                   </div>
                   
-                  {question.type === 'mcq' && question.options && (
+                  {question.type === 'mcq' && question.options && question.options.length > 0 && (
                     <div style={{ marginTop: '8px' }}>
                       <strong style={{ color: '#6B7280', fontSize: '13px' }}>Options:</strong>
                       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
-                        {question.options.filter(opt => opt.text).map((opt, optIndex) => (
+                        {question.options.filter(opt => opt && opt.text).map((opt, optIndex) => (
                           <div key={optIndex} style={{
                             padding: '4px 8px',
                             backgroundColor: opt.isCorrect ? '#D1FAE5' : '#F3F4F6',
@@ -1073,7 +1099,7 @@ const EditTest = () => {
                           
                           <input
                             type="text"
-                            value={option.text}
+                            value={option.text || ''}
                             onChange={(e) => handleOptionChange(index, 'text', e.target.value)}
                             style={{
                               flex: 1,
@@ -1096,7 +1122,7 @@ const EditTest = () => {
                             <input
                               type="radio"
                               name="correctOption"
-                              checked={option.isCorrect}
+                              checked={option.isCorrect || false}
                               onChange={() => handleCorrectOptionChange(index)}
                               style={{ marginRight: '4px' }}
                             />
@@ -1137,7 +1163,7 @@ const EditTest = () => {
                   </label>
                   <input
                     type="text"
-                    value={currentQuestion.topics.join(', ')}
+                    value={currentQuestion.topics?.join(', ') || ''}
                     onChange={handleTopicsChange}
                     style={{
                       width: '100%',
@@ -1163,7 +1189,7 @@ const EditTest = () => {
                   </label>
                   <textarea
                     name="explanation"
-                    value={currentQuestion.explanation}
+                    value={currentQuestion.explanation || ''}
                     onChange={handleQuestionChange}
                     rows="3"
                     style={{

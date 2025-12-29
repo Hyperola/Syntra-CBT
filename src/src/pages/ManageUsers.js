@@ -1,4 +1,4 @@
-// pages/ManageUsers.js - COMPLETE UPDATED VERSION WITH CORRECT TEACHER ENDPOINTS
+// pages/ManageUsers.js - COMPLETE UPDATED VERSION WITH FIXED TEACHER ASSIGNMENTS
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -29,7 +29,10 @@ import {
   FiMapPin,
   FiLock,
   FiBookOpen,
-  FiPlus
+  FiPlus,
+  FiUpload,
+  FiImage,
+  FiCamera
 } from 'react-icons/fi';
 
 const ManageUsers = () => {
@@ -40,11 +43,14 @@ const ManageUsers = () => {
     password: '',
     confirmPassword: '',
     email: '',
-    name: '',
-    surname: '',
+    firstName: '',
+    middleName: '',
+    lastName: '',
     role: 'student',
     class: '',
     studentId: '',
+    parentEmail: '',
+    parentPhoneNumber: '',
     selectedSubjects: [],
     teacherAssignments: [],
     picture: null,
@@ -54,8 +60,12 @@ const ManageUsers = () => {
     sex: '',
     age: '',
     active: true,
-    adminPermissions: []
+    adminPermissions: [],
+    profileImage: ''
   });
+  const [profileImage, setProfileImage] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [editUserId, setEditUserId] = useState(null);
   const [users, setUsers] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -83,6 +93,7 @@ const ManageUsers = () => {
   });
   const [availableSubjectsForAssignment, setAvailableSubjectsForAssignment] = useState([]);
   const [loadingAssignmentSubjects, setLoadingAssignmentSubjects] = useState(false);
+  const [debugMode, setDebugMode] = useState(false);
 
   const navigate = useNavigate();
 
@@ -110,8 +121,6 @@ const ManageUsers = () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       
-      console.log('📚 Raw classes API response:', res.data);
-      
       let classesData = [];
       
       if (res.data && Array.isArray(res.data.classes)) {
@@ -128,7 +137,6 @@ const ManageUsers = () => {
         const classId = cls._id || cls.id || cls.classId;
         let className = cls.name || cls.fullName || cls.label || `Class ${classId?.substring(0, 4)}...`;
         
-        // Build descriptive name if we have level and stream
         if (cls.level && cls.stream) {
           className = `${cls.level} ${cls.stream}`;
         } else if (cls.level) {
@@ -152,10 +160,9 @@ const ManageUsers = () => {
         };
       }).filter(Boolean);
 
-      console.log('📚 Formatted classes:', formattedClasses);
       setClasses(formattedClasses);
     } catch (err) {
-      console.error('📚 Error fetching classes:', err);
+      console.error('Error fetching classes:', err);
       setError('Failed to load classes. Please try again.');
       setClasses([]);
     } finally {
@@ -173,16 +180,12 @@ const ManageUsers = () => {
     try {
       const token = localStorage.getItem('token');
       
-      // Try different API endpoints for fetching subjects
       let subjectsList = [];
       
       try {
-        // First try: Get subjects for specific class
         const res = await axios.get(`http://localhost:5000/api/classes/${classId}/subjects`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        
-        console.log('📚 Subjects for class response:', res.data);
         
         if (res.data && Array.isArray(res.data.subjects)) {
           subjectsList = res.data.subjects;
@@ -192,9 +195,6 @@ const ManageUsers = () => {
           subjectsList = res.data;
         }
       } catch (firstErr) {
-        console.log('First API attempt failed, trying alternative...', firstErr);
-        
-        // Second try: Get all subjects and filter by classId
         const res = await axios.get('http://localhost:5000/api/subjects', {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -229,7 +229,6 @@ const ManageUsers = () => {
         };
       }).filter(Boolean);
       
-      console.log('📚 Formatted subjects for class', classId, ':', formattedSubjects);
       setClassSubjects(formattedSubjects);
       
     } catch (err) {
@@ -266,8 +265,6 @@ const ManageUsers = () => {
           subjectsList = res.data;
         }
       } catch (firstErr) {
-        console.log('First API attempt failed, trying alternative...', firstErr);
-        
         const res = await axios.get('http://localhost:5000/api/subjects', {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -298,7 +295,6 @@ const ManageUsers = () => {
         isCore: sub.isCore || false
       })).filter(Boolean);
       
-      console.log('📚 Assignment subjects for class', classId, ':', formattedSubjects);
       setAvailableSubjectsForAssignment(formattedSubjects);
       
     } catch (err) {
@@ -310,12 +306,72 @@ const ManageUsers = () => {
     }
   };
 
+  const getProfileImageUrl = (user) => {
+    if (!user) return null;
+    
+    if (user.profileImageUrl && user.profileImageUrl !== 'null' && user.profileImageUrl !== 'undefined') {
+      if (user.profileImageUrl.startsWith('http')) {
+        return user.profileImageUrl;
+      }
+      return `http://localhost:5000${user.profileImageUrl.startsWith('/') ? '' : '/'}${user.profileImageUrl}`;
+    }
+    
+    if (user.profileImage && user.profileImage !== 'null' && user.profileImage !== 'undefined') {
+      if (user.profileImage.startsWith('http')) {
+        return user.profileImage;
+      }
+      let imagePath = user.profileImage;
+      if (imagePath.startsWith('/uploads/')) {
+        imagePath = imagePath.substring(1);
+      }
+      if (imagePath.startsWith('uploads/')) {
+        imagePath = imagePath;
+      } else if (!imagePath.includes('/')) {
+        imagePath = `uploads/profiles/${imagePath}`;
+      }
+      return `http://localhost:5000/${imagePath}`;
+    }
+    
+    if (user.profilePicture && user.profilePicture !== 'null' && user.profilePicture !== 'undefined') {
+      if (user.profilePicture.startsWith('http')) {
+        return user.profilePicture;
+      }
+      let imagePath = user.profilePicture;
+      if (imagePath.startsWith('/uploads/')) {
+        imagePath = imagePath.substring(1);
+      }
+      if (imagePath.startsWith('uploads/')) {
+        imagePath = imagePath;
+      } else if (!imagePath.includes('/')) {
+        imagePath = `uploads/profiles/${imagePath}`;
+      }
+      return `http://localhost:5000/${imagePath}`;
+    }
+    
+    if (user.picture && user.picture !== 'null' && user.picture !== 'undefined') {
+      if (user.picture.startsWith('http')) {
+        return user.picture;
+      }
+      let imagePath = user.picture;
+      if (imagePath.startsWith('/uploads/')) {
+        imagePath = imagePath.substring(1);
+      }
+      if (imagePath.startsWith('uploads/')) {
+        imagePath = imagePath;
+      } else if (!imagePath.includes('/')) {
+        imagePath = `uploads/profiles/${imagePath}`;
+      }
+      return `http://localhost:5000/${imagePath}`;
+    }
+    
+    return null;
+  };
+
   const fetchUsers = async () => {
     setLoading(true);
     setError(null);
     try {
       const token = localStorage.getItem('token');
-      console.log('👥 Fetching users with pagination:', pagination);
       
       const params = {
         page: pagination.currentPage,
@@ -325,12 +381,17 @@ const ManageUsers = () => {
       if (filterRole) params.role = filterRole;
       if (searchTerm) params.search = searchTerm;
       
+      console.log('📡 Fetching users from API...');
       const res = await axios.get('http://localhost:5000/api/users', {
         headers: { Authorization: `Bearer ${token}` },
         params: params
       });
 
-      console.log('👥 Users API response:', res.data);
+      console.log('✅ API Response received:', {
+        success: res.data.success,
+        totalUsers: res.data.pagination?.totalUsers,
+        usersCount: res.data.users?.length
+      });
 
       let usersData = [];
       let paginationData = {};
@@ -343,7 +404,6 @@ const ManageUsers = () => {
       } else if (Array.isArray(res.data)) {
         usersData = res.data;
       } else {
-        console.error('👥 Unexpected users response:', res.data);
         setError('Invalid data format from server.');
         setUsers([]);
         return;
@@ -355,49 +415,42 @@ const ManageUsers = () => {
         const userId = user._id || user.id || user.userId;
         if (!userId) return null;
         
-        // Get class info
         let classInfo = null;
         if (user.class) {
           if (typeof user.class === 'object') {
             classInfo = user.class;
           } else if (typeof user.class === 'string') {
-            // Try to find class in classes list
             classInfo = classes.find(c => c._id === user.class) || { _id: user.class, name: 'Unknown Class' };
           }
         }
         
-        // Log teacher assignments for debugging
-        if (user.role === 'teacher' && user.teacherAssignments) {
-          console.log(`👨‍🏫 Teacher ${user.name} assignments:`, user.teacherAssignments);
-        }
+        const fullName = `${user.firstName || user.name || ''} ${user.middleName ? user.middleName + ' ' : ''}${user.lastName || user.surname || ''}`.trim();
+        
+        const profileImageUrl = getProfileImageUrl(user);
         
         return {
           ...user,
           _id: userId,
           id: userId,
-          fullName: user.fullName || `${user.name || ''} ${user.surname || ''}`.trim(),
+          firstName: user.firstName || user.name || '',
+          middleName: user.middleName || '',
+          lastName: user.lastName || user.surname || '',
+          fullName: fullName,
           className: classInfo?.name || 
                     (user.class && typeof user.class === 'object' 
                       ? (user.class.name || user.class.fullName || user.class.label)
                       : (typeof user.class === 'string' ? user.class : 'N/A')),
           classInfo: classInfo,
-          profilePicture: user.picture || user.profilePicture,
+          profilePicture: user.profilePicture || user.profileImage || user.picture,
+          profileImage: user.profileImage || user.profilePicture || user.picture,
+          profileImageUrl: profileImageUrl,
           teacherAssignments: user.teacherAssignments || [],
           enrolledSubjects: user.enrolledSubjects || []
         };
       }).filter(Boolean);
       
-      console.log('👥 Valid users loaded:', validUsers.length);
-      
-      // Debug: Check if teacher assignments are coming through
-      const teachers = validUsers.filter(u => u.role === 'teacher');
-      console.log(`👨‍🏫 Found ${teachers.length} teachers with assignments:`, 
-        teachers.map(t => ({
-          name: t.name,
-          assignmentCount: t.teacherAssignments?.length || 0,
-          assignments: t.teacherAssignments
-        }))
-      );
+      const usersWithImages = validUsers.filter(u => u.profileImageUrl).length;
+      console.log(`📊 Users with profile images: ${usersWithImages}/${validUsers.length}`);
       
       setUsers(validUsers);
       setPagination(prev => ({
@@ -405,9 +458,9 @@ const ManageUsers = () => {
         totalPages: paginationData.totalPages || prev.totalPages,
         totalUsers: paginationData.totalUsers || prev.totalUsers
       }));
-      setApiDebug(`Fetched ${validUsers.length} users successfully`);
+      setApiDebug(`Fetched ${validUsers.length} users (${usersWithImages} with images)`);
     } catch (err) {
-      console.error('👥 Error fetching users:', err);
+      console.error('❌ Error fetching users:', err);
       const errorMsg = err.response?.data?.message || err.response?.data?.error || 'Failed to load users.';
       setError(errorMsg);
       setApiDebug(`Error: ${errorMsg}`);
@@ -418,12 +471,10 @@ const ManageUsers = () => {
   };
 
   const handleClassChange = async (classId) => {
-    console.log('📚 Class changed to:', classId);
-    
     setFormData(prev => ({
       ...prev,
       class: classId,
-      selectedSubjects: [] // Clear selected subjects when class changes
+      selectedSubjects: []
     }));
     
     await fetchClassSubjects(classId);
@@ -506,13 +557,11 @@ const ManageUsers = () => {
       })
     };
 
-    // Check if this class is already assigned
     const existingIndex = formData.teacherAssignments.findIndex(
       assignment => assignment.classId === teacherAssignmentModal.selectedClass
     );
 
     if (existingIndex >= 0) {
-      // Update existing assignment
       const updatedAssignments = [...formData.teacherAssignments];
       updatedAssignments[existingIndex] = newAssignment;
       setFormData(prev => ({
@@ -520,7 +569,6 @@ const ManageUsers = () => {
         teacherAssignments: updatedAssignments
       }));
     } else {
-      // Add new assignment
       setFormData(prev => ({
         ...prev,
         teacherAssignments: [...prev.teacherAssignments, newAssignment]
@@ -578,8 +626,8 @@ const ManageUsers = () => {
     if (formData.password && formData.password !== formData.confirmPassword) {
       return 'Passwords do not match.';
     }
-    if (!formData.name.trim()) return 'Name is required.';
-    if (!formData.surname.trim()) return 'Surname is required.';
+    if (!formData.firstName.trim()) return 'First name is required.';
+    if (!formData.lastName.trim()) return 'Last name is required.';
     
     const usernameRegex = /^[a-zA-Z0-9_]+$/;
     if (!usernameRegex.test(cleanedUsername)) {
@@ -591,14 +639,73 @@ const ManageUsers = () => {
       return 'Please enter a valid email address.';
     }
 
-    // For students, class is required
     if (formData.role === 'student' && !formData.class) {
       return 'Class is required for students.';
+    }
+
+    if (formData.role === 'student' && !formData.address?.trim()) {
+      return 'Home address is required for students.';
+    }
+
+    if (formData.role === 'student' && !formData.email.trim() && !formData.parentEmail?.trim()) {
+      return 'Either student email or parent email is required.';
     }
 
     return null;
   };
 
+  const handleImageUpload = async (file) => {
+    if (!file) {
+      console.log('⚠️ No file selected');
+      return;
+    }
+    
+    console.log('📁 File selected:', {
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      isFile: file instanceof File
+    });
+    
+    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    const maxSize = 2 * 1024 * 1024; // 2MB
+    
+    if (!validTypes.includes(file.type)) {
+      setError('Please upload JPG, PNG, GIF, or WebP only.');
+      return;
+    }
+    
+    if (file.size > maxSize) {
+      setError('Image must be under 2MB.');
+      return;
+    }
+    
+    setUploadingImage(true);
+    try {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result);
+      };
+      reader.readAsDataURL(file);
+      
+      setProfileImage(file);
+      setSuccess('Image ready for upload.');
+      
+    } catch (err) {
+      console.error('Error processing image:', err);
+      setError('Failed to process image.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const removeProfileImage = () => {
+    setProfileImage(null);
+    setImagePreview(null);
+    setFormData(prev => ({ ...prev, picture: null, profileImage: '' }));
+  };
+
+  // FIXED: Updated handleUpdateUser function with proper teacher assignments format
   const handleUpdateUser = async (e) => {
     e.preventDefault();
     const validationError = validateForm();
@@ -619,155 +726,119 @@ const ManageUsers = () => {
       
       const cleanedUsername = cleanUsername(formData.username);
       
-      // Build user data for update
-      const userData = {
-        username: cleanedUsername,
-        email: formData.email.trim(),
-        name: formData.name.trim(),
-        surname: formData.surname.trim(),
-        role: formData.role,
-        active: formData.active,
-        dateOfBirth: formData.dateOfBirth || null,
-        address: formData.address?.trim() || null,
-        phoneNumber: formData.phoneNumber?.trim() || null,
-        sex: formData.sex || null,
-        age: formData.age ? parseInt(formData.age) : null,
-        adminPermissions: formData.role === 'admin' ? formData.adminPermissions : []
-      };
+      // Build user data with FormData for file upload
+      const formDataToSend = new FormData();
+      formDataToSend.append('username', cleanedUsername);
+      formDataToSend.append('email', formData.email.trim());
+      formDataToSend.append('firstName', formData.firstName.trim());
+      formDataToSend.append('middleName', formData.middleName?.trim() || '');
+      formDataToSend.append('lastName', formData.lastName.trim());
+      formDataToSend.append('role', formData.role);
+      formDataToSend.append('active', formData.active.toString());
+      
+      if (formData.dateOfBirth) formDataToSend.append('dateOfBirth', formData.dateOfBirth);
+      if (formData.address) formDataToSend.append('address', formData.address.trim());
+      if (formData.phoneNumber) formDataToSend.append('phoneNumber', formData.phoneNumber.trim());
+      if (formData.sex) formDataToSend.append('sex', formData.sex);
+      if (formData.age) formDataToSend.append('age', formData.age);
+      if (formData.parentEmail) formDataToSend.append('parentEmail', formData.parentEmail.trim());
+      if (formData.parentPhoneNumber) formDataToSend.append('parentPhoneNumber', formData.parentPhoneNumber.trim());
       
       // Add password only if provided
       if (formData.password && formData.password.trim()) {
-        userData.password = formData.password;
+        formDataToSend.append('password', formData.password);
+      }
+      
+      // Append image file if exists
+      if (profileImage && profileImage instanceof File) {
+        formDataToSend.append('profileImage', profileImage);
+        console.log('📸 Image file appended to FormData:', profileImage.name);
       }
       
       // Handle role-specific fields
       if (formData.role === 'student') {
-        userData.class = formData.class || null;
-        userData.studentId = formData.studentId?.trim() || null;
+        if (formData.class) formDataToSend.append('class', formData.class);
+        if (formData.studentId) formDataToSend.append('studentId', formData.studentId.trim());
         
-        // Handle subject enrollment if subjects are selected
-        if (formData.class && formData.selectedSubjects.length > 0) {
-          try {
-            await axios.post(
-              `http://localhost:5000/api/students/${editUserId}/enroll-subjects`,
-              { subjectIds: formData.selectedSubjects },
-              { headers: { Authorization: `Bearer ${token}` } }
-            );
-          } catch (enrollErr) {
-            console.warn('Could not enroll in subjects:', enrollErr);
-          }
+        // Handle student enrolled subjects
+        if (formData.selectedSubjects.length > 0) {
+          const enrolledSubjects = formData.selectedSubjects.map(subjectId => {
+            const subject = classSubjects.find(s => s.id === subjectId);
+            return {
+              subject: subjectId,
+              subjectName: subject?.name || 'Unknown Subject',
+              isCore: subject?.isCore || false
+            };
+          });
+          formDataToSend.append('enrolledSubjects', JSON.stringify(enrolledSubjects));
         }
       }
       
       if (formData.role === 'teacher') {
-        userData.class = formData.class || null;
+        if (formData.class) formDataToSend.append('class', formData.class);
         
-        console.log('📤 Teacher assignments to save:', formData.teacherAssignments);
-        
-        // IMPORTANT: Save teacher assignments in user document
+        // FIXED: Send teacher assignments in correct format
         if (formData.teacherAssignments.length > 0) {
-          // Format assignments for the User model
+          // Format assignments as backend expects: class and subjects array with subject and subjectName
           const formattedAssignments = formData.teacherAssignments.map(assignment => ({
-            class: assignment.classId,
-            className: assignment.className,
+            class: assignment.classId,  // Must be 'class' not 'classId'
             subjects: assignment.subjects.map(subject => ({
-              subject: subject.subjectId,
+              subject: subject.subjectId,  // Must be 'subject' not 'subjectId'
               subjectName: subject.subjectName
             }))
           }));
           
-          userData.teacherAssignments = formattedAssignments;
-          console.log('📤 Formatted assignments for User model:', formattedAssignments);
-        } else {
-          // If no assignments, send empty array to clear existing ones
-          userData.teacherAssignments = [];
+          console.log('📤 Formatted teacher assignments:', JSON.stringify(formattedAssignments, null, 2));
+          formDataToSend.append('teacherAssignments', JSON.stringify(formattedAssignments));
         }
       }
       
-      // For admins, don't send class or studentId
       if (formData.role === 'admin' || formData.role === 'super_admin') {
-        delete userData.class;
-        delete userData.studentId;
+        if (formData.adminPermissions.length > 0) {
+          formDataToSend.append('adminPermissions', JSON.stringify(formData.adminPermissions));
+        }
       }
       
-      console.log('📤 Updating user with complete data:', userData);
+      console.log('🔄 Updating user with FormData...');
       
-      // Update the user with ALL data including assignments
+      // Update user data with FormData for file upload
       const response = await axios.put(
         `http://localhost:5000/api/users/${editUserId}`, 
-        userData, 
+        formDataToSend, 
         {
           headers: { 
             Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
+            'Content-Type': 'multipart/form-data'
           }
         }
       );
       
       console.log('✅ User update response:', response.data);
       
-      // If teacher has assignments, also use the teacher-specific endpoint for redundancy
-      if (formData.role === 'teacher' && formData.teacherAssignments.length > 0) {
-        try {
-          console.log('📤 Also updating via teacher assignment API...');
-          
-          // First clear existing assignments by updating with empty array
-          await axios.put(
-            `http://localhost:5000/api/users/${editUserId}`,
-            { teacherAssignments: [] },
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          
-          console.log('✅ Cleared existing assignments');
-          
-          // Then add new assignments one by one using teacher endpoint
-          for (const assignment of formData.teacherAssignments) {
-            const subjectIds = assignment.subjects.map(subject => subject.subjectId);
-            
-            console.log(`📤 Assigning ${subjectIds.length} subjects to class ${assignment.classId}`);
-            
-            await axios.post(
-              `http://localhost:5000/api/users/teachers/${editUserId}/assign-subjects`,
-              { 
-                classId: assignment.classId, 
-                subjectIds: subjectIds
-              },
-              { headers: { Authorization: `Bearer ${token}` } }
-            );
-            
-            console.log(`✅ Assigned subjects for class ${assignment.classId}`);
-          }
-          
-          console.log('✅ All teacher assignments updated successfully via teacher API');
-        } catch (assignErr) {
-          console.error('❌ Error updating via teacher API:', assignErr);
-          // Don't throw error here - the user was already updated successfully
-          if (assignErr.response) {
-            console.error('Teacher API error response:', assignErr.response.data);
-          }
-        }
-      }
-      
       setSuccess('User updated successfully!');
-      setEditUserId(null);
-      resetForm();
       
-      // Wait a bit and refresh users
+      // Reset form and fetch updated users
       setTimeout(() => {
+        setEditUserId(null);
+        resetForm();
         fetchUsers();
-      }, 1000);
+      }, 1500);
       
     } catch (err) {
       console.error('❌ Error updating user:', err);
       
       let errorMessage = 'Failed to update user.';
       if (err.response) {
+        console.error('Server response:', err.response.data);
         if (err.response.data && err.response.data.message) {
           errorMessage = err.response.data.message;
         } else if (err.response.data && err.response.data.error) {
           errorMessage = err.response.data.error;
+        } else if (err.response.data && err.response.data.errors) {
+          errorMessage = Object.values(err.response.data.errors).join(', ');
         }
-        console.error('Server response:', err.response.data);
+      } else if (err.message) {
+        errorMessage = err.message;
       }
       
       setError(errorMessage);
@@ -782,14 +853,18 @@ const ManageUsers = () => {
       password: '',
       confirmPassword: '',
       email: '',
-      name: '',
-      surname: '',
+      firstName: '',
+      middleName: '',
+      lastName: '',
       role: 'student',
       class: '',
       studentId: '',
+      parentEmail: '',
+      parentPhoneNumber: '',
       selectedSubjects: [],
       teacherAssignments: [],
       picture: null,
+      profileImage: '',
       dateOfBirth: '',
       address: '',
       phoneNumber: '',
@@ -798,6 +873,8 @@ const ManageUsers = () => {
       active: true,
       adminPermissions: []
     });
+    setProfileImage(null);
+    setImagePreview(null);
     setClassSubjects([]);
     setEditUserId(null);
   };
@@ -807,24 +884,19 @@ const ManageUsers = () => {
       setError('Invalid user data');
       return;
     }
-
-    console.log('✏️ Editing user:', user);
     
     setEditUserId(user._id);
     
-    // Format date of birth
     let formattedDate = '';
     if (user.dateOfBirth) {
       const date = new Date(user.dateOfBirth);
       formattedDate = date.toISOString().split('T')[0];
     }
     
-    // Get enrolled subjects for students
     const enrolledSubjectIds = user.enrolledSubjects?.map(sub => 
       sub.subject?._id || sub.subject || sub.subjectId
     ).filter(Boolean) || [];
     
-    // Get class ID - handle both object and string formats
     let classId = '';
     if (user.class) {
       if (typeof user.class === 'object') {
@@ -834,9 +906,8 @@ const ManageUsers = () => {
       }
     }
     
-    // Get teacher assignments from user object
+    // Properly extract teacher assignments
     const teacherAssignments = user.teacherAssignments?.map(assignment => {
-      // Extract class ID - handle different formats
       let assignmentClassId = '';
       if (assignment.class) {
         if (typeof assignment.class === 'object') {
@@ -848,56 +919,59 @@ const ManageUsers = () => {
         assignmentClassId = assignment.classId || '';
       }
       
-      // Find class name
       const classObj = classes.find(c => c._id === assignmentClassId);
       const className = assignment.className || classObj?.name || 'Unknown Class';
+      
+      // Extract subjects properly
+      const subjects = assignment.subjects?.map(sub => {
+        let subjectId = '';
+        let subjectName = '';
+        
+        if (sub.subject) {
+          if (typeof sub.subject === 'object') {
+            subjectId = sub.subject._id || sub.subject.id;
+            subjectName = sub.subject.name || sub.subject.subjectName || 'Unknown Subject';
+          } else {
+            subjectId = sub.subject;
+            subjectName = sub.subjectName || 'Unknown Subject';
+          }
+        } else {
+          subjectId = sub.subjectId || '';
+          subjectName = sub.subjectName || 'Unknown Subject';
+        }
+        
+        return {
+          subjectId: subjectId,
+          subjectName: subjectName
+        };
+      }).filter(sub => sub.subjectId) || [];
       
       return {
         classId: assignmentClassId,
         className: className,
-        subjects: assignment.subjects?.map(sub => ({
-          subjectId: sub.subject?._id || sub.subject || sub.subjectId,
-          subjectName: sub.subjectName || (sub.subject?.name || 'Unknown Subject')
-        })) || []
+        subjects: subjects
       };
-    }).filter(assignment => assignment.classId) || []; // Filter out assignments without classId
+    }).filter(assignment => assignment.classId && assignment.subjects.length > 0) || [];
     
-    console.log('📝 User data for edit:', {
-      username: user.username,
-      email: user.email,
-      name: user.name,
-      surname: user.surname,
-      role: user.role,
-      classId: classId,
-      studentId: user.studentId,
-      enrolledSubjects: user.enrolledSubjects,
-      enrolledSubjectIds: enrolledSubjectIds,
-      teacherAssignments: user.teacherAssignments, // Original from API
-      formattedTeacherAssignments: teacherAssignments, // Formatted for form
-      dateOfBirth: user.dateOfBirth,
-      formattedDate: formattedDate,
-      address: user.address,
-      phoneNumber: user.phoneNumber,
-      sex: user.sex,
-      age: user.age,
-      active: user.active,
-      adminPermissions: user.adminPermissions || []
-    });
+    const profileImageField = user.profileImage || user.profilePicture || user.picture || '';
     
-    // Set form data
     setFormData({
       username: user.username || '',
       password: '',
       confirmPassword: '',
       email: user.email || '',
-      name: user.name || '',
-      surname: user.surname || '',
+      firstName: user.firstName || user.name || '',
+      middleName: user.middleName || '',
+      lastName: user.lastName || user.surname || '',
       role: user.role || 'student',
       class: classId,
       studentId: user.studentId || '',
+      parentEmail: user.parentEmail || '',
+      parentPhoneNumber: user.parentPhoneNumber || '',
       selectedSubjects: enrolledSubjectIds,
       teacherAssignments: teacherAssignments,
-      picture: null,
+      picture: profileImageField,
+      profileImage: profileImageField,
       dateOfBirth: formattedDate,
       address: user.address || '',
       phoneNumber: user.phoneNumber || '',
@@ -907,13 +981,38 @@ const ManageUsers = () => {
       adminPermissions: user.adminPermissions || []
     });
     
-    // If user has a class, fetch its subjects (for students)
+    console.log('📝 Editing user with assignments:', {
+      originalAssignments: user.teacherAssignments,
+      parsedAssignments: teacherAssignments
+    });
+    
+    if (user.profileImageUrl) {
+      console.log('✅ Setting image preview from profileImageUrl:', user.profileImageUrl);
+      setImagePreview(user.profileImageUrl);
+    } else if (profileImageField) {
+      const imageUrl = getProfileImageUrl(user);
+      if (imageUrl) {
+        console.log('✅ Setting image preview from getProfileImageUrl:', imageUrl);
+        setImagePreview(imageUrl);
+      } else {
+        console.log('ℹ️ No profile image found for user');
+        setImagePreview(null);
+      }
+    } else {
+      console.log('ℹ️ No profile image found for user');
+      setImagePreview(null);
+    }
+    
+    setProfileImage(null);
+    
     if (classId && user.role === 'student') {
-      console.log('📚 Fetching subjects for class:', classId);
       await fetchClassSubjects(classId);
     } else {
       setClassSubjects([]);
     }
+    
+    // Switch to edit mode
+    setTab('edit');
   };
 
   const handleDeleteUser = async (userId) => {
@@ -967,71 +1066,6 @@ const ManageUsers = () => {
     setExporting(false);
   };
 
-  const testTeacherAssignmentApi = async (teacherId) => {
-    if (!teacherId) {
-      setError('No teacher ID provided');
-      return;
-    }
-    
-    setLoading(true);
-    try {
-      const token = localStorage.getItem('token');
-      
-      console.log('🧪 Testing teacher assignment API for teacher:', teacherId);
-      
-      // Test 1: Get current assignments via teacher endpoint
-      const getRes = await axios.get(
-        `http://localhost:5000/api/users/teachers/${teacherId}/assignments`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      console.log('📋 Current assignments from teacher endpoint:', getRes.data);
-      
-      // Test 2: Add a test assignment
-      const testClassId = classes[0]?._id;
-      const testSubjectId = availableSubjectsForAssignment[0]?.id;
-      
-      if (testClassId && testSubjectId) {
-        console.log('🧪 Adding test assignment via teacher endpoint...');
-        
-        const assignRes = await axios.post(
-          `http://localhost:5000/api/users/teachers/${teacherId}/assign-subjects`,
-          { 
-            classId: testClassId, 
-            subjectIds: [testSubjectId]
-          },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        
-        console.log('✅ Test assignment added via teacher endpoint:', assignRes.data);
-        
-        // Test 3: Verify assignment was added via user endpoint
-        const verifyRes = await axios.get(
-          `http://localhost:5000/api/users/${teacherId}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        
-        console.log('✅ Verified assignments in user data:', verifyRes.data.teacherAssignments);
-        
-        setSuccess('Teacher assignment API test successful!');
-        fetchUsers();
-      } else {
-        setError('Need at least one class and subject to test');
-      }
-      
-    } catch (err) {
-      console.error('❌ Teacher assignment API test failed:', err);
-      if (err.response) {
-        console.error('Error response:', err.response.data);
-        setError(`API Error: ${err.response.data.message || err.response.statusText}`);
-      } else {
-        setError('Network error testing teacher assignment API');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const getTeacherAssignmentsDisplay = (teacher) => {
     if (!teacher || !Array.isArray(teacher.teacherAssignments)) return [];
     
@@ -1062,8 +1096,8 @@ const ManageUsers = () => {
     const searchLower = searchTerm.toLowerCase();
     const matchesSearch = searchTerm === '' || 
       (user.username && user.username.toLowerCase().includes(searchLower)) ||
-      (user.name && user.name.toLowerCase().includes(searchLower)) ||
-      (user.surname && user.surname.toLowerCase().includes(searchLower)) ||
+      (user.firstName && user.firstName.toLowerCase().includes(searchLower)) ||
+      (user.lastName && user.lastName.toLowerCase().includes(searchLower)) ||
       (user.email && user.email.toLowerCase().includes(searchLower)) ||
       (user.studentId && user.studentId.toLowerCase().includes(searchLower)) ||
       (user.fullName && user.fullName.toLowerCase().includes(searchLower));
@@ -1072,6 +1106,26 @@ const ManageUsers = () => {
     
     return matchesSearch && matchesRole;
   });
+
+  const getClassDisplayName = (user) => {
+    if (!user) return 'N/A';
+    if (user.className) return user.className;
+    if (user.class && typeof user.class === 'object') {
+      return user.class.name || user.class.fullName || user.class.label || 'N/A';
+    }
+    if (user.class) {
+      const foundClass = classes.find(c => c._id === user.class);
+      return foundClass ? foundClass.name : 'N/A';
+    }
+    return 'N/A';
+  };
+
+  const handlePageChange = (newPage) => {
+    setPagination(prev => ({
+      ...prev,
+      currentPage: newPage
+    }));
+  };
 
   const canManageUsers = () => {
     return authUser && (
@@ -1105,49 +1159,9 @@ const ManageUsers = () => {
       return user.role !== 'super_admin';
     }
     if (authUser.role === 'teacher') {
-      return user.role === 'student'; // Teachers can edit only students
+      return user.role === 'student';
     }
     return false;
-  };
-
-  const canAssignSubjects = (user) => {
-    if (!authUser || !user) return false;
-    return (authUser.role === 'super_admin' || 
-           (authUser.role === 'admin' && authUser.adminPermissions?.includes('MANAGE_USERS'))) &&
-           user.role === 'teacher';
-  };
-
-  const canEnrollStudent = (user) => {
-    if (!authUser || !user) return false;
-    return (authUser.role === 'super_admin' || 
-           (authUser.role === 'admin' && authUser.adminPermissions?.includes('MANAGE_USERS'))) &&
-           user.role === 'student' && user.class;
-  };
-
-  const getProfilePictureUrl = (picture) => {
-    if (!picture) return null;
-    if (picture.startsWith('http')) return picture;
-    return `http://localhost:5000/uploads/${picture}`;
-  };
-
-  const getClassDisplayName = (user) => {
-    if (!user) return 'N/A';
-    if (user.className) return user.className;
-    if (user.class && typeof user.class === 'object') {
-      return user.class.name || user.class.fullName || user.class.label || 'N/A';
-    }
-    if (user.class) {
-      const foundClass = classes.find(c => c._id === user.class);
-      return foundClass ? foundClass.name : 'N/A';
-    }
-    return 'N/A';
-  };
-
-  const handlePageChange = (newPage) => {
-    setPagination(prev => ({
-      ...prev,
-      currentPage: newPage
-    }));
   };
 
   if (!authUser || !canManageUsers()) {
@@ -1225,30 +1239,8 @@ const ManageUsers = () => {
             >
               <FiDownload /> {exporting ? 'Exporting...' : 'Export Users'}
             </button>
-            
-            <button
-              style={styles.testAssignmentButton}
-              onClick={() => {
-                const teacher = users.find(u => u.role === 'teacher');
-                if (teacher) {
-                  testTeacherAssignmentApi(teacher._id);
-                } else {
-                  setError('No teacher found to test');
-                }
-              }}
-              disabled={loading}
-              title="Test Teacher Assignment API"
-            >
-              <FiLoader /> Test Assignments
-            </button>
           </div>
         </div>
-
-        {apiDebug && (
-          <div style={styles.debugInfo}>
-            <small>API Debug: {apiDebug}</small>
-          </div>
-        )}
 
         {error && (
           <div style={styles.errorMessage}>
@@ -1273,7 +1265,7 @@ const ManageUsers = () => {
               onClick={() => { setTab('view'); resetForm(); }}
               style={{
                 ...styles.tabButton,
-                backgroundColor: '#D4A017',
+                backgroundColor: '#D69E2E',
                 color: '#000000',
               }}
             >
@@ -1342,15 +1334,15 @@ const ManageUsers = () => {
                 <table style={styles.table}>
                   <thead>
                     <tr>
-                      <th>Profile</th>
-                      <th>Username</th>
-                      <th>Email</th>
-                      <th>Name</th>
-                      <th>Role</th>
-                      <th>Class</th>
-                      <th>Assignments/Subjects</th>
-                      <th>Status</th>
-                      <th>Actions</th>
+                      <th style={styles.tableHeader}>Profile</th>
+                      <th style={styles.tableHeader}>Username</th>
+                      <th style={styles.tableHeader}>Email</th>
+                      <th style={styles.tableHeader}>Name</th>
+                      <th style={styles.tableHeader}>Role</th>
+                      <th style={styles.tableHeader}>Class</th>
+                      <th style={styles.tableHeader}>Assignments/Subjects</th>
+                      <th style={styles.tableHeader}>Status</th>
+                      <th style={styles.tableHeader}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1360,37 +1352,64 @@ const ManageUsers = () => {
                           backgroundColor: user.active ? 'transparent' : '#FFF3F3'
                         }}>
                           <td>
-                            {user.profilePicture ? (
-                              <img 
-                                src={getProfilePictureUrl(user.profilePicture)} 
-                                alt="Profile" 
-                                style={styles.profileImage}
-                                onError={(e) => {
-                                  e.target.style.display = 'none';
-                                  e.target.nextElementSibling.style.display = 'flex';
-                                }}
-                              />
-                            ) : null}
-                            <div style={styles.profileInitials}>
-                              {user.name?.charAt(0) || '?'}{user.surname?.charAt(0) || ''}
+                            <div style={{ position: 'relative', width: '50px', height: '50px' }}>
+                              {user.profileImageUrl ? (
+                                <>
+                                  <img 
+                                    src={user.profileImageUrl} 
+                                    alt="Profile" 
+                                    style={styles.profileImage}
+                                    onError={(e) => {
+                                      console.warn('❌ Failed to load profile image for', user.username, 'URL:', user.profileImageUrl);
+                                      e.target.style.display = 'none';
+                                      const initialsId = `initials-${user._id}`;
+                                      const initialsEl = document.getElementById(initialsId);
+                                      if (initialsEl) {
+                                        initialsEl.style.display = 'flex';
+                                      }
+                                    }}
+                                  />
+                                  <div 
+                                    id={`initials-${user._id}`}
+                                    style={{
+                                      ...styles.profileInitials,
+                                      display: 'none',
+                                      position: 'absolute',
+                                      top: 0,
+                                      left: 0,
+                                      width: '100%',
+                                      height: '100%',
+                                      zIndex: 1
+                                    }}
+                                  >
+                                    {user.firstName?.charAt(0) || '?'}{user.lastName?.charAt(0) || ''}
+                                  </div>
+                                </>
+                              ) : (
+                                <div style={styles.profileInitials}>
+                                  {user.firstName?.charAt(0) || '?'}{user.lastName?.charAt(0) || ''}
+                                </div>
+                              )}
                             </div>
                           </td>
-                          <td>{user.username || 'N/A'}</td>
-                          <td>{user.email || 'N/A'}</td>
-                          <td>{user.name || ''} {user.surname || ''}</td>
-                          <td>
+                          <td style={styles.tableCell}>{user.username || 'N/A'}</td>
+                          <td style={styles.tableCell}>{user.email || 'N/A'}</td>
+                          <td style={styles.tableCell}>
+                            {user.firstName || ''} {user.middleName ? user.middleName + ' ' : ''}{user.lastName || ''}
+                          </td>
+                          <td style={styles.tableCell}>
                             <span style={{
                               ...styles.roleBadge,
                               backgroundColor: 
-                                user.role === 'super_admin' ? '#FF6B6B' :
-                                user.role === 'admin' ? '#4ECDC4' :
-                                user.role === 'teacher' ? '#45B7D1' : '#96CEB4'
+                                user.role === 'super_admin' ? '#E53E3E' :
+                                user.role === 'admin' ? '#3182CE' :
+                                user.role === 'teacher' ? '#38A169' : '#D69E2E'
                             }}>
                               {user.role || 'unknown'}
                             </span>
                           </td>
-                          <td>{getClassDisplayName(user)}</td>
-                          <td>
+                          <td style={styles.tableCell}>{getClassDisplayName(user)}</td>
+                          <td style={styles.tableCell}>
                             {user.role === 'teacher' ? (
                               <div>
                                 <span style={styles.subjectsBadge}>
@@ -1423,16 +1442,16 @@ const ManageUsers = () => {
                               <span style={styles.subjectsBadge}>N/A</span>
                             )}
                           </td>
-                          <td>
+                          <td style={styles.tableCell}>
                             <span style={{
                               ...styles.statusBadge,
                               backgroundColor: user.active ? '#E6FFE6' : '#FFF3CD',
-                              color: user.active ? '#228B22' : '#D4A017'
+                              color: user.active ? '#228B22' : '#D69E2E'
                             }}>
                               {user.active ? 'Active' : 'Inactive'}
                             </span>
                           </td>
-                          <td>
+                          <td style={styles.tableCell}>
                             <div style={styles.actionButtons}>
                               <button
                                 onClick={() => handleViewProfile(user)}
@@ -1561,7 +1580,9 @@ const ManageUsers = () => {
           <div style={styles.modalOverlay}>
             <div style={{...styles.modalContent, maxWidth: '900px', maxHeight: '90vh', overflowY: 'auto'}}>
               <div style={styles.modalHeader}>
-                <h3>Edit User: {formData.name} {formData.surname} ({formData.role})</h3>
+                <h3 style={{color: '#2D3748', margin: 0}}>
+                  Edit User: {formData.firstName} {formData.lastName} ({formData.role})
+                </h3>
                 <button 
                   onClick={() => { setEditUserId(null); resetForm(); }} 
                   style={styles.modalCloseButton}
@@ -1572,12 +1593,74 @@ const ManageUsers = () => {
               
               <div style={styles.modalBody}>
                 <form onSubmit={handleUpdateUser}>
+                  {/* Profile Image Upload Section */}
+                  <div style={styles.imageUploadSection}>
+                    <h4 style={styles.sectionTitle}>Profile Image</h4>
+                    <div style={styles.imageUploadContainer}>
+                      <div style={styles.imagePreviewArea}>
+                        {imagePreview ? (
+                          <img src={imagePreview} alt="Preview" style={styles.imagePreview} />
+                        ) : (
+                          <div style={styles.imagePlaceholder}>
+                            <FiImage size={40} color="#718096" />
+                            <span style={styles.placeholderText}>No Image</span>
+                          </div>
+                        )}
+                      </div>
+                      <div style={styles.imageUploadControls}>
+                        <input
+                          type="file"
+                          id="profileImage"
+                          accept="image/jpeg,image/png,image/gif,image/webp"
+                          onChange={(e) => handleImageUpload(e.target.files[0])}
+                          style={{ display: 'none' }}
+                          disabled={uploadingImage}
+                        />
+                        <label htmlFor="profileImage" style={styles.uploadButton}>
+                          {uploadingImage ? (
+                            <>
+                              <FiLoader style={{animation: 'spin 1s linear infinite'}} />
+                              Uploading...
+                            </>
+                          ) : imagePreview ? (
+                            <>
+                              <FiUpload /> Change Photo
+                            </>
+                          ) : (
+                            <>
+                              <FiUpload /> Upload Photo
+                            </>
+                          )}
+                        </label>
+                        {imagePreview && (
+                          <button
+                            type="button"
+                            onClick={removeProfileImage}
+                            style={styles.removeImageButton}
+                            disabled={uploadingImage}
+                          >
+                            <FiXCircle /> Remove
+                          </button>
+                        )}
+                        <div style={styles.imageUploadInfo}>
+                          <small>JPG, PNG, GIF, WebP up to 2MB</small>
+                          <br />
+                          <small style={{ color: '#D69E2E' }}>
+                            Current image: {formData.profileImage || 'None'}
+                          </small>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
                   <div style={styles.formGrid}>
                     <div style={styles.formSection}>
-                      <h3 style={styles.sectionTitle}>Basic Information</h3>
+                      <h4 style={styles.sectionTitle}>Basic Information</h4>
                       <div style={styles.formRow}>
                         <div style={styles.formGroup}>
-                          <label>Username *</label>
+                          <label style={styles.formLabel}>
+                            Username <span style={styles.required}>*</span>
+                          </label>
                           <input
                             type="text"
                             placeholder="e.g., john_doe (no spaces)"
@@ -1586,12 +1669,14 @@ const ManageUsers = () => {
                             required
                             style={styles.formInput}
                           />
-                          <small style={{ color: '#666', fontSize: '12px' }}>
+                          <small style={styles.helpText}>
                             Username will be converted to lowercase with underscores instead of spaces
                           </small>
                         </div>
                         <div style={styles.formGroup}>
-                          <label>Email *</label>
+                          <label style={styles.formLabel}>
+                            Email <span style={styles.required}>*</span>
+                          </label>
                           <input
                             type="email"
                             placeholder="e.g., john@school.com"
@@ -1605,7 +1690,7 @@ const ManageUsers = () => {
 
                       <div style={styles.formRow}>
                         <div style={styles.formGroup}>
-                          <label>Password (Leave blank to keep current)</label>
+                          <label style={styles.formLabel}>Password (Leave blank to keep current)</label>
                           <input
                             type="password"
                             placeholder="Enter new password (min 6 characters)"
@@ -1616,7 +1701,7 @@ const ManageUsers = () => {
                           />
                         </div>
                         <div style={styles.formGroup}>
-                          <label>Confirm Password</label>
+                          <label style={styles.formLabel}>Confirm Password</label>
                           <input
                             type="password"
                             placeholder="Confirm new password"
@@ -1629,23 +1714,37 @@ const ManageUsers = () => {
 
                       <div style={styles.formRow}>
                         <div style={styles.formGroup}>
-                          <label>Name *</label>
+                          <label style={styles.formLabel}>
+                            First Name <span style={styles.required}>*</span>
+                          </label>
                           <input
                             type="text"
                             placeholder="e.g., John"
-                            value={formData.name}
-                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                            value={formData.firstName}
+                            onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
                             required
                             style={styles.formInput}
                           />
                         </div>
                         <div style={styles.formGroup}>
-                          <label>Surname *</label>
+                          <label style={styles.formLabel}>Middle Name</label>
+                          <input
+                            type="text"
+                            placeholder="e.g., Michael (optional)"
+                            value={formData.middleName}
+                            onChange={(e) => setFormData({ ...formData, middleName: e.target.value })}
+                            style={styles.formInput}
+                          />
+                        </div>
+                        <div style={styles.formGroup}>
+                          <label style={styles.formLabel}>
+                            Last Name <span style={styles.required}>*</span>
+                          </label>
                           <input
                             type="text"
                             placeholder="e.g., Doe"
-                            value={formData.surname}
-                            onChange={(e) => setFormData({ ...formData, surname: e.target.value })}
+                            value={formData.lastName}
+                            onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
                             required
                             style={styles.formInput}
                           />
@@ -1654,7 +1753,9 @@ const ManageUsers = () => {
 
                       <div style={styles.formRow}>
                         <div style={styles.formGroup}>
-                          <label>Role *</label>
+                          <label style={styles.formLabel}>
+                            Role <span style={styles.required}>*</span>
+                          </label>
                           <select
                             value={formData.role}
                             onChange={(e) => {
@@ -1681,7 +1782,7 @@ const ManageUsers = () => {
                           </select>
                         </div>
                         <div style={styles.formGroup}>
-                          <label>Status</label>
+                          <label style={styles.formLabel}>Status</label>
                           <select
                             value={formData.active}
                             onChange={(e) => setFormData({ ...formData, active: e.target.value === 'true' })}
@@ -1694,14 +1795,78 @@ const ManageUsers = () => {
                       </div>
                     </div>
 
+                    {/* Contact Information Section */}
+                    <div style={styles.formSection}>
+                      <h4 style={styles.sectionTitle}>Contact Information</h4>
+                      
+                      <div style={styles.formRow}>
+                        <div style={styles.formGroup}>
+                          <label style={styles.formLabel}>Phone Number</label>
+                          <input
+                            type="tel"
+                            placeholder="e.g., +2341234567890"
+                            value={formData.phoneNumber}
+                            onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
+                            style={styles.formInput}
+                          />
+                        </div>
+                        <div style={styles.formGroup}>
+                          <label style={styles.formLabel}>
+                            {formData.role === 'student' ? 'Home Address' : 'Address'} 
+                            {formData.role === 'student' && <span style={styles.required}> *</span>}
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g., 123 Main Street"
+                            value={formData.address}
+                            onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                            required={formData.role === 'student'}
+                            style={styles.formInput}
+                          />
+                          {formData.role === 'student' && (
+                            <small style={styles.helpText}>Home address is required for students</small>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Role-specific Information */}
                     {(formData.role === 'student' || formData.role === 'teacher') && (
                       <div style={styles.formSection}>
-                        <h3 style={styles.sectionTitle}>
+                        <h4 style={styles.sectionTitle}>
                           {formData.role === 'student' ? 'Student Information' : 'Teacher Information'}
-                        </h3>
+                        </h4>
+                        
+                        {formData.role === 'student' && (
+                          <div style={styles.formRow}>
+                            <div style={styles.formGroup}>
+                              <label style={styles.formLabel}>Parent Email</label>
+                              <input
+                                type="email"
+                                placeholder="e.g., parent@email.com"
+                                value={formData.parentEmail}
+                                onChange={(e) => setFormData({ ...formData, parentEmail: e.target.value })}
+                                style={styles.formInput}
+                              />
+                              <small style={styles.helpText}>
+                                Either student email or parent email is required
+                              </small>
+                            </div>
+                            <div style={styles.formGroup}>
+                              <label style={styles.formLabel}>Parent Phone Number</label>
+                              <input
+                                type="tel"
+                                placeholder="e.g., +2341234567890"
+                                value={formData.parentPhoneNumber}
+                                onChange={(e) => setFormData({ ...formData, parentPhoneNumber: e.target.value })}
+                                style={styles.formInput}
+                              />
+                            </div>
+                          </div>
+                        )}
                         
                         <div style={styles.formGroup}>
-                          <label>
+                          <label style={styles.formLabel}>
                             {formData.role === 'teacher' ? 'Primary Class (Optional)' : 'Class *'}
                             {loadingClasses && (
                               <span style={styles.loadingText}>
@@ -1716,7 +1881,7 @@ const ManageUsers = () => {
                             disabled={loadingClasses}
                             style={{
                               ...styles.formInput,
-                              backgroundColor: loadingClasses ? '#F0F0F0' : '#FFFFFF'
+                              backgroundColor: loadingClasses ? '#F5F7FA' : '#FFFFFF'
                             }}
                           >
                             <option value="">
@@ -1729,7 +1894,7 @@ const ManageUsers = () => {
                             ))}
                           </select>
                           {formData.role === 'teacher' && (
-                            <small style={{ color: '#666', fontSize: '12px' }}>
+                            <small style={styles.helpText}>
                               Primary class for timetable purposes
                             </small>
                           )}
@@ -1738,7 +1903,7 @@ const ManageUsers = () => {
                         {formData.role === 'student' && (
                           <>
                             <div style={styles.formGroup}>
-                              <label>Student ID</label>
+                              <label style={styles.formLabel}>Student ID</label>
                               <input
                                 type="text"
                                 placeholder="e.g., STU001"
@@ -1751,7 +1916,7 @@ const ManageUsers = () => {
                             {/* Student Subject Selection */}
                             {formData.class && (
                               <div style={styles.formGroup}>
-                                <label>Select Subjects to Enroll In</label>
+                                <label style={styles.formLabel}>Select Subjects to Enroll In</label>
                                 {loadingSubjects ? (
                                   <div style={styles.loadingSubjects}>
                                     <div style={styles.smallSpinner}></div>
@@ -1775,7 +1940,7 @@ const ManageUsers = () => {
                                         </label>
                                       ))}
                                     </div>
-                                    <small style={{ color: '#666', fontSize: '12px' }}>
+                                    <small style={styles.helpText}>
                                       Select the subjects this student will take. Core subjects are required. 
                                       Currently selected: {formData.selectedSubjects.length}
                                     </small>
@@ -1792,10 +1957,10 @@ const ManageUsers = () => {
 
                         {formData.role === 'teacher' && (
                           <div style={styles.formGroup}>
-                            <label>Teacher Assignments</label>
+                            <label style={styles.formLabel}>Teacher Assignments</label>
                             <div style={styles.assignmentsContainer}>
                               {formData.teacherAssignments.length === 0 ? (
-                                <p style={{ color: '#666', fontStyle: 'italic' }}>No assignments yet</p>
+                                <p style={{ color: '#718096', fontStyle: 'italic' }}>No assignments yet</p>
                               ) : (
                                 <div style={styles.assignmentsList}>
                                   {formData.teacherAssignments.map((assignment, index) => (
@@ -1836,7 +2001,7 @@ const ManageUsers = () => {
 
                     {formData.role === 'admin' && (
                       <div style={styles.formSection}>
-                        <h3 style={styles.sectionTitle}>Admin Permissions</h3>
+                        <h4 style={styles.sectionTitle}>Admin Permissions</h4>
                         <div style={styles.permissionsGrid}>
                           {adminPermissionOptions.map(perm => (
                             <label key={perm.value} style={styles.permissionCheckbox}>
@@ -1860,10 +2025,10 @@ const ManageUsers = () => {
                     )}
 
                     <div style={styles.formSection}>
-                      <h3 style={styles.sectionTitle}>Personal Information</h3>
+                      <h4 style={styles.sectionTitle}>Personal Information</h4>
                       <div style={styles.formRow}>
                         <div style={styles.formGroup}>
-                          <label>Date of Birth</label>
+                          <label style={styles.formLabel}>Date of Birth</label>
                           <input
                             type="date"
                             value={formData.dateOfBirth}
@@ -1872,16 +2037,16 @@ const ManageUsers = () => {
                           />
                         </div>
                         <div style={styles.formGroup}>
-                          <label>Age</label>
+                          <label style={styles.formLabel}>Age</label>
                           <input
                             type="number"
                             value={formData.age}
                             readOnly
-                            style={{...styles.formInput, backgroundColor: '#F0F0F0'}}
+                            style={{...styles.formInput, backgroundColor: '#F5F7FA'}}
                           />
                         </div>
                         <div style={styles.formGroup}>
-                          <label>Sex</label>
+                          <label style={styles.formLabel}>Sex</label>
                           <select
                             value={formData.sex}
                             onChange={(e) => setFormData({ ...formData, sex: e.target.value })}
@@ -1894,35 +2059,13 @@ const ManageUsers = () => {
                           </select>
                         </div>
                       </div>
-
-                      <div style={styles.formGroup}>
-                        <label>Address</label>
-                        <input
-                          type="text"
-                          placeholder="e.g., 123 Main St"
-                          value={formData.address}
-                          onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                          style={styles.formInput}
-                        />
-                      </div>
-
-                      <div style={styles.formGroup}>
-                        <label>Phone Number</label>
-                        <input
-                          type="tel"
-                          placeholder="e.g., +2341234567890"
-                          value={formData.phoneNumber}
-                          onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
-                          style={styles.formInput}
-                        />
-                      </div>
                     </div>
                   </div>
 
                   <div style={styles.formActions}>
                     <button
                       type="submit"
-                      disabled={loading}
+                      disabled={loading || uploadingImage}
                       style={styles.submitButton}
                     >
                       {loading ? (
@@ -1950,7 +2093,7 @@ const ManageUsers = () => {
           <div style={styles.modalOverlay}>
             <div style={{...styles.modalContent, maxWidth: '600px'}}>
               <div style={styles.modalHeader}>
-                <h3>Add Teacher Assignment</h3>
+                <h3 style={{color: '#2D3748', margin: 0}}>Add Teacher Assignment</h3>
                 <button onClick={closeTeacherAssignmentModal} style={styles.modalCloseButton}>
                   <FiX />
                 </button>
@@ -1958,7 +2101,7 @@ const ManageUsers = () => {
               
               <div style={styles.modalBody}>
                 <div style={styles.formGroup}>
-                  <label>Select Class</label>
+                  <label style={styles.formLabel}>Select Class</label>
                   <select
                     value={teacherAssignmentModal.selectedClass}
                     onChange={(e) => handleAssignmentClassChange(e.target.value)}
@@ -1975,7 +2118,9 @@ const ManageUsers = () => {
 
                 {teacherAssignmentModal.selectedClass && (
                   <div style={styles.formGroup}>
-                    <label>Select Subjects for {classes.find(c => c._id === teacherAssignmentModal.selectedClass)?.name}</label>
+                    <label style={styles.formLabel}>
+                      Select Subjects for {classes.find(c => c._id === teacherAssignmentModal.selectedClass)?.name}
+                    </label>
                     {loadingAssignmentSubjects ? (
                       <div style={styles.loadingSubjects}>
                         <div style={styles.smallSpinner}></div>
@@ -1999,7 +2144,7 @@ const ManageUsers = () => {
                             </label>
                           ))}
                         </div>
-                        <small style={{ color: '#666', fontSize: '12px' }}>
+                        <small style={{ color: '#718096', fontSize: '12px' }}>
                           {teacherAssignmentModal.selectedSubjects.length} subject(s) selected
                         </small>
                       </>
@@ -2032,11 +2177,11 @@ const ManageUsers = () => {
   );
 };
 
-// Styles remain the same as before...
+// Styles (same as before, included for completeness)
 const styles = {
   container: {
     minHeight: '100vh',
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#F5F7FA',
     fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif"
   },
   main: {
@@ -2059,7 +2204,7 @@ const styles = {
     margin: '0 0 8px 0'
   },
   subtitle: {
-    color: '#6B7280',
+    color: '#718096',
     margin: 0,
     fontSize: '16px'
   },
@@ -2071,7 +2216,7 @@ const styles = {
   },
   createSuperAdminButton: {
     padding: '10px 20px',
-    backgroundColor: '#B22222',
+    backgroundColor: '#E53E3E',
     color: 'white',
     border: 'none',
     borderRadius: '6px',
@@ -2082,11 +2227,15 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     transition: 'all 0.2s',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+    '&:hover': {
+      backgroundColor: '#C53030',
+      transform: 'translateY(-2px)'
+    }
   },
   createAdminButton: {
     padding: '10px 20px',
-    backgroundColor: '#4ECDC4',
+    backgroundColor: '#3182CE',
     color: 'white',
     border: 'none',
     borderRadius: '6px',
@@ -2097,11 +2246,15 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     transition: 'all 0.2s',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+    '&:hover': {
+      backgroundColor: '#2C5282',
+      transform: 'translateY(-2px)'
+    }
   },
   createTeacherButton: {
     padding: '10px 20px',
-    backgroundColor: '#45B7D1',
+    backgroundColor: '#38A169',
     color: 'white',
     border: 'none',
     borderRadius: '6px',
@@ -2112,11 +2265,15 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     transition: 'all 0.2s',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+    '&:hover': {
+      backgroundColor: '#2F855A',
+      transform: 'translateY(-2px)'
+    }
   },
   createStudentButton: {
     padding: '10px 20px',
-    backgroundColor: '#D4A017',
+    backgroundColor: '#D69E2E',
     color: '#4B5320',
     border: 'none',
     borderRadius: '6px',
@@ -2127,11 +2284,16 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     transition: 'all 0.2s',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+    '&:hover': {
+      backgroundColor: '#B7791F',
+      transform: 'translateY(-2px)',
+      color: 'white'
+    }
   },
   exportButton: {
     padding: '10px 20px',
-    backgroundColor: '#6B7280',
+    backgroundColor: '#718096',
     color: 'white',
     border: 'none',
     borderRadius: '6px',
@@ -2141,37 +2303,15 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     transition: 'all 0.2s',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-  },
-  testAssignmentButton: {
-    padding: '10px 20px',
-    backgroundColor: '#8B4513',
-    color: 'white',
-    padding: '10px 20px',
-    backgroundColor: '#8B4513',
-    color: 'white',
-    border: 'none',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '14px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    transition: 'all 0.2s',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-  },
-  debugInfo: {
-    backgroundColor: '#EDF2F7',
-    color: '#4A5568',
-    padding: '12px',
-    borderRadius: '6px',
-    marginBottom: '16px',
-    fontSize: '12px',
-    borderLeft: '4px solid #D4A017'
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+    '&:hover': {
+      backgroundColor: '#4A5568',
+      transform: 'translateY(-2px)'
+    }
   },
   errorMessage: {
-    backgroundColor: '#FFF3F3',
-    color: '#B22222',
+    backgroundColor: '#FED7D7',
+    color: '#9B2C2C',
     padding: '16px',
     borderRadius: '8px',
     marginBottom: '24px',
@@ -2179,11 +2319,12 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: '12px',
-    fontWeight: '500'
+    fontWeight: '500',
+    borderLeft: '4px solid #E53E3E'
   },
   successMessage: {
-    backgroundColor: '#E6FFE6',
-    color: '#228B22',
+    backgroundColor: '#C6F6D5',
+    color: '#22543D',
     padding: '16px',
     borderRadius: '8px',
     marginBottom: '24px',
@@ -2191,7 +2332,8 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: '12px',
-    fontWeight: '500'
+    fontWeight: '500',
+    borderLeft: '4px solid #38A169'
   },
   closeMessageButton: {
     background: 'none',
@@ -2200,7 +2342,10 @@ const styles = {
     cursor: 'pointer',
     fontSize: '16px',
     padding: '4px',
-    borderRadius: '4px'
+    borderRadius: '4px',
+    '&:hover': {
+      backgroundColor: 'rgba(0,0,0,0.1)'
+    }
   },
   tabsContainer: {
     marginBottom: '24px'
@@ -2220,7 +2365,14 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    transition: 'all 0.2s'
+    transition: 'all 0.2s',
+    backgroundColor: '#D69E2E',
+    color: '#4B5320',
+    '&:hover': {
+      backgroundColor: '#B7791F',
+      transform: 'translateY(-2px)',
+      color: 'white'
+    }
   },
   viewContainer: {
     backgroundColor: 'white',
@@ -2245,27 +2397,43 @@ const styles = {
     left: '16px',
     top: '50%',
     transform: 'translateY(-50%)',
-    color: '#6B7280',
+    color: '#718096',
     fontSize: '16px'
   },
   searchInput: {
     width: '100%',
     padding: '12px 16px 12px 40px',
-    border: '1px solid #D3D3D3',
+    border: '1px solid #E2E8F0',
     borderRadius: '6px',
-    fontSize: '14px'
+    fontSize: '14px',
+    color: '#2D3748',
+    backgroundColor: 'white',
+    transition: 'border-color 0.2s',
+    '&:focus': {
+      outline: 'none',
+      borderColor: '#3182CE',
+      boxShadow: '0 0 0 3px rgba(49, 130, 206, 0.1)'
+    }
   },
   filterSelect: {
     padding: '12px 16px',
-    border: '1px solid #D3D3D3',
+    border: '1px solid #E2E8F0',
     borderRadius: '6px',
     fontSize: '14px',
     minWidth: '150px',
-    backgroundColor: 'white'
+    backgroundColor: 'white',
+    color: '#2D3748',
+    cursor: 'pointer',
+    transition: 'border-color 0.2s',
+    '&:focus': {
+      outline: 'none',
+      borderColor: '#3182CE',
+      boxShadow: '0 0 0 3px rgba(49, 130, 206, 0.1)'
+    }
   },
   refreshButton: {
     padding: '12px 16px',
-    backgroundColor: '#6B7280',
+    backgroundColor: '#718096',
     color: 'white',
     border: 'none',
     borderRadius: '6px',
@@ -2275,7 +2443,16 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     minWidth: '120px',
-    justifyContent: 'center'
+    justifyContent: 'center',
+    transition: 'all 0.2s',
+    '&:hover:not(:disabled)': {
+      backgroundColor: '#4A5568',
+      transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.6,
+      cursor: 'not-allowed'
+    }
   },
   loadingContainer: {
     display: 'flex',
@@ -2320,9 +2497,9 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     padding: '20px',
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#F5F7FA',
     borderRadius: '4px',
-    color: '#666',
+    color: '#718096',
     fontSize: '14px'
   },
   emptyState: {
@@ -2331,7 +2508,7 @@ const styles = {
     borderRadius: '8px',
     boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
     textAlign: 'center',
-    color: '#6B7280'
+    color: '#718096'
   },
   emptyIcon: {
     fontSize: '48px',
@@ -2340,48 +2517,68 @@ const styles = {
   },
   tableContainer: {
     overflowX: 'auto',
-    marginBottom: '24px'
+    marginBottom: '24px',
+    borderRadius: '6px',
+    border: '1px solid #E2E8F0'
   },
   table: {
     width: '100%',
     borderCollapse: 'collapse',
-    border: '1px solid #E0E0E0',
     fontSize: '14px'
   },
+  tableHeader: {
+    backgroundColor: '#4B5320',
+    color: '#FFFFFF',
+    fontWeight: '600',
+    padding: '12px',
+    border: '1px solid #E2E8F0',
+    textAlign: 'left',
+    position: 'sticky',
+    top: 0
+  },
+  tableCell: {
+    padding: '12px',
+    border: '1px solid #E2E8F0',
+    color: '#2D3748'
+  },
   profileImage: {
-    width: '40px',
-    height: '40px',
+    width: '50px',
+    height: '50px',
     objectFit: 'cover',
     borderRadius: '50%',
-    border: '2px solid #D4A017'
+    border: '2px solid #D69E2E',
+    display: 'block',
+    position: 'relative',
+    zIndex: 2
   },
   profileInitials: {
-    width: '40px',
-    height: '40px',
+    width: '50px',
+    height: '50px',
     borderRadius: '50%',
     backgroundColor: '#4B5320',
     color: 'white',
-    display: 'inline-flex',
+    display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: '14px',
-    fontWeight: 'bold'
+    fontSize: '16px',
+    fontWeight: 'bold',
+    border: '2px solid #D69E2E'
   },
   roleBadge: {
     padding: '4px 8px',
     borderRadius: '4px',
     fontSize: '12px',
     fontWeight: '500',
-    color: '#000000',
+    color: '#FFFFFF',
     display: 'inline-block',
     minWidth: '70px',
     textAlign: 'center'
   },
   subjectsBadge: {
     fontSize: '12px',
-    color: '#666',
+    color: '#718096',
     padding: '4px 8px',
-    backgroundColor: '#F0F0F0',
+    backgroundColor: '#F5F7FA',
     borderRadius: '4px',
     display: 'inline-block'
   },
@@ -2392,12 +2589,15 @@ const styles = {
     cursor: 'pointer',
     fontSize: '14px',
     padding: '2px',
-    marginLeft: '8px'
+    marginLeft: '8px',
+    '&:hover': {
+      color: '#D69E2E'
+    }
   },
   expandedDetails: {
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#F5F7FA',
     padding: '16px',
-    borderTop: '2px solid #E0E0E0'
+    borderTop: '2px solid #E2E8F0'
   },
   detailsTitle: {
     fontSize: '14px',
@@ -2408,7 +2608,7 @@ const styles = {
   assignmentGroup: {
     marginBottom: '12px',
     paddingBottom: '12px',
-    borderBottom: '1px dashed #E0E0E0'
+    borderBottom: '1px dashed #E2E8F0'
   },
   assignmentSubjects: {
     display: 'flex',
@@ -2433,15 +2633,16 @@ const styles = {
     fontSize: '12px',
     padding: '6px 12px',
     borderRadius: '16px',
-    border: '1px solid #E0E0E0',
+    border: '1px solid #E2E8F0',
     display: 'inline-flex',
     alignItems: 'center',
-    gap: '4px'
+    gap: '4px',
+    color: '#2D3748'
   },
   coreBadge: {
     fontSize: '10px',
-    color: '#228B22',
-    backgroundColor: '#E6FFE6',
+    color: '#22543D',
+    backgroundColor: '#C6F6D5',
     padding: '2px 6px',
     borderRadius: '10px',
     fontWeight: '500'
@@ -2474,7 +2675,7 @@ const styles = {
   },
   viewButton: {
     padding: '6px 12px',
-    backgroundColor: '#6B7280',
+    backgroundColor: '#718096',
     color: 'white',
     border: 'none',
     borderRadius: '4px',
@@ -2482,11 +2683,16 @@ const styles = {
     fontSize: '12px',
     display: 'flex',
     alignItems: 'center',
-    gap: '4px'
+    gap: '4px',
+    transition: 'all 0.2s',
+    '&:hover': {
+      backgroundColor: '#4A5568',
+      transform: 'translateY(-2px)'
+    }
   },
   editButton: {
     padding: '6px 12px',
-    backgroundColor: '#D4A017',
+    backgroundColor: '#D69E2E',
     color: '#4B5320',
     border: 'none',
     borderRadius: '4px',
@@ -2494,11 +2700,17 @@ const styles = {
     fontSize: '12px',
     display: 'flex',
     alignItems: 'center',
-    gap: '4px'
+    gap: '4px',
+    transition: 'all 0.2s',
+    '&:hover': {
+      backgroundColor: '#B7791F',
+      transform: 'translateY(-2px)',
+      color: 'white'
+    }
   },
   deleteButton: {
     padding: '6px 12px',
-    backgroundColor: '#B22222',
+    backgroundColor: '#E53E3E',
     color: 'white',
     border: 'none',
     borderRadius: '4px',
@@ -2506,7 +2718,12 @@ const styles = {
     fontSize: '12px',
     display: 'flex',
     alignItems: 'center',
-    gap: '4px'
+    gap: '4px',
+    transition: 'all 0.2s',
+    '&:hover': {
+      backgroundColor: '#C53030',
+      transform: 'translateY(-2px)'
+    }
   },
   pagination: {
     display: 'flex',
@@ -2515,7 +2732,7 @@ const styles = {
     gap: '16px',
     marginTop: '24px',
     paddingTop: '16px',
-    borderTop: '1px solid #E0E0E0'
+    borderTop: '1px solid #E2E8F0'
   },
   pageButton: {
     padding: '8px 16px',
@@ -2524,27 +2741,214 @@ const styles = {
     border: 'none',
     borderRadius: '4px',
     cursor: 'pointer',
-    fontSize: '14px'
+    fontSize: '14px',
+    transition: 'all 0.2s',
+    '&:hover:not(:disabled)': {
+      backgroundColor: '#3A4218',
+      transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.6,
+      cursor: 'not-allowed'
+    }
   },
   pageInfo: {
     fontSize: '14px',
-    color: '#666'
+    color: '#718096'
   },
+  // Modal Styles
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
+    backdropFilter: 'blur(2px)'
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: '12px',
+    width: '90%',
+    maxWidth: '500px',
+    boxShadow: '0 10px 25px rgba(0,0,0,0.2)'
+  },
+  modalHeader: {
+    padding: '20px',
+    borderBottom: '1px solid #E2E8F0',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  modalCloseButton: {
+    background: 'none',
+    border: 'none',
+    fontSize: '20px',
+    color: '#718096',
+    cursor: 'pointer',
+    padding: '4px',
+    borderRadius: '4px',
+    '&:hover': {
+      backgroundColor: '#F5F7FA'
+    }
+  },
+  modalBody: {
+    padding: '20px'
+  },
+  modalFooter: {
+    padding: '20px',
+    borderTop: '1px solid #E2E8F0',
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '12px'
+  },
+  modalSubmitButton: {
+    padding: '10px 20px',
+    backgroundColor: '#D69E2E',
+    color: '#4B5320',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '600',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    transition: 'all 0.2s',
+    '&:hover:not(:disabled)': {
+      backgroundColor: '#B7791F',
+      transform: 'translateY(-2px)',
+      color: 'white'
+    },
+    '&:disabled': {
+      opacity: 0.6,
+      cursor: 'not-allowed'
+    }
+  },
+  modalCancelButton: {
+    padding: '10px 20px',
+    backgroundColor: '#718096',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    transition: 'all 0.2s',
+    '&:hover': {
+      backgroundColor: '#4A5568',
+      transform: 'translateY(-2px)'
+    }
+  },
+  // Image Upload Styles
+  imageUploadSection: {
+    marginBottom: '24px',
+    padding: '20px',
+    backgroundColor: '#F5F7FA',
+    borderRadius: '8px',
+    border: '1px solid #E2E8F0'
+  },
+  imageUploadContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '20px'
+  },
+  imagePreviewArea: {
+    width: '150px',
+    height: '150px',
+    borderRadius: '50%',
+    backgroundColor: 'white',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    border: '2px dashed #CBD5E0'
+  },
+  imagePreview: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover'
+  },
+  imagePlaceholder: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '8px'
+  },
+  placeholderText: {
+    fontSize: '12px',
+    color: '#718096'
+  },
+  imageUploadControls: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+    flex: 1
+  },
+  uploadButton: {
+    padding: '10px 20px',
+    backgroundColor: '#3182CE',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    justifyContent: 'center',
+    transition: 'all 0.2s',
+    '&:hover': {
+      backgroundColor: '#2C5282',
+      transform: 'translateY(-2px)'
+    }
+  },
+  removeImageButton: {
+    padding: '10px 20px',
+    backgroundColor: '#FED7D7',
+    color: '#9B2C2C',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    justifyContent: 'center',
+    transition: 'all 0.2s',
+    '&:hover': {
+      backgroundColor: '#FEB2B2',
+      transform: 'translateY(-2px)'
+    }
+  },
+  imageUploadInfo: {
+    color: '#718096',
+    fontSize: '12px',
+    textAlign: 'center'
+  },
+  // Form Styles
   formGrid: {
     display: 'grid',
     gap: '24px'
   },
   formSection: {
     padding: '20px',
-    border: '1px solid #E0E0E0',
+    border: '1px solid #E2E8F0',
     borderRadius: '8px',
     backgroundColor: '#FAFAFA'
   },
   sectionTitle: {
-    fontSize: '18px',
+    fontSize: '16px',
     fontWeight: '600',
-    color: '#4B5320',
-    margin: '0 0 16px 0'
+    color: '#2D3748',
+    margin: '0 0 16px 0',
+    borderBottom: '2px solid #D69E2E',
+    paddingBottom: '8px'
   },
   formRow: {
     display: 'grid',
@@ -2555,17 +2959,46 @@ const styles = {
   formGroup: {
     marginBottom: '16px'
   },
+  formLabel: {
+    display: 'block',
+    marginBottom: '6px',
+    fontSize: '14px',
+    fontWeight: '500',
+    color: '#2D3748'
+  },
+  required: {
+    color: '#E53E3E',
+    marginLeft: '2px'
+  },
   formInput: {
     width: '100%',
     padding: '10px 12px',
-    border: '1px solid #D3D3D3',
+    border: '1px solid #E2E8F0',
     borderRadius: '4px',
     fontSize: '14px',
-    boxSizing: 'border-box'
+    boxSizing: 'border-box',
+    color: '#2D3748',
+    backgroundColor: 'white',
+    transition: 'border-color 0.2s, box-shadow 0.2s',
+    '&:focus': {
+      outline: 'none',
+      borderColor: '#3182CE',
+      boxShadow: '0 0 0 3px rgba(49, 130, 206, 0.1)'
+    },
+    '&:disabled': {
+      backgroundColor: '#F5F7FA',
+      cursor: 'not-allowed'
+    }
+  },
+  helpText: {
+    color: '#718096',
+    fontSize: '12px',
+    marginTop: '4px',
+    display: 'block'
   },
   loadingText: {
     fontSize: '12px',
-    color: '#D4A017',
+    color: '#D69E2E',
     marginLeft: '8px'
   },
   subjectsSelectionGrid: {
@@ -2575,7 +3008,7 @@ const styles = {
     maxHeight: '300px',
     overflowY: 'auto',
     padding: '10px',
-    border: '1px solid #E0E0E0',
+    border: '1px solid #E2E8F0',
     borderRadius: '4px',
     backgroundColor: 'white'
   },
@@ -2585,15 +3018,21 @@ const styles = {
     gap: '8px',
     fontSize: '14px',
     padding: '8px',
-    border: '1px solid #E0E0E0',
+    border: '1px solid #E2E8F0',
     borderRadius: '4px',
     backgroundColor: '#F8F9FA',
-    cursor: 'pointer'
+    cursor: 'pointer',
+    color: '#2D3748',
+    transition: 'all 0.2s',
+    '&:hover': {
+      backgroundColor: '#F0F4F8',
+      borderColor: '#CBD5E0'
+    }
   },
   coreFormBadge: {
     fontSize: '10px',
-    color: '#228B22',
-    backgroundColor: '#E6FFE6',
+    color: '#22543D',
+    backgroundColor: '#C6F6D5',
     padding: '2px 6px',
     borderRadius: '10px',
     marginLeft: '4px',
@@ -2618,13 +3057,19 @@ const styles = {
     gap: '8px',
     fontSize: '14px',
     padding: '8px',
-    border: '1px solid #E0E0E0',
+    border: '1px solid #E2E8F0',
     borderRadius: '4px',
     backgroundColor: 'white',
-    cursor: 'pointer'
+    cursor: 'pointer',
+    color: '#2D3748',
+    transition: 'all 0.2s',
+    '&:hover': {
+      backgroundColor: '#F5F7FA',
+      borderColor: '#CBD5E0'
+    }
   },
   assignmentsContainer: {
-    border: '1px solid #E0E0E0',
+    border: '1px solid #E2E8F0',
     borderRadius: '4px',
     padding: '12px',
     backgroundColor: 'white'
@@ -2635,7 +3080,7 @@ const styles = {
   assignmentItem: {
     marginBottom: '12px',
     padding: '12px',
-    border: '1px solid #E0E0E0',
+    border: '1px solid #E2E8F0',
     borderRadius: '4px',
     backgroundColor: '#F8F9FA'
   },
@@ -2648,10 +3093,14 @@ const styles = {
   removeAssignmentButton: {
     background: 'none',
     border: 'none',
-    color: '#B22222',
+    color: '#E53E3E',
     cursor: 'pointer',
     fontSize: '16px',
-    padding: '4px'
+    padding: '4px',
+    borderRadius: '4px',
+    '&:hover': {
+      backgroundColor: '#FED7D7'
+    }
   },
   assignmentSubjects: {
     display: 'flex',
@@ -2677,7 +3126,12 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     width: '100%',
-    justifyContent: 'center'
+    justifyContent: 'center',
+    transition: 'all 0.2s',
+    '&:hover': {
+      backgroundColor: '#3A4218',
+      transform: 'translateY(-2px)'
+    }
   },
   formActions: {
     display: 'flex',
@@ -2687,7 +3141,7 @@ const styles = {
   },
   submitButton: {
     padding: '12px 24px',
-    backgroundColor: '#D4A017',
+    backgroundColor: '#D69E2E',
     color: '#4B5320',
     border: 'none',
     borderRadius: '6px',
@@ -2697,85 +3151,35 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: '150px'
+    minWidth: '150px',
+    transition: 'all 0.2s',
+    '&:hover:not(:disabled)': {
+      backgroundColor: '#B7791F',
+      transform: 'translateY(-2px)',
+      color: 'white'
+    },
+    '&:disabled': {
+      opacity: 0.6,
+      cursor: 'not-allowed'
+    }
   },
   cancelButton: {
     padding: '12px 24px',
-    backgroundColor: '#6B7280',
+    backgroundColor: '#718096',
     color: 'white',
-    border: 'none',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '14px'
-  },
-  modalOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1000
-  },
-  modalContent: {
-    backgroundColor: 'white',
-    borderRadius: '8px',
-    width: '90%',
-    maxWidth: '500px'
-  },
-  modalHeader: {
-    padding: '20px',
-    borderBottom: '1px solid #E0E0E0',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center'
-  },
-  modalCloseButton: {
-    background: 'none',
-    border: 'none',
-    fontSize: '20px',
-    color: '#666',
-    cursor: 'pointer',
-    padding: '4px'
-  },
-  modalBody: {
-    padding: '20px'
-  },
-  modalFooter: {
-    padding: '20px',
-    borderTop: '1px solid #E0E0E0',
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: '12px'
-  },
-  modalSubmitButton: {
-    padding: '10px 20px',
-    backgroundColor: '#D4A017',
-    color: '#4B5320',
     border: 'none',
     borderRadius: '6px',
     cursor: 'pointer',
     fontSize: '14px',
-    fontWeight: '600',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px'
-  },
-  modalCancelButton: {
-    padding: '10px 20px',
-    backgroundColor: '#6B7280',
-    color: 'white',
-    border: 'none',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '14px'
+    transition: 'all 0.2s',
+    '&:hover': {
+      backgroundColor: '#4A5568',
+      transform: 'translateY(-2px)'
+    }
   },
   authRequiredContainer: {
     minHeight: '100vh',
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#F5F7FA',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center'
@@ -2805,72 +3209,17 @@ styleSheet.textContent = `
     100% { transform: rotate(360deg); }
   }
   
-  table th, table td {
-    padding: 12px;
-    border: 1px solid #E0E0E0;
-    text-align: left;
-    vertical-align: middle;
-  }
-  
-  table th {
-    background-color: #4B5320;
-    color: #FFFFFF;
-    font-weight: 600;
-    position: sticky;
-    top: 0;
-  }
-  
   table tr:nth-child(even) {
     background-color: #F8F9FA;
   }
   
   table tr:hover {
-    background-color: #F0F0F0;
+    background-color: #F0F4F8;
   }
   
   input[type="checkbox"] {
     cursor: pointer;
-  }
-  
-  /* Add hover effects to buttons */
-  button:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
-    transition: all 0.2s ease;
-  }
-  
-  button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-    transform: none !important;
-  }
-  
-  .createSuperAdminButton:hover:not(:disabled) {
-    background-color: #9A1C1C;
-  }
-  
-  .createAdminButton:hover:not(:disabled) {
-    background-color: #3DBDB5;
-  }
-  
-  .createTeacherButton:hover:not(:disabled) {
-    background-color: #38A5C1;
-  }
-  
-  .createStudentButton:hover:not(:disabled) {
-    background-color: #C09015;
-  }
-  
-  .exportButton:hover:not(:disabled) {
-    background-color: #5A6268;
-  }
-  
-  .testAssignmentButton:hover:not(:disabled) {
-    background-color: #7A3A13;
-  }
-  
-  .submitButton:hover:not(:disabled) {
-    background-color: #C09015;
+    accent-color: #3182CE;
   }
   
   /* Responsive adjustments */
@@ -2898,8 +3247,8 @@ styleSheet.textContent = `
     }
     
     .tabButton {
-      width: '100%';
-      justify-content: 'center';
+      width: 100%;
+      justify-content: center;
     }
     
     .actionButtons {
@@ -2908,12 +3257,21 @@ styleSheet.textContent = `
     }
     
     .formRow {
-      grid-template-columns: 1fr;
+      grid-templateColumns: 1fr;
     }
     
     .modalContent {
       width: 95%;
       margin: 10px;
+    }
+    
+    .imageUploadContainer {
+      flex-direction: column;
+      text-align: center;
+    }
+    
+    .imagePreviewArea {
+      margin: 0 auto;
     }
   }
   

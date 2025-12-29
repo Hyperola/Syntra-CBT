@@ -1,3 +1,4 @@
+// models/Class.js - UPDATED FOR STREAMS SUPPORT
 const mongoose = require('mongoose');
 
 const classSchema = new mongoose.Schema({
@@ -6,7 +7,6 @@ const classSchema = new mongoose.Schema({
     required: [true, 'Class name is required'],
     trim: true,
     uppercase: true,
-    unique: true,
     maxLength: [50, 'Class name too long']
   },
   shortName: {
@@ -14,7 +14,6 @@ const classSchema = new mongoose.Schema({
     required: [true, 'Class short name is required'],
     trim: true,
     uppercase: true,
-    unique: true,
     maxLength: [10, 'Short name too long']
   },
   level: {
@@ -29,13 +28,24 @@ const classSchema = new mongoose.Schema({
     type: String,
     trim: true,
     uppercase: true,
-    maxLength: [20, 'Stream name too long']
+    maxLength: [20, 'Stream name too long'],
+    default: ''
+  },
+  section: {
+    type: String,
+    trim: true,
+    uppercase: true,
+    maxLength: [10, 'Section name too long'],
+    default: ''
   },
   fullName: {
     type: String,
     trim: true,
     default: function() {
-      return `${this.level}${this.stream ? ` ${this.stream}` : ''}`;
+      const parts = [this.level];
+      if (this.stream) parts.push(this.stream);
+      if (this.section) parts.push(`(${this.section})`);
+      return parts.join(' ');
     }
   },
   capacity: {
@@ -49,7 +59,6 @@ const classSchema = new mongoose.Schema({
     ref: 'User',
     default: null
   },
-  // ADDED: Direct subject assignments for the class
   subjectAssignments: {
     type: [{
       subject: {
@@ -97,10 +106,10 @@ const classSchema = new mongoose.Schema({
     }
   },
   metadata: {
-    notes: {
+    notes: [{
       type: String,
-      maxLength: [500, 'Notes too long']
-    },
+      maxLength: [500, 'Note too long']
+    }],
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'
@@ -108,6 +117,10 @@ const classSchema = new mongoose.Schema({
     lastModifiedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'
+    },
+    lastModifiedAt: {
+      type: Date,
+      default: Date.now
     }
   }
 }, {
@@ -116,15 +129,26 @@ const classSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Indexes for performance
-classSchema.index({ level: 1, stream: 1 }, { unique: true });
-classSchema.index({ shortName: 1 }, { unique: true });
+// UPDATED INDEX: Allow same level with different stream/section
+classSchema.index({ 
+  level: 1, 
+  stream: 1, 
+  section: 1, 
+  academicYear: 1 
+}, { 
+  unique: true,
+  partialFilterExpression: { isActive: true }
+});
+
+// Other indexes
 classSchema.index({ name: 1 }, { unique: true });
+classSchema.index({ shortName: 1 }, { unique: true });
 classSchema.index({ isActive: 1 });
 classSchema.index({ displayOrder: 1 });
 classSchema.index({ academicYear: 1 });
+classSchema.index({ 'metadata.createdBy': 1 });
 
-// Virtual properties with null checks
+// Virtual properties
 classSchema.virtual('studentCount').get(function() {
   return this.students && Array.isArray(this.students) ? this.students.length : 0;
 });
@@ -140,6 +164,7 @@ classSchema.virtual('apiResponse').get(function() {
     shortName: this.shortName,
     level: this.level,
     stream: this.stream,
+    section: this.section,
     fullName: this.fullName,
     capacity: this.capacity,
     classTeacher: this.classTeacher,
@@ -153,91 +178,29 @@ classSchema.virtual('apiResponse').get(function() {
   };
 });
 
-// Static methods
-classSchema.statics.findByLevel = function(level) {
-  return this.find({ level, isActive: true })
-    .populate('classTeacher', 'firstName lastName email')
-    .populate('students', 'firstName lastName studentId')
-    .populate('subjectAssignments.subject', 'name code category')
-    .sort({ displayOrder: 1, name: 1 });
-};
-
-classSchema.statics.findActiveClasses = function() {
-  return this.find({ isActive: true })
-    .populate('classTeacher', 'firstName lastName email')
-    .populate('subjectAssignments.subject', 'name code category')
-    .sort({ level: 1, displayOrder: 1, name: 1 });
-};
-
-// Instance methods for subject management
-classSchema.methods.addSubjectAssignment = function(subjectId, isCore = true) {
-  // Initialize subjectAssignments if it doesn't exist
-  if (!this.subjectAssignments || !Array.isArray(this.subjectAssignments)) {
-    this.subjectAssignments = [];
-  }
-  
-  // Check if subject already assigned
-  const existingAssignment = this.subjectAssignments.find(
-    assignment => assignment.subject && assignment.subject.toString() === subjectId.toString()
-  );
-  
-  if (!existingAssignment) {
-    this.subjectAssignments.push({
-      subject: subjectId,
-      isCore: isCore
-    });
-  }
-  return this.save();
-};
-
-classSchema.methods.removeSubjectAssignment = function(subjectId) {
-  if (!this.subjectAssignments || !Array.isArray(this.subjectAssignments)) {
-    return this.save();
-  }
-  
-  this.subjectAssignments = this.subjectAssignments.filter(
-    assignment => assignment.subject && assignment.subject.toString() !== subjectId.toString()
-  );
-  return this.save();
-};
-
-classSchema.methods.updateSubjectCoreStatus = function(subjectId, isCore) {
-  if (!this.subjectAssignments || !Array.isArray(this.subjectAssignments)) {
-    return this.save();
-  }
-  
-  const assignment = this.subjectAssignments.find(
-    a => a.subject && a.subject.toString() === subjectId.toString()
-  );
-  
-  if (assignment) {
-    assignment.isCore = isCore;
-  }
-  return this.save();
-};
-
-classSchema.methods.getCoreSubjects = function() {
-  if (!this.subjectAssignments || !Array.isArray(this.subjectAssignments)) {
-    return [];
-  }
-  return this.subjectAssignments.filter(assignment => assignment.isCore);
-};
-
-classSchema.methods.getElectiveSubjects = function() {
-  if (!this.subjectAssignments || !Array.isArray(this.subjectAssignments)) {
-    return [];
-  }
-  return this.subjectAssignments.filter(assignment => !assignment.isCore);
-};
-
 // Pre-save middleware
 classSchema.pre('save', function(next) {
   // Ensure fullName is properly formatted
-  this.fullName = `${this.level}${this.stream ? ` ${this.stream}` : ''}`;
+  const parts = [this.level];
+  if (this.stream) parts.push(this.stream);
+  if (this.section) parts.push(`(${this.section})`);
+  this.fullName = parts.join(' ');
+  
+  // Generate name if not provided
+  if (!this.name && this.level) {
+    this.name = this.fullName;
+  }
   
   // Generate shortName if not provided
   if (!this.shortName) {
-    this.shortName = this.level.replace('SS', '');
+    const baseShortName = this.level.replace('SS', '');
+    if (this.stream) {
+      this.shortName = `${baseShortName}${this.stream.charAt(0)}`;
+    } else if (this.section) {
+      this.shortName = `${baseShortName}${this.section}`;
+    } else {
+      this.shortName = baseShortName;
+    }
   }
   
   // Ensure arrays are initialized
@@ -247,6 +210,16 @@ classSchema.pre('save', function(next) {
   
   if (!this.students || !Array.isArray(this.students)) {
     this.students = [];
+  }
+  
+  // Initialize metadata if not set
+  if (!this.metadata) {
+    this.metadata = {
+      notes: [],
+      createdBy: null,
+      lastModifiedBy: null,
+      lastModifiedAt: new Date()
+    };
   }
   
   next();

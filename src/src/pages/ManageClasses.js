@@ -1,4 +1,4 @@
-// pages/ManageClasses.js - UPDATED WITH DELETE FUNCTIONALITY
+// pages/ManageClasses.js - COMPLETE UPDATED VERSION WITH ALL FIXES
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -23,7 +23,23 @@ import {
   FiCalendar,
   FiLoader,
   FiLink,
-  FiLink2
+  FiInfo,
+  FiList,
+  FiUserCheck,
+  FiUserX,
+  FiUserMinus,
+  FiAward,
+  FiChevronRight,
+  FiUsers as FiTeachers,
+  FiBriefcase,
+  FiStar,
+  FiDownload,
+  FiSliders,
+  FiBookmark,
+  FiMail,
+  FiClock,
+  FiCheckSquare,
+  FiXCircle
 } from 'react-icons/fi';
 
 const ManageClasses = () => {
@@ -38,17 +54,33 @@ const ManageClasses = () => {
   const [filterLevel, setFilterLevel] = useState('all');
   const [expandedClass, setExpandedClass] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showAssignSubjectsModal, setShowAssignSubjectsModal] = useState(null);
   const [showDeleteModal, setShowDeleteModal] = useState(null);
-  const [availableSubjects, setAvailableSubjects] = useState([]);
-  const [loadingSubjects, setLoadingSubjects] = useState(false);
-  const [selectedSubjects, setSelectedSubjects] = useState([]);
-  const [assignSubjectsLoading, setAssignSubjectsLoading] = useState(false);
+  const [showDetailsModal, setShowDetailsModal] = useState(null);
+  const [showStudentsModal, setShowStudentsModal] = useState(null);
+  const [showSubjectTeachersModal, setShowSubjectTeachersModal] = useState(null);
+  const [showAssignTeacherModal, setShowAssignTeacherModal] = useState(null);
+  
+  // Class details states
+  const [classDetails, setClassDetails] = useState(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [classStudents, setClassStudents] = useState([]);
+  const [loadingStudents, setLoadingStudents] = useState(false);
+  const [classSubjectTeachers, setClassSubjectTeachers] = useState([]);
+  const [loadingSubjectTeachers, setLoadingSubjectTeachers] = useState(false);
+  const [availableTeachers, setAvailableTeachers] = useState([]);
+  const [loadingTeachers, setLoadingTeachers] = useState(false);
+  
+  // Assignment states
+  const [assigningSubject, setAssigningSubject] = useState(null);
+  const [selectedTeacher, setSelectedTeacher] = useState('');
+  const [assignTeacherLoading, setAssignTeacherLoading] = useState(false);
+  
   const [newClassData, setNewClassData] = useState({
     name: '',
     shortName: '',
     level: 'JSS1',
     stream: '',
+    section: '',
     capacity: 40,
     classTeacherId: ''
   });
@@ -68,6 +100,7 @@ const ManageClasses = () => {
     }
   }, [success]);
 
+  // Fetch all classes with student counts
   const fetchClasses = async () => {
     setLoading(true);
     setError(null);
@@ -77,258 +110,613 @@ const ManageClasses = () => {
         headers: { Authorization: `Bearer ${token}` }
       });
       
-      console.log('Classes fetched:', res.data);
-      
       let classesData = [];
-      if (Array.isArray(res.data)) {
-        classesData = res.data;
-      } else if (res.data && res.data.classes) {
+      if (res.data && Array.isArray(res.data.classes)) {
         classesData = res.data.classes;
-      } else if (res.data && Array.isArray(res.data.data)) {
+      } else if (res.data && res.data.data && Array.isArray(res.data.data)) {
         classesData = res.data.data;
+      } else if (Array.isArray(res.data)) {
+        classesData = res.data;
       }
       
-      setClasses(classesData);
+      // Format classes with proper data including student counts
+      const formattedClasses = await Promise.all(classesData.map(async (cls) => {
+        const classId = cls._id || cls.id;
+        
+        // Get class teacher details if assigned
+        let classTeacher = null;
+        let classTeacherName = 'Not Assigned';
+        if (cls.classTeacher) {
+          try {
+            const teacherRes = await axios.get(`http://localhost:5000/api/users/${cls.classTeacher}`, {
+              headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+            });
+            if (teacherRes.data.success) {
+              classTeacher = teacherRes.data.user;
+              classTeacherName = `${classTeacher.firstName} ${classTeacher.lastName}`.trim() || classTeacher.username;
+            }
+          } catch (err) {
+            console.error('Error fetching class teacher:', err);
+          }
+        }
+        
+        // Get student count - FIXED: Using correct endpoint
+        let studentCount = 0;
+        try {
+          const studentRes = await axios.get(`http://localhost:5000/api/classes/${classId}/students/count`, {
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+          });
+          
+          if (studentRes.data && typeof studentRes.data.count === 'number') {
+            studentCount = studentRes.data.count;
+          } else if (studentRes.data && typeof studentRes.data === 'number') {
+            studentCount = studentRes.data;
+          } else if (studentRes.data && studentRes.data.total) {
+            studentCount = studentRes.data.total;
+          }
+        } catch (err) {
+          console.error('Error fetching student count:', err);
+          // Try alternative endpoint
+          try {
+            const altRes = await axios.get(`http://localhost:5000/api/classes/${classId}/students`, {
+              headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+            });
+            if (altRes.data && Array.isArray(altRes.data)) {
+              studentCount = altRes.data.length;
+            } else if (altRes.data && Array.isArray(altRes.data.students)) {
+              studentCount = altRes.data.students.length;
+            }
+          } catch (altErr) {
+            console.error('Alternative student count failed:', altErr);
+          }
+        }
+        
+        return {
+          ...cls,
+          id: classId,
+          studentCount: studentCount,
+          classTeacher: classTeacher,
+          classTeacherName: classTeacherName,
+          isActive: cls.isActive !== false
+        };
+      }));
+      
+      setClasses(formattedClasses);
     } catch (err) {
       console.error('Fetch classes error:', err);
-      setError(err.response?.data?.error || 'Failed to load classes');
+      setError(err.response?.data?.message || 'Failed to load classes');
     }
     setLoading(false);
   };
 
-  const fetchAvailableSubjects = async () => {
-    setLoadingSubjects(true);
+  // Fetch detailed class information for modal
+  const fetchClassDetails = async (classId) => {
+    setLoadingDetails(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get('http://localhost:5000/api/subjects', {
+      
+      // Fetch class details
+      const classRes = await axios.get(`http://localhost:5000/api/classes/${classId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
-      let subjectsData = [];
-      if (Array.isArray(res.data)) {
-        subjectsData = res.data;
-      } else if (res.data && res.data.subjects) {
-        subjectsData = res.data.subjects;
+      let classData = classRes.data.class || classRes.data || classRes.data?.data;
+      if (!classData) {
+        throw new Error('Class not found');
       }
       
-      console.log('Available subjects:', subjectsData);
-      setAvailableSubjects(subjectsData);
-      setSelectedSubjects([]);
+      // Get class teacher details if assigned
+      if (classData.classTeacher) {
+        try {
+          const teacherRes = await axios.get(`http://localhost:5000/api/users/${classData.classTeacher}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (teacherRes.data.success) {
+            classData.classTeacher = teacherRes.data.user;
+            classData.classTeacherName = `${teacherRes.data.user.firstName} ${teacherRes.data.user.lastName}`.trim() || teacherRes.data.user.username;
+          }
+        } catch (err) {
+          console.error('Error fetching class teacher details:', err);
+          classData.classTeacherName = 'Teacher not found';
+        }
+      } else {
+        classData.classTeacherName = 'Not Assigned';
+      }
+      
+      // Get subject assignments
+      let subjectAssignments = [];
+      try {
+        const subjectsRes = await axios.get(`http://localhost:5000/api/classes/${classId}/subjects`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        if (subjectsRes.data && Array.isArray(subjectsRes.data.subjects)) {
+          subjectAssignments = subjectsRes.data.subjects;
+        } else if (subjectsRes.data && Array.isArray(subjectsRes.data)) {
+          subjectAssignments = subjectsRes.data;
+        } else if (subjectsRes.data && subjectsRes.data.data && Array.isArray(subjectsRes.data.data)) {
+          subjectAssignments = subjectsRes.data.data;
+        }
+      } catch (err) {
+        console.error('Error fetching subjects:', err);
+      }
+      
+      // Get student count
+      let studentCount = 0;
+      try {
+        const countRes = await axios.get(`http://localhost:5000/api/classes/${classId}/students/count`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        if (countRes.data && typeof countRes.data.count === 'number') {
+          studentCount = countRes.data.count;
+        } else if (countRes.data && typeof countRes.data === 'number') {
+          studentCount = countRes.data;
+        }
+      } catch (err) {
+        console.error('Error fetching student count:', err);
+      }
+      
+      // Get subject teachers
+      let subjectsWithTeachers = [];
+      try {
+        const teacherRes = await axios.get(`http://localhost:5000/api/users/subject-teachers/class/${classId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        if (teacherRes.data && teacherRes.data.subjectTeachers && Array.isArray(teacherRes.data.subjectTeachers)) {
+          // Map subject teachers to subjects
+          subjectAssignments.forEach(subject => {
+            const subjectId = subject._id || subject.id || subject.subject?._id || subject.subjectId;
+            let teacher = null;
+            let teacherName = 'Not Assigned';
+            
+            for (const teacherData of teacherRes.data.subjectTeachers) {
+              if (teacherData.subjects && teacherData.subjects.some(s => 
+                (s.id || s._id || s.subject?.id || s.subject?._id) === subjectId
+              )) {
+                teacher = teacherData.teacher;
+                teacherName = teacher ? 
+                  `${teacher.firstName || ''} ${teacher.lastName || ''}`.trim() || teacher.username : 
+                  'Not Assigned';
+                break;
+              }
+            }
+            
+            subjectsWithTeachers.push({
+              ...subject,
+              id: subjectId,
+              name: subject.name || subject.subject?.name,
+              code: subject.code || subject.subject?.code,
+              teacher: teacher,
+              teacherName: teacherName
+            });
+          });
+        } else {
+          // No teachers assigned yet
+          subjectsWithTeachers = subjectAssignments.map(subject => ({
+            ...subject,
+            id: subject._id || subject.id || subject.subject?._id || subject.subjectId,
+            name: subject.name || subject.subject?.name,
+            code: subject.code || subject.subject?.code,
+            teacher: null,
+            teacherName: 'Not Assigned'
+          }));
+        }
+      } catch (err) {
+        console.error('Error fetching subject teachers:', err);
+        // If error, just show subjects without teachers
+        subjectsWithTeachers = subjectAssignments.map(subject => ({
+          ...subject,
+          id: subject._id || subject.id || subject.subject?._id || subject.subjectId,
+          name: subject.name || subject.subject?.name,
+          code: subject.code || subject.subject?.code,
+          teacher: null,
+          teacherName: 'Not Assigned'
+        }));
+      }
+      
+      const fullClassDetails = {
+        ...classData,
+        id: classId,
+        studentCount: studentCount,
+        subjectAssignments: subjectsWithTeachers,
+        createdAt: classData.createdAt ? new Date(classData.createdAt).toLocaleDateString() : 'N/A'
+      };
+      
+      setClassDetails(fullClassDetails);
+      setShowDetailsModal(true);
+      
     } catch (err) {
-      console.error('Error fetching subjects:', err);
-      setAvailableSubjects([]);
+      console.error('Fetch class details error:', err);
+      setError(err.response?.data?.message || 'Failed to load class details');
     } finally {
-      setLoadingSubjects(false);
+      setLoadingDetails(false);
     }
   };
 
-  const fetchClassSubjects = async (classId) => {
+  // Fetch students in a class
+  const fetchClassStudents = async (classId) => {
+    setLoadingStudents(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get(`http://localhost:5000/api/classes/${classId}/subjects`, {
+      const res = await axios.get(`http://localhost:5000/api/classes/${classId}/students`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
-      if (res.data && res.data.subjects) {
-        const assignedSubjectIds = res.data.subjects.map(s => s.id);
-        setSelectedSubjects(assignedSubjectIds);
+      let students = [];
+      if (res.data && res.data.students && Array.isArray(res.data.students)) {
+        students = res.data.students;
+      } else if (res.data && res.data.data && Array.isArray(res.data.data)) {
+        students = res.data.data;
+      } else if (Array.isArray(res.data)) {
+        students = res.data;
       }
+      
+      // Format student names properly
+      const formattedStudents = students.map(student => ({
+        ...student,
+        id: student._id || student.id,
+        displayName: student.name || 
+                    `${student.firstName || ''} ${student.lastName || ''}`.trim() || 
+                    student.username,
+        studentId: student.studentId || 'N/A'
+      }));
+      
+      setClassStudents(formattedStudents);
+      setShowStudentsModal(classId);
+      
+      // Get class info for modal title
+      const classData = classes.find(c => c.id === classId);
+      if (classData) {
+        setClassDetails(classData);
+      }
+      
     } catch (err) {
-      console.error('Error fetching class subjects:', err);
+      console.error('Fetch class students error:', err);
+      setError(err.response?.data?.message || 'Failed to load students');
+    } finally {
+      setLoadingStudents(false);
     }
   };
 
-  const handleAssignSubjects = async (classId) => {
-    if (selectedSubjects.length === 0) {
-      setError('Please select at least one subject');
+  // Fetch subject teachers for a class
+  const fetchSubjectTeachers = async (classId) => {
+    setLoadingSubjectTeachers(true);
+    try {
+      const token = localStorage.getItem('token');
+      
+      // Get class details
+      const classRes = await axios.get(`http://localhost:5000/api/classes/${classId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const classData = classRes.data.class || classRes.data;
+      
+      // Get subject assignments
+      let subjects = [];
+      try {
+        const subjectsRes = await axios.get(`http://localhost:5000/api/classes/${classId}/subjects`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        if (subjectsRes.data && Array.isArray(subjectsRes.data.subjects)) {
+          subjects = subjectsRes.data.subjects;
+        } else if (subjectsRes.data && Array.isArray(subjectsRes.data)) {
+          subjects = subjectsRes.data;
+        }
+      } catch (err) {
+        console.error('Error fetching subjects:', err);
+      }
+      
+      // Get subject teachers
+      let subjectsWithTeachers = [];
+      try {
+        const teacherRes = await axios.get(`http://localhost:5000/api/users/subject-teachers/class/${classId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        if (teacherRes.data && teacherRes.data.subjectTeachers && Array.isArray(teacherRes.data.subjectTeachers)) {
+          // Map teachers to subjects
+          subjects.forEach(subject => {
+            const subjectId = subject._id || subject.id || subject.subject?._id || subject.subjectId;
+            let teacher = null;
+            let teacherName = 'Not Assigned';
+            
+            for (const teacherData of teacherRes.data.subjectTeachers) {
+              if (teacherData.subjects && teacherData.subjects.some(s => 
+                (s.id || s._id || s.subject?.id || s.subject?._id) === subjectId
+              )) {
+                teacher = teacherData.teacher;
+                teacherName = teacher ? 
+                  `${teacher.firstName || ''} ${teacher.lastName || ''}`.trim() || teacher.username : 
+                  'Not Assigned';
+                break;
+              }
+            }
+            
+            subjectsWithTeachers.push({
+              ...subject,
+              id: subjectId,
+              name: subject.name || subject.subject?.name,
+              code: subject.code || subject.subject?.code,
+              teacher: teacher,
+              teacherName: teacherName
+            });
+          });
+        } else {
+          // No teachers assigned
+          subjectsWithTeachers = subjects.map(subject => ({
+            ...subject,
+            id: subject._id || subject.id || subject.subject?._id || subject.subjectId,
+            name: subject.name || subject.subject?.name,
+            code: subject.code || subject.subject?.code,
+            teacher: null,
+            teacherName: 'Not Assigned'
+          }));
+        }
+      } catch (err) {
+        console.error('Error fetching subject teachers:', err);
+        // If error, show subjects without teachers
+        subjectsWithTeachers = subjects.map(subject => ({
+          ...subject,
+          id: subject._id || subject.id || subject.subject?._id || subject.subjectId,
+          name: subject.name || subject.subject?.name,
+          code: subject.code || subject.subject?.code,
+          teacher: null,
+          teacherName: 'Not Assigned'
+        }));
+      }
+      
+      setClassSubjectTeachers(subjectsWithTeachers);
+      setClassDetails(classData);
+      setShowSubjectTeachersModal(classId);
+      
+    } catch (err) {
+      console.error('Fetch subject teachers error:', err);
+      setError(err.response?.data?.message || 'Failed to load subject teachers');
+    } finally {
+      setLoadingSubjectTeachers(false);
+    }
+  };
+
+  // Fetch available teachers for assignment
+  const fetchAvailableTeachers = async () => {
+    setLoadingTeachers(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get('http://localhost:5000/api/users/teachers/list', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      let teachersData = [];
+      if (res.data && res.data.teachers && Array.isArray(res.data.teachers)) {
+        teachersData = res.data.teachers;
+      } else if (res.data && Array.isArray(res.data)) {
+        teachersData = res.data;
+      }
+      
+      setAvailableTeachers(teachersData);
+    } catch (err) {
+      console.error('Fetch teachers error:', err);
+      setError(err.response?.data?.message || 'Failed to load teachers');
+    } finally {
+      setLoadingTeachers(false);
+    }
+  };
+
+  // Open assign teacher modal for a subject
+  const openAssignTeacherModal = (subject, classId) => {
+    setAssigningSubject(subject);
+    fetchAvailableTeachers();
+    setSelectedTeacher(subject.teacher?.id || subject.teacher?._id || '');
+    setShowAssignTeacherModal({
+      classId,
+      subjectId: subject.id || subject._id,
+      subjectName: subject.name
+    });
+  };
+
+  // Assign teacher to a subject
+  const handleAssignTeacher = async () => {
+    if (!showAssignTeacherModal || !selectedTeacher) {
+      setError('Please select a teacher');
       return;
     }
 
-    setAssignSubjectsLoading(true);
+    setAssignTeacherLoading(true);
     try {
       const token = localStorage.getItem('token');
-      await axios.post(`http://localhost:5000/api/classes/${classId}/subjects`, {
-        subjectIds: selectedSubjects,
-        isCore: true
+      const { classId, subjectId } = showAssignTeacherModal;
+      
+      const response = await axios.post('http://localhost:5000/api/users/subject-teachers/assign', {
+        teacherId: selectedTeacher,
+        classId: classId,
+        subjectIds: [subjectId]
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.data.success) {
+        const teacher = availableTeachers.find(t => (t.id || t._id) === selectedTeacher);
+        const teacherName = teacher ? (teacher.name || teacher.displayName || teacher.username) : 'Teacher';
+        
+        setSuccess(`Teacher ${teacherName} assigned to ${showAssignTeacherModal.subjectName}`);
+        
+        // Refresh subject teachers list
+        await fetchSubjectTeachers(classId);
+        // Refresh class details if modal is open
+        if (showDetailsModal) {
+          await fetchClassDetails(classId);
+        }
+        
+        setShowAssignTeacherModal(null);
+        setSelectedTeacher('');
+        setAssigningSubject(null);
+      }
+    } catch (err) {
+      console.error('Assign teacher error:', err);
+      setError(err.response?.data?.message || 'Failed to assign teacher');
+    } finally {
+      setAssignTeacherLoading(false);
+    }
+  };
+
+  // Remove teacher from a subject
+  const handleRemoveTeacher = async (classId, subjectId, subjectName) => {
+    if (!window.confirm(`Are you sure you want to remove the teacher from ${subjectName}?`)) {
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      
+      // Get current teacher for this subject
+      const subjectTeacher = classSubjectTeachers.find(st => 
+        (st.id || st._id) === subjectId
+      );
+      
+      if (!subjectTeacher || !subjectTeacher.teacher) {
+        setError('No teacher assigned to this subject');
+        return;
+      }
+
+      const teacherId = subjectTeacher.teacher.id || subjectTeacher.teacher._id;
+
+      // Remove teacher assignment
+      const response = await axios.delete(`http://localhost:5000/api/users/teachers/${teacherId}/remove-assignment`, {
+        headers: { Authorization: `Bearer ${token}` },
+        data: {
+          classId: classId,
+          subjectId: subjectId
+        }
+      });
+
+      if (response.data.success) {
+        setSuccess(`Teacher removed from ${subjectName}`);
+        // Refresh the list
+        await fetchSubjectTeachers(classId);
+        // Refresh class details if modal is open
+        if (showDetailsModal) {
+          await fetchClassDetails(classId);
+        }
+      }
+    } catch (err) {
+      console.error('Remove teacher error:', err);
+      setError(err.response?.data?.message || 'Failed to remove teacher');
+    }
+  };
+
+  // Assign class teacher
+  const handleAssignClassTeacher = async (classId, teacherId) => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.put(`http://localhost:5000/api/classes/${classId}`, {
+        classTeacher: teacherId || null
       }, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
-      setSuccess('Subjects assigned to class successfully');
-      setShowAssignSubjectsModal(null);
-      fetchClasses();
+      if (response.data.success) {
+        const teacher = teacherId ? 
+          availableTeachers.find(t => (t.id || t._id) === teacherId) : null;
+        
+        if (teacherId) {
+          setSuccess(`Class teacher assigned: ${teacher?.name || teacher?.username}`);
+        } else {
+          setSuccess('Class teacher removed');
+        }
+        
+        fetchClasses(); // Refresh classes list
+        if (showDetailsModal) {
+          fetchClassDetails(classId); // Refresh details modal
+        }
+      }
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to assign subjects');
-    } finally {
-      setAssignSubjectsLoading(false);
+      console.error('Assign class teacher error:', err);
+      setError(err.response?.data?.message || 'Failed to assign class teacher');
     }
   };
 
-  const handleRemoveSubjectFromClass = async (classId, subjectId) => {
+  // Delete class permanently
+  const handleDeleteClass = async (classId, className) => {
     try {
       const token = localStorage.getItem('token');
-      await axios.delete(`http://localhost:5000/api/classes/${classId}/subjects/${subjectId}`, {
+      const response = await axios.delete(`http://localhost:5000/api/classes/${classId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
-      setSuccess('Subject removed from class successfully');
-      fetchClasses();
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to remove subject');
-    }
-  };
-
-  const toggleSubjectSelection = (subjectId) => {
-    setSelectedSubjects(prev => {
-      if (prev.includes(subjectId)) {
-        return prev.filter(id => id !== subjectId);
-      } else {
-        return [...prev, subjectId];
+      if (response.data.success) {
+        setSuccess(`Class "${className}" deleted successfully`);
+        setClasses(prevClasses => prevClasses.filter(cls => 
+          cls.id !== classId
+        ));
+        setShowDeleteModal(null);
       }
-    });
+    } catch (err) {
+      console.error('Delete class error:', err);
+      setError(err.response?.data?.message || 'Failed to delete class');
+    }
   };
 
-  // In ManageClasses.js component
-
-const handleDeleteClass = async (classId, className) => {
-  try {
-    const token = localStorage.getItem('token');
-    const response = await axios.delete(`http://localhost:5000/api/classes/${classId}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    
-    if (response.data.success) {
-      setSuccess(`Class "${className}" deactivated successfully`);
-      setShowDeleteModal(null);
-      // Remove the deleted class from state
-      setClasses(prevClasses => prevClasses.filter(cls => 
-        (cls.id || cls._id) !== classId
-      ));
-    }
-  } catch (err) {
-    console.error('Delete class error:', err);
-    setError(err.response?.data?.error || 'Failed to delete class. Please try again.');
-  }
-};
-
-const handleHardDeleteClass = async (classId, className) => {
-  if (!window.confirm(`WARNING: This will permanently delete "${className}" and all associated data. This action cannot be undone. Are you sure?`)) {
-    return;
-  }
-
-  try {
-    const token = localStorage.getItem('token');
-    const response = await axios.delete(`http://localhost:5000/api/classes/${classId}/hard`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    
-    if (response.data.success) {
-      setSuccess(`Class "${className}" permanently deleted`);
-      // Remove the deleted class from state
-      setClasses(prevClasses => prevClasses.filter(cls => 
-        (cls.id || cls._id) !== classId
-      ));
-    }
-  } catch (err) {
-    console.error('Hard delete class error:', err);
-    setError(err.response?.data?.error || 'Failed to permanently delete class.');
-  }
-};
-
-const handleDeactivateClass = async (classId, className) => {
-  try {
-    const token = localStorage.getItem('token');
-    const response = await axios.patch(`http://localhost:5000/api/classes/${classId}/deactivate`, {}, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    
-    if (response.data.success) {
-      setSuccess(`Class "${className}" deactivated successfully`);
-      // Update the class status in state
-      setClasses(prevClasses => prevClasses.map(cls => 
-        (cls.id || cls._id) === classId ? { ...cls, isActive: false } : cls
-      ));
-      setShowDeleteModal(null);
-    }
-  } catch (err) {
-    console.error('Deactivate class error:', err);
-    setError(err.response?.data?.error || 'Failed to deactivate class');
-  }
-};
-
-const handleReactivateClass = async (classId) => {
-  try {
-    const token = localStorage.getItem('token');
-    const response = await axios.patch(`http://localhost:5000/api/classes/${classId}/reactivate`, {}, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    
-    if (response.data.success) {
-      setSuccess('Class reactivated successfully');
-      // Update the class status in state
-      setClasses(prevClasses => prevClasses.map(cls => 
-        (cls.id || cls._id) === classId ? { ...cls, isActive: true } : cls
-      ));
-    }
-  } catch (err) {
-    console.error('Reactivate class error:', err);
-    setError(err.response?.data?.error || 'Failed to reactivate class');
-  }
-};
-
+  // Create new class
   const handleCreateClass = async (e) => {
     e.preventDefault();
+    setLoading(true);
+    
     try {
       const token = localStorage.getItem('token');
       const res = await axios.post('http://localhost:5000/api/classes', newClassData, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
-      setSuccess('Class created successfully');
-      setShowCreateModal(false);
-      setNewClassData({
-        name: '',
-        shortName: '',
-        level: 'JSS1',
-        stream: '',
-        capacity: 40,
-        classTeacherId: ''
-      });
-      fetchClasses();
+      if (res.data.success) {
+        setSuccess('Class created successfully');
+        setShowCreateModal(false);
+        setNewClassData({
+          name: '',
+          shortName: '',
+          level: 'JSS1',
+          stream: '',
+          section: '',
+          capacity: 40,
+          classTeacherId: ''
+        });
+        fetchClasses();
+      }
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create class');
+      console.error('Create class error:', err);
+      setError(err.response?.data?.message || 'Failed to create class');
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Filter classes
+  // Filter classes based on search and level
   const filteredClasses = classes.filter(cls => {
     if (!cls) return false;
     
     const className = cls.name || '';
-    const fullName = cls.fullName || `${cls.level || ''}${cls.stream ? ` ${cls.stream}` : ''}`;
+    const classLevel = cls.level || '';
+    const classTeacher = cls.classTeacherName || '';
+    const shortName = cls.shortName || '';
     
     const matchesSearch = className.toLowerCase().includes(search.toLowerCase()) ||
-                         fullName.toLowerCase().includes(search.toLowerCase());
+                         classLevel.toLowerCase().includes(search.toLowerCase()) ||
+                         classTeacher.toLowerCase().includes(search.toLowerCase()) ||
+                         shortName.toLowerCase().includes(search.toLowerCase());
     const matchesLevel = filterLevel === 'all' || cls.level === filterLevel;
+    
     return matchesSearch && matchesLevel;
   });
 
-  const handleViewClassDetails = (classId) => {
-    navigate(`/admin/classes/${classId}`);
-  };
-
-  const handleEditClass = (classId) => {
-    navigate(`/admin/classes/${classId}/edit`);
-  };
-
   if (!user || !(user.role === 'admin' || user.role === 'super_admin' || user.role === 'teacher')) {
     return (
-      <div style={styles.authRequiredContainer}>
+      <div style={styles.container}>
         <div style={styles.authErrorMessage}>
           <FiAlertTriangle style={styles.errorIcon} />
           <div>
-            <h3 style={{ margin: '0 0 8px 0', fontSize: '18px' }}>Access Denied</h3>
-            <p style={{ margin: 0, fontSize: '14px' }}>You don't have permission to manage classes.</p>
+            <h3 style={{ margin: '0 0 8px 0', fontSize: '16px', color: '#333' }}>Access Denied</h3>
+            <p style={{ margin: 0, fontSize: '13px', color: '#333' }}>You don't have permission to manage classes.</p>
           </div>
         </div>
       </div>
@@ -349,20 +737,30 @@ const handleReactivateClass = async (classId) => {
             </p>
           </div>
           
-          {(user.role === 'admin' || user.role === 'super_admin') && (
+          <div style={styles.headerActions}>
+            {(user.role === 'admin' || user.role === 'super_admin') && (
+              <button
+                style={styles.createButton}
+                onClick={() => setShowCreateModal(true)}
+              >
+                <FiPlus /> Create New Class
+              </button>
+            )}
             <button
-              style={styles.createButton}
-              onClick={() => setShowCreateModal(true)}
+              style={styles.refreshButton}
+              onClick={fetchClasses}
+              disabled={loading}
             >
-              <FiPlus /> Create New Class
+              <FiRefreshCw /> Refresh
             </button>
-          )}
+          </div>
         </div>
 
         {/* Messages */}
         {error && (
           <div style={styles.errorMessage}>
-            <FiAlertTriangle /> {error}
+            <FiAlertTriangle style={{ color: '#B22222', fontSize: '16px' }} /> 
+            <span style={{ flex: 1, color: '#B22222', fontSize: '14px' }}>{error}</span>
             <button onClick={() => setError(null)} style={styles.closeMessageButton}>
               <FiX />
             </button>
@@ -370,7 +768,8 @@ const handleReactivateClass = async (classId) => {
         )}
         {success && (
           <div style={styles.successMessage}>
-            <FiCheckCircle /> {success}
+            <FiCheckCircle style={{ color: '#228B22', fontSize: '16px' }} /> 
+            <span style={{ flex: 1, color: '#228B22', fontSize: '14px' }}>{success}</span>
             <button onClick={() => setSuccess(null)} style={styles.closeMessageButton}>
               <FiX />
             </button>
@@ -383,7 +782,7 @@ const handleReactivateClass = async (classId) => {
             <FiSearch style={styles.searchIcon} />
             <input
               type="text"
-              placeholder="Search classes..."
+              placeholder="Search classes by name, level, or teacher..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               style={styles.searchInput}
@@ -422,13 +821,13 @@ const handleReactivateClass = async (classId) => {
         {loading ? (
           <div style={styles.loadingContainer}>
             <div style={styles.loadingSpinner}></div>
-            <p>Loading classes...</p>
+            <p style={{ color: '#333', fontSize: '14px' }}>Loading classes...</p>
           </div>
         ) : filteredClasses.length === 0 ? (
           <div style={styles.emptyState}>
             <FiBookOpen style={styles.emptyIcon} />
-            <h3>No Classes Found</h3>
-            <p>
+            <h3 style={{ color: '#333', fontSize: '18px' }}>No Classes Found</h3>
+            <p style={{ color: '#666', fontSize: '14px' }}>
               {classes.length === 0 ? 'No classes have been created yet.' : 'No classes match your search criteria.'}
             </p>
             {(user.role === 'admin' || user.role === 'super_admin') && (
@@ -443,15 +842,13 @@ const handleReactivateClass = async (classId) => {
         ) : (
           <div style={styles.classesGrid}>
             {filteredClasses.map(cls => {
-              if (!cls) return null;
-              
+              const classId = cls.id;
               const className = cls.name || 'Unnamed Class';
-              const fullName = cls.fullName || `${cls.level || ''}${cls.stream ? ` ${cls.stream}` : ''}`;
-              const shortName = cls.shortName || cls.level || '';
+              const fullName = cls.fullName || `${cls.level || ''}${cls.stream ? ` ${cls.stream}` : ''}${cls.section ? ` (${cls.section})` : ''}`;
               const studentCount = cls.studentCount || 0;
-              const subjectCount = cls.subjectCount || (cls.subjectAssignments?.length || 0);
               const capacity = cls.capacity || 40;
-              const classId = cls.id || cls._id;
+              const utilization = capacity > 0 ? Math.round((studentCount / capacity) * 100) : 0;
+              const utilizationColor = utilization >= 90 ? '#B22222' : utilization >= 75 ? '#D4A017' : '#228B22';
               
               return (
                 <div key={classId} style={styles.classCard}>
@@ -460,12 +857,21 @@ const handleReactivateClass = async (classId) => {
                     <div style={styles.classInfo}>
                       <h3 style={styles.className}>{fullName}</h3>
                       <div style={styles.classMeta}>
-                        <span style={styles.classShortName}>{shortName}</span>
+                        <span style={styles.classShortName}>{cls.shortName || cls.level}</span>
                         <span style={styles.classStat}>
-                          <FiUsers /> {studentCount}/{capacity} students
+                          <FiUsers style={{ color: '#4B5320', fontSize: '14px' }} /> 
+                          <span style={{ color: '#333', fontSize: '13px' }}>{studentCount}/{capacity}</span>
                         </span>
                         <span style={styles.classStat}>
-                          <FiBook /> {subjectCount} subjects
+                          <FiUser style={{ color: '#4B5320', fontSize: '14px' }} /> 
+                          <span style={{ color: '#333', fontSize: '13px' }}>{cls.classTeacherName || 'Not Assigned'}</span>
+                        </span>
+                        <span style={{
+                          ...styles.utilizationBadge,
+                          backgroundColor: utilizationColor,
+                          color: 'white'
+                        }}>
+                          {utilization}% full
                         </span>
                       </div>
                     </div>
@@ -488,44 +894,43 @@ const handleReactivateClass = async (classId) => {
                         <span style={styles.detailValue}>{className}</span>
                       </div>
                       <div style={styles.detailRow}>
-                        <span style={styles.detailLabel}>Class ID:</span>
-                        <span style={styles.detailValue} title={classId}>
-                          {classId.substring(0, 8)}...
-                        </span>
-                      </div>
-                      <div style={styles.detailRow}>
-                        <span style={styles.detailLabel}>Academic Year:</span>
-                        <span style={styles.detailValue}>{cls.academicYear || `${new Date().getFullYear()}/${new Date().getFullYear() + 1}`}</span>
+                        <span style={styles.detailLabel}>Level:</span>
+                        <span style={styles.detailValue}>{cls.level}</span>
                       </div>
                       
-                      {/* Subject Assignments */}
-                      {cls.subjectAssignments && cls.subjectAssignments.length > 0 && (
-                        <div style={styles.subjectAssignments}>
-                          <h4 style={styles.sectionTitle}>Assigned Subjects:</h4>
-                          <div style={styles.subjectList}>
-                            {cls.subjectAssignments.map((assignment, index) => (
-                              <div key={index} style={styles.subjectItem}>
-                                <span style={styles.subjectName}>
-                                  {assignment.subject?.name || `Subject ${index + 1}`}
-                                  {assignment.subject?.code && ` (${assignment.subject.code})`}
-                                </span>
-                                {assignment.isCore && (
-                                  <span style={styles.coreBadge}>Core</span>
-                                )}
-                                {(user.role === 'admin' || user.role === 'super_admin') && (
-                                  <button
-                                    onClick={() => handleRemoveSubjectFromClass(classId, assignment.subject?.id)}
-                                    style={styles.removeSubjectButton}
-                                  >
-                                    <FiX />
-                                  </button>
-                                )}
-                              </div>
-                            ))}
-                          </div>
+                      {/* Class Teacher */}
+                      <div style={styles.detailRow}>
+                        <span style={styles.detailLabel}>Class Teacher:</span>
+                        <div style={styles.teacherInfo}>
+                          <span style={styles.detailValue}>{cls.classTeacherName || 'Not Assigned'}</span>
+                          {(user.role === 'admin' || user.role === 'super_admin') && (
+                            <div style={styles.teacherActions}>
+                              <button
+                                style={{...styles.smallButton, ...styles.assignTeacherButton}}
+                                onClick={async () => {
+                                  await fetchAvailableTeachers();
+                                  setShowAssignTeacherModal({
+                                    classId: classId,
+                                    isClassTeacher: true,
+                                    currentTeacher: cls.classTeacher?.id || cls.classTeacher?._id
+                                  });
+                                }}
+                              >
+                                <FiUserPlus /> {cls.classTeacher ? 'Change' : 'Assign'}
+                              </button>
+                              {cls.classTeacher && (
+                                <button
+                                  style={{...styles.smallButton, ...styles.removeTeacherButton}}
+                                  onClick={() => handleAssignClassTeacher(classId, null)}
+                                >
+                                  <FiUserMinus /> Remove
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
-                      )}
-
+                      </div>
+                      
                       <div style={styles.detailRow}>
                         <span style={styles.detailLabel}>Status:</span>
                         <span style={{
@@ -541,70 +946,46 @@ const handleReactivateClass = async (classId) => {
                       <div style={styles.classActions}>
                         <button
                           style={{...styles.actionButton, ...styles.viewButton}}
-                          onClick={() => handleViewClassDetails(classId)}
+                          onClick={() => fetchClassDetails(classId)}
+                          disabled={loadingDetails}
                         >
-                          <FiEye /> View Details
+                          <FiEye /> {loadingDetails ? 'Loading...' : 'Details'}
+                        </button>
+                        
+                        <button
+                          style={{...styles.actionButton, ...styles.viewStudentsButton}}
+                          onClick={() => fetchClassStudents(classId)}
+                          disabled={loadingStudents}
+                        >
+                          <FiUsers /> Students
+                        </button>
+                        
+                        <button
+                          style={{...styles.actionButton, ...styles.manageSubjectsButton}}
+                          onClick={() => fetchSubjectTeachers(classId)}
+                          disabled={loadingSubjectTeachers}
+                        >
+                          <FiTeachers /> Subject Teachers
                         </button>
                         
                         {(user.role === 'admin' || user.role === 'super_admin') && (
                           <>
                             <button
-                              style={{...styles.actionButton, ...styles.assignSubjectsButton}}
-                              onClick={() => {
-                                setShowAssignSubjectsModal(classId);
-                                fetchAvailableSubjects();
-                                fetchClassSubjects(classId);
-                              }}
-                            >
-                              <FiLink /> Assign Subjects
-                            </button>
-
-                            <button
                               style={{...styles.actionButton, ...styles.editButton}}
-                              onClick={() => handleEditClass(classId)}
+                              onClick={() => navigate(`/admin/classes/${classId}/edit`)}
                             >
                               <FiEdit /> Edit
                             </button>
 
-                            {cls.isActive ? (
-                              <>
-                                <button
-                                  style={{...styles.actionButton, ...styles.deactivateButton}}
-                                  onClick={() => setShowDeleteModal({ 
-                                    id: classId, 
-                                    name: className,
-                                    type: 'deactivate'
-                                  })}
-                                >
-                                  <FiTrash2 /> Deactivate
-                                </button>
-                                <button
-                                  style={{...styles.actionButton, ...styles.deleteButton}}
-                                  onClick={() => setShowDeleteModal({ 
-                                    id: classId, 
-                                    name: className,
-                                    type: 'delete'
-                                  })}
-                                >
-                                  <FiTrash2 /> Delete
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  style={{...styles.actionButton, ...styles.reactivateButton}}
-                                  onClick={() => handleReactivateClass(classId)}
-                                >
-                                  <FiCheckCircle /> Reactivate
-                                </button>
-                                <button
-                                  style={{...styles.actionButton, ...styles.hardDeleteButton}}
-                                  onClick={() => handleHardDeleteClass(classId, className)}
-                                >
-                                  <FiTrash2 /> Permanently Delete
-                                </button>
-                              </>
-                            )}
+                            <button
+                              style={{...styles.actionButton, ...styles.deleteButton}}
+                              onClick={() => setShowDeleteModal({ 
+                                id: classId, 
+                                name: className
+                              })}
+                            >
+                              <FiTrash2 /> Delete
+                            </button>
                           </>
                         )}
                       </div>
@@ -616,11 +997,583 @@ const handleReactivateClass = async (classId) => {
           </div>
         )}
 
+        {/* Class Details Modal */}
+        {showDetailsModal && classDetails && (
+          <div style={styles.modalOverlay}>
+            <div style={{...styles.modalContent, maxWidth: '900px'}}>
+              <div style={styles.modalHeader}>
+                <div>
+                  <h2 style={styles.modalTitle}>Class Details</h2>
+                  <p style={{ fontSize: '13px', color: '#666', margin: 0 }}>
+                    {classDetails.name} - Complete Information
+                  </p>
+                </div>
+                <button 
+                  style={styles.closeModalButton}
+                  onClick={() => {
+                    setShowDetailsModal(false);
+                    setClassDetails(null);
+                  }}
+                >
+                  <FiX />
+                </button>
+              </div>
+              
+              {loadingDetails ? (
+                <div style={styles.loadingContainer}>
+                  <FiLoader style={{ animation: 'spin 1s linear infinite', fontSize: '28px', color: '#4B5320' }} />
+                  <p style={{ color: '#333', fontSize: '14px' }}>Loading class details...</p>
+                </div>
+              ) : (
+                <>
+                  <div style={styles.statsBar}>
+                    <span style={styles.statItem}>
+                      <FiUsers style={{ color: '#4B5320' }} /> 
+                      <span style={{ color: '#333', fontSize: '13px' }}>Students: {classDetails.studentCount || 0}</span>
+                    </span>
+                    <span style={styles.statItem}>
+                      <FiBook style={{ color: '#4B5320' }} /> 
+                      <span style={{ color: '#333', fontSize: '13px' }}>Subjects: {classDetails.subjectAssignments?.length || 0}</span>
+                    </span>
+                    <span style={styles.statItem}>
+                      <FiClock style={{ color: '#4B5320' }} /> 
+                      <span style={{ color: '#333', fontSize: '13px' }}>Created: {classDetails.createdAt}</span>
+                    </span>
+                  </div>
+                  
+                  {/* Class Information Section */}
+                  <div style={styles.section}>
+                    <h3 style={styles.sectionTitle}>Class Information</h3>
+                    <div style={styles.infoGrid}>
+                      <div style={styles.infoItem}>
+                        <span style={styles.infoLabel}>Class Name:</span>
+                        <span style={styles.infoValue}>{classDetails.name}</span>
+                      </div>
+                      <div style={styles.infoItem}>
+                        <span style={styles.infoLabel}>Short Name:</span>
+                        <span style={styles.infoValue}>{classDetails.shortName || 'N/A'}</span>
+                      </div>
+                      <div style={styles.infoItem}>
+                        <span style={styles.infoLabel}>Level:</span>
+                        <span style={styles.infoValue}>{classDetails.level}</span>
+                      </div>
+                      <div style={styles.infoItem}>
+                        <span style={styles.infoLabel}>Stream:</span>
+                        <span style={styles.infoValue}>{classDetails.stream || 'N/A'}</span>
+                      </div>
+                      <div style={styles.infoItem}>
+                        <span style={styles.infoLabel}>Section:</span>
+                        <span style={styles.infoValue}>{classDetails.section || 'N/A'}</span>
+                      </div>
+                      <div style={styles.infoItem}>
+                        <span style={styles.infoLabel}>Capacity:</span>
+                        <span style={styles.infoValue}>{classDetails.capacity || 40}</span>
+                      </div>
+                      <div style={styles.infoItem}>
+                        <span style={styles.infoLabel}>Class Teacher:</span>
+                        <span style={styles.infoValue}>{classDetails.classTeacherName || 'Not Assigned'}</span>
+                      </div>
+                      <div style={styles.infoItem}>
+                        <span style={styles.infoLabel}>Status:</span>
+                        <span style={{
+                          ...styles.statusBadge,
+                          backgroundColor: classDetails.isActive ? '#E6FFE6' : '#FFF3CD',
+                          color: classDetails.isActive ? '#228B22' : '#D4A017',
+                          fontSize: '12px',
+                          padding: '3px 8px'
+                        }}>
+                          {classDetails.isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Subjects Section */}
+                  {classDetails.subjectAssignments && classDetails.subjectAssignments.length > 0 && (
+                    <div style={styles.section}>
+                      <div style={styles.sectionHeader}>
+                        <h3 style={styles.sectionTitle}>Subjects ({classDetails.subjectAssignments.length})</h3>
+                        <button
+                          style={styles.assignButton}
+                          onClick={() => {
+                            setShowDetailsModal(false);
+                            setTimeout(() => fetchSubjectTeachers(classDetails.id), 300);
+                          }}
+                        >
+                          <FiUserPlus /> Manage Teachers
+                        </button>
+                      </div>
+                      <div style={styles.subjectsGrid}>
+                        {classDetails.subjectAssignments.map((subject, index) => (
+                          <div key={subject.id || index} style={styles.subjectCard}>
+                            <div style={styles.subjectHeader}>
+                              <h4 style={styles.subjectName}>
+                                {subject.name}
+                                {subject.code && (
+                                  <span style={styles.subjectCode}> ({subject.code})</span>
+                                )}
+                              </h4>
+                              <span style={{
+                                ...styles.teacherStatus,
+                                backgroundColor: subject.teacher ? '#E6FFE6' : '#FFF3CD',
+                                color: subject.teacher ? '#228B22' : '#D4A017'
+                              }}>
+                                {subject.teacher ? 'Teacher Assigned' : 'No Teacher'}
+                              </span>
+                            </div>
+                            <div style={styles.subjectDetails}>
+                              <div style={styles.subjectInfo}>
+                                <span style={styles.subjectInfoLabel}>Teacher:</span>
+                                <span style={styles.subjectInfoValue}>{subject.teacherName}</span>
+                              </div>
+                              {subject.teacher && (
+                                <div style={styles.subjectActions}>
+                                  <button
+                                    style={{...styles.smallButton, ...styles.changeTeacherButton}}
+                                    onClick={() => openAssignTeacherModal(subject, classDetails.id)}
+                                  >
+                                    <FiUserPlus /> Change
+                                  </button>
+                                  <button
+                                    style={{...styles.smallButton, ...styles.removeTeacherButton}}
+                                    onClick={() => handleRemoveTeacher(classDetails.id, subject.id, subject.name)}
+                                  >
+                                    <FiUserX /> Remove
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Quick Actions */}
+                  <div style={styles.section}>
+                    <h3 style={styles.sectionTitle}>Quick Actions</h3>
+                    <div style={styles.actionButtons}>
+                      <button
+                        style={{...styles.actionButton, ...styles.viewStudentsButton}}
+                        onClick={() => {
+                          setShowDetailsModal(false);
+                          setTimeout(() => fetchClassStudents(classDetails.id), 300);
+                        }}
+                      >
+                        <FiUsers /> View Students
+                      </button>
+                      <button
+                        style={{...styles.actionButton, ...styles.manageSubjectsButton}}
+                        onClick={() => {
+                          setShowDetailsModal(false);
+                          setTimeout(() => fetchSubjectTeachers(classDetails.id), 300);
+                        }}
+                      >
+                        <FiTeachers /> Manage Subject Teachers
+                      </button>
+                      {(user.role === 'admin' || user.role === 'super_admin') && (
+                        <>
+                          <button
+                            style={{...styles.actionButton, ...styles.editButton}}
+                            onClick={() => navigate(`/admin/classes/${classDetails.id}/edit`)}
+                          >
+                            <FiEdit /> Edit Class
+                          </button>
+                          <button
+                            style={{...styles.actionButton, ...styles.deleteButton}}
+                            onClick={() => {
+                              setShowDetailsModal(false);
+                              setTimeout(() => setShowDeleteModal({
+                                id: classDetails.id,
+                                name: classDetails.name
+                              }), 300);
+                            }}
+                          >
+                            <FiTrash2 /> Delete Class
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Students Modal */}
+        {showStudentsModal && (
+          <div style={styles.modalOverlay}>
+            <div style={{...styles.modalContent, maxWidth: '800px'}}>
+              <div style={styles.modalHeader}>
+                <div>
+                  <h2 style={styles.modalTitle}>
+                    Students in {classDetails?.name || 'Class'}
+                  </h2>
+                  <p style={{ fontSize: '13px', color: '#666', margin: 0 }}>
+                    Total: {classStudents.length} students
+                  </p>
+                </div>
+                <button 
+                  style={styles.closeModalButton}
+                  onClick={() => {
+                    setShowStudentsModal(false);
+                    setClassStudents([]);
+                  }}
+                >
+                  <FiX />
+                </button>
+              </div>
+              
+              {loadingStudents ? (
+                <div style={styles.loadingContainer}>
+                  <FiLoader style={{ animation: 'spin 1s linear infinite', fontSize: '28px', color: '#4B5320' }} />
+                  <p style={{ color: '#333', fontSize: '14px' }}>Loading students...</p>
+                </div>
+              ) : classStudents.length === 0 ? (
+                <div style={{...styles.emptyState, padding: '30px 20px'}}>
+                  <FiUsers style={{ fontSize: '40px', color: '#666', marginBottom: '16px' }} />
+                  <h3 style={{ color: '#333', fontSize: '18px' }}>No Students Found</h3>
+                  <p style={{ color: '#666', fontSize: '14px' }}>This class currently has no students enrolled.</p>
+                </div>
+              ) : (
+                <>
+                  <div style={styles.statsBar}>
+                    <span style={styles.statItem}>
+                      <FiUsers style={{ color: '#4B5320' }} /> 
+                      <span style={{ color: '#333', fontSize: '13px' }}>Total: {classStudents.length}</span>
+                    </span>
+                  </div>
+                  
+                  <div style={styles.studentsTableContainer}>
+                    <table style={styles.studentsTable}>
+                      <thead>
+                        <tr>
+                          <th style={styles.tableHeader}>#</th>
+                          <th style={styles.tableHeader}>Student Name</th>
+                          <th style={styles.tableHeader}>Student ID</th>
+                          <th style={styles.tableHeader}>Username</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {classStudents.map((student, index) => (
+                          <tr key={student.id} style={styles.tableRow}>
+                            <td style={styles.tableCell}>{index + 1}</td>
+                            <td style={styles.tableCell}>
+                              <div style={styles.studentCell}>
+                                <FiUser style={{ color: '#4B5320', marginRight: '8px', fontSize: '14px' }} />
+                                <span style={{ color: '#333', fontSize: '14px' }}>
+                                  {student.displayName}
+                                </span>
+                              </div>
+                            </td>
+                            <td style={styles.tableCell}>
+                              <span style={{ color: '#333', fontSize: '14px' }}>{student.studentId || 'N/A'}</span>
+                            </td>
+                            <td style={styles.tableCell}>
+                              <span style={{ color: '#333', fontSize: '14px' }}>{student.username || 'N/A'}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Subject Teachers Modal */}
+        {showSubjectTeachersModal && (
+          <div style={styles.modalOverlay}>
+            <div style={{...styles.modalContent, maxWidth: '900px'}}>
+              <div style={styles.modalHeader}>
+                <div>
+                  <h2 style={styles.modalTitle}>
+                    Subject Teachers - {classDetails?.name || 'Class'}
+                  </h2>
+                  <p style={{ fontSize: '13px', color: '#666', margin: 0 }}>
+                    View and manage subject teachers for this class
+                  </p>
+                </div>
+                <button 
+                  style={styles.closeModalButton}
+                  onClick={() => {
+                    setShowSubjectTeachersModal(false);
+                    setClassSubjectTeachers([]);
+                  }}
+                >
+                  <FiX />
+                </button>
+              </div>
+              
+              {loadingSubjectTeachers ? (
+                <div style={styles.loadingContainer}>
+                  <FiLoader style={{ animation: 'spin 1s linear infinite', fontSize: '28px', color: '#4B5320' }} />
+                  <p style={{ color: '#333', fontSize: '14px' }}>Loading subject teachers...</p>
+                </div>
+              ) : classSubjectTeachers.length === 0 ? (
+                <div style={{...styles.emptyState, padding: '30px 20px'}}>
+                  <FiBriefcase style={{ fontSize: '40px', color: '#666', marginBottom: '16px' }} />
+                  <h3 style={{ color: '#333', fontSize: '18px' }}>No Subjects Found</h3>
+                  <p style={{ color: '#666', fontSize: '14px' }}>No subjects have been assigned to this class yet.</p>
+                </div>
+              ) : (
+                <>
+                  <div style={styles.statsBar}>
+                    <span style={styles.statItem}>
+                      <FiBook style={{ color: '#4B5320' }} /> 
+                      <span style={{ color: '#333', fontSize: '13px' }}>Subjects: {classSubjectTeachers.length}</span>
+                    </span>
+                    <span style={styles.statItem}>
+                      <FiCheckSquare style={{ color: '#4B5320' }} /> 
+                      <span style={{ color: '#333', fontSize: '13px' }}>Teachers Assigned: {
+                        classSubjectTeachers.filter(st => st.teacher).length
+                      }</span>
+                    </span>
+                    <span style={styles.statItem}>
+                      <FiXCircle style={{ color: '#4B5320' }} /> 
+                      <span style={{ color: '#333', fontSize: '13px' }}>Unassigned: {
+                        classSubjectTeachers.filter(st => !st.teacher).length
+                      }</span>
+                    </span>
+                  </div>
+                  
+                  <div style={styles.subjectTeachersContainer}>
+                    {classSubjectTeachers.map((subject, index) => {
+                      const subjectId = subject.id;
+                      const subjectName = subject.name;
+                      const teacher = subject.teacher;
+                      const teacherName = subject.teacherName;
+                      
+                      return (
+                        <div key={subjectId || index} style={styles.subjectTeacherCard}>
+                          <div style={styles.subjectTeacherHeader}>
+                            <div style={styles.subjectTeacherInfo}>
+                              <h4 style={styles.subjectTeacherName}>
+                                {subjectName}
+                                {subject.code && (
+                                  <span style={styles.subjectTeacherCode}> ({subject.code})</span>
+                                )}
+                              </h4>
+                              <div style={styles.subjectTeacherMeta}>
+                                <span style={styles.teacherNameBadge}>
+                                  <FiUser style={{ fontSize: '11px' }} /> {teacherName}
+                                </span>
+                              </div>
+                            </div>
+                            <div style={styles.subjectTeacherActions}>
+                              {(user.role === 'admin' || user.role === 'super_admin') && (
+                                <>
+                                  <button
+                                    style={{...styles.smallButton, ...styles.assignTeacherButton}}
+                                    onClick={() => openAssignTeacherModal(subject, showSubjectTeachersModal)}
+                                  >
+                                    <FiUserPlus /> {teacher ? 'Change Teacher' : 'Assign Teacher'}
+                                  </button>
+                                  {teacher && (
+                                    <button
+                                      style={{...styles.smallButton, ...styles.removeTeacherButton}}
+                                      onClick={() => handleRemoveTeacher(
+                                        showSubjectTeachersModal,
+                                        subjectId,
+                                        subjectName
+                                      )}
+                                    >
+                                      <FiUserX /> Remove
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  
+                  {(user.role === 'admin' || user.role === 'super_admin') && (
+                    <div style={styles.modalFooter}>
+                      <div style={styles.footerText}>
+                        <FiInfo style={{ fontSize: '12px', marginRight: '6px', color: '#4B5320' }} />
+                        Click "Assign Teacher" to assign a teacher to a subject
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Assign Teacher Modal */}
+        {showAssignTeacherModal && (
+          <div style={styles.modalOverlay}>
+            <div style={styles.modalContent}>
+              <div style={styles.modalHeader}>
+                <h2 style={styles.modalTitle}>
+                  {showAssignTeacherModal.isClassTeacher 
+                    ? 'Assign Class Teacher' 
+                    : `Assign Teacher to ${showAssignTeacherModal.subjectName || 'Subject'}`}
+                </h2>
+                <button 
+                  style={styles.closeModalButton}
+                  onClick={() => {
+                    setShowAssignTeacherModal(null);
+                    setSelectedTeacher('');
+                  }}
+                >
+                  <FiX />
+                </button>
+              </div>
+              
+              {loadingTeachers ? (
+                <div style={styles.loadingContainer}>
+                  <FiLoader style={{ animation: 'spin 1s linear infinite', fontSize: '28px', color: '#4B5320' }} />
+                  <p style={{ color: '#333', fontSize: '14px' }}>Loading teachers...</p>
+                </div>
+              ) : availableTeachers.length === 0 ? (
+                <div style={{...styles.emptyState, padding: '20px'}}>
+                  <FiUsers style={{ fontSize: '30px', color: '#666', marginBottom: '12px' }} />
+                  <h3 style={{ color: '#333', fontSize: '16px' }}>No Teachers Available</h3>
+                  <p style={{ color: '#666', fontSize: '13px' }}>No teachers found. Please create teachers first.</p>
+                </div>
+              ) : (
+                <>
+                  <div style={styles.formGroup}>
+                    <label style={styles.formLabel}>
+                      Select Teacher
+                    </label>
+                    <select
+                      value={selectedTeacher}
+                      onChange={(e) => setSelectedTeacher(e.target.value)}
+                      style={styles.formInput}
+                    >
+                      <option value="">-- Select a teacher --</option>
+                      {availableTeachers.map(teacher => (
+                        <option key={teacher.id || teacher._id} value={teacher.id || teacher._id}>
+                          {teacher.name || teacher.displayName || teacher.username}
+                          {teacher.email && ` - ${teacher.email}`}
+                        </option>
+                      ))}
+                    </select>
+                    
+                    {selectedTeacher && (
+                      <div style={styles.teacherInfoBox}>
+                        <div style={styles.teacherInfoRow}>
+                          <FiUser style={{ fontSize: '12px', color: '#4B5320' }} />
+                          <span style={{ fontSize: '12px', color: '#333', marginLeft: '5px' }}>
+                            {availableTeachers.find(t => (t.id || t._id) === selectedTeacher)?.name || ''}
+                          </span>
+                        </div>
+                        <div style={styles.teacherInfoRow}>
+                          <FiMail style={{ fontSize: '12px', color: '#4B5320' }} />
+                          <span style={{ fontSize: '12px', color: '#333', marginLeft: '5px' }}>
+                            {availableTeachers.find(t => (t.id || t._id) === selectedTeacher)?.email || 'No email'}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {!showAssignTeacherModal.isClassTeacher && showAssignTeacherModal.subjectName && (
+                    <div style={styles.formGroup}>
+                      <label style={styles.formLabel}>Subject Information</label>
+                      <div style={styles.subjectInfoBox}>
+                        <div style={styles.subjectInfoRow}>
+                          <span style={styles.subjectInfoLabel}>Subject:</span>
+                          <span style={styles.subjectInfoValue}>{showAssignTeacherModal.subjectName}</span>
+                        </div>
+                        <div style={styles.subjectInfoRow}>
+                          <span style={styles.subjectInfoLabel}>Class:</span>
+                          <span style={styles.subjectInfoValue}>{classDetails?.name || 'Unknown Class'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  <div style={styles.modalActions}>
+                    <button 
+                      style={styles.cancelButton}
+                      onClick={() => {
+                        setShowAssignTeacherModal(null);
+                        setSelectedTeacher('');
+                      }}
+                      disabled={assignTeacherLoading}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      style={styles.submitButton}
+                      onClick={() => {
+                        if (showAssignTeacherModal.isClassTeacher) {
+                          handleAssignClassTeacher(
+                            showAssignTeacherModal.classId,
+                            selectedTeacher
+                          );
+                          setShowAssignTeacherModal(null);
+                        } else {
+                          handleAssignTeacher();
+                        }
+                      }}
+                      disabled={assignTeacherLoading || !selectedTeacher}
+                    >
+                      {assignTeacherLoading ? (
+                        <>
+                          <FiLoader style={{ animation: 'spin 1s linear infinite' }} /> Assigning...
+                        </>
+                      ) : (
+                        'Assign Teacher'
+                      )}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Delete Confirmation Modal */}
+        {showDeleteModal && (
+          <div style={styles.modalOverlay}>
+            <div style={styles.modalContent}>
+              <h2 style={styles.modalTitle}>Delete Class</h2>
+              
+              <div style={styles.warningBox}>
+                <FiAlertTriangle style={styles.warningIcon} />
+                <div>
+                  <h4 style={styles.warningTitle}>Confirm Deletion</h4>
+                  <p style={styles.warningText}>
+                    Are you sure you want to delete "{showDeleteModal.name}"?
+                    This action cannot be undone. All class data including student enrollments and subject assignments will be permanently removed.
+                  </p>
+                </div>
+              </div>
+              <div style={styles.modalActions}>
+                <button 
+                  style={styles.cancelButton}
+                  onClick={() => setShowDeleteModal(null)}
+                >
+                  Cancel
+                </button>
+                <button 
+                  style={styles.deleteButton}
+                  onClick={() => handleDeleteClass(showDeleteModal.id, showDeleteModal.name)}
+                >
+                  Delete Permanently
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Create Class Modal */}
         {showCreateModal && (
           <div style={styles.modalOverlay}>
             <div style={styles.modalContent}>
               <h2 style={styles.modalTitle}>Create New Class</h2>
+              
               <form onSubmit={handleCreateClass}>
                 <div style={styles.formGroup}>
                   <label style={styles.formLabel}>Class Name *</label>
@@ -633,6 +1586,7 @@ const handleReactivateClass = async (classId) => {
                     style={styles.formInput}
                   />
                 </div>
+                
                 <div style={styles.formRow}>
                   <div style={styles.formGroup}>
                     <label style={styles.formLabel}>Short Name *</label>
@@ -659,182 +1613,66 @@ const handleReactivateClass = async (classId) => {
                     </select>
                   </div>
                 </div>
-                <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Stream (Optional)</label>
-                  <input
-                    type="text"
-                    value={newClassData.stream}
-                    onChange={(e) => setNewClassData({...newClassData, stream: e.target.value})}
-                    placeholder="e.g., Science, Arts"
-                    style={styles.formInput}
-                  />
+                
+                <div style={styles.formRow}>
+                  <div style={styles.formGroup}>
+                    <label style={styles.formLabel}>Stream (Optional)</label>
+                    <input
+                      type="text"
+                      value={newClassData.stream}
+                      onChange={(e) => setNewClassData({...newClassData, stream: e.target.value})}
+                      placeholder="e.g., SCIENCE, ARTS"
+                      style={styles.formInput}
+                    />
+                  </div>
+                  <div style={styles.formGroup}>
+                    <label style={styles.formLabel}>Section (Optional)</label>
+                    <input
+                      type="text"
+                      value={newClassData.section}
+                      onChange={(e) => setNewClassData({...newClassData, section: e.target.value})}
+                      placeholder="e.g., A, B, C"
+                      style={styles.formInput}
+                    />
+                  </div>
                 </div>
+                
                 <div style={styles.formGroup}>
                   <label style={styles.formLabel}>Capacity</label>
                   <input
                     type="number"
                     value={newClassData.capacity}
-                    onChange={(e) => setNewClassData({...newClassData, capacity: e.target.value})}
+                    onChange={(e) => setNewClassData({...newClassData, capacity: parseInt(e.target.value) || 40})}
                     min="1"
                     max="100"
                     style={styles.formInput}
                   />
                 </div>
+                
                 <div style={styles.modalActions}>
                   <button 
                     type="button" 
                     style={styles.cancelButton}
                     onClick={() => setShowCreateModal(false)}
+                    disabled={loading}
                   >
                     Cancel
                   </button>
-                  <button type="submit" style={styles.submitButton}>
-                    Create Class
+                  <button 
+                    type="submit" 
+                    style={styles.submitButton}
+                    disabled={loading || !newClassData.name || !newClassData.level || !newClassData.shortName}
+                  >
+                    {loading ? (
+                      <>
+                        <FiLoader style={{ animation: 'spin 1s linear infinite' }} /> Creating...
+                      </>
+                    ) : (
+                      'Create Class'
+                    )}
                   </button>
                 </div>
               </form>
-            </div>
-          </div>
-        )}
-
-        {/* Assign Subjects Modal */}
-        {showAssignSubjectsModal && (
-          <div style={styles.modalOverlay}>
-            <div style={styles.modalContent}>
-              <h2 style={styles.modalTitle}>Assign Subjects to Class</h2>
-              
-              <div style={styles.subjectsGrid}>
-                {loadingSubjects ? (
-                  <div style={styles.loadingSubjects}>
-                    <FiLoader style={{ animation: 'spin 1s linear infinite', fontSize: '24px' }} />
-                    <p>Loading subjects...</p>
-                  </div>
-                ) : availableSubjects.length === 0 ? (
-                  <p style={styles.noSubjects}>No subjects available.</p>
-                ) : (
-                  availableSubjects.map(subject => (
-                    <label 
-                      key={subject.id || subject._id} 
-                      style={{
-                        ...styles.subjectCheckbox,
-                        backgroundColor: selectedSubjects.includes(subject.id || subject._id) ? '#E6FFE6' : 'white',
-                        borderColor: selectedSubjects.includes(subject.id || subject._id) ? '#4B5320' : '#E0E0E0'
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedSubjects.includes(subject.id || subject._id)}
-                        onChange={() => toggleSubjectSelection(subject.id || subject._id)}
-                        style={styles.checkboxInput}
-                      />
-                      <div style={styles.subjectCheckboxContent}>
-                        <span style={styles.subjectCheckboxName}>{subject.name}</span>
-                        {subject.code && (
-                          <span style={styles.subjectCheckboxCode}>{subject.code}</span>
-                        )}
-                        {subject.category && (
-                          <span style={styles.subjectCheckboxCategory}>{subject.category}</span>
-                        )}
-                      </div>
-                    </label>
-                  ))
-                )}
-              </div>
-              
-              <div style={styles.selectedSubjectsInfo}>
-                <p>Selected: {selectedSubjects.length} subjects</p>
-              </div>
-              
-              <div style={styles.modalActions}>
-                <button 
-                  style={styles.cancelButton}
-                  onClick={() => setShowAssignSubjectsModal(null)}
-                  disabled={assignSubjectsLoading}
-                >
-                  Cancel
-                </button>
-                <button
-                  style={styles.submitButton}
-                  onClick={() => handleAssignSubjects(showAssignSubjectsModal)}
-                  disabled={assignSubjectsLoading || selectedSubjects.length === 0}
-                >
-                  {assignSubjectsLoading ? (
-                    <>
-                      <FiLoader style={{ animation: 'spin 1s linear infinite' }} /> Assigning...
-                    </>
-                  ) : (
-                    'Assign Selected Subjects'
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Delete/Deactivate Confirmation Modal */}
-        {showDeleteModal && (
-          <div style={styles.modalOverlay}>
-            <div style={styles.modalContent}>
-              <h2 style={styles.modalTitle}>
-                {showDeleteModal.type === 'delete' ? 'Delete Class' : 'Deactivate Class'}
-              </h2>
-              
-              {showDeleteModal.type === 'delete' ? (
-                <>
-                  <div style={styles.warningBox}>
-                    <FiAlertTriangle style={styles.warningIcon} />
-                    <div>
-                      <h4 style={styles.warningTitle}>Warning: Permanent Deletion</h4>
-                      <p style={styles.warningText}>
-                        Are you sure you want to permanently delete "{showDeleteModal.name}"?
-                        This action will remove the class record but may fail if there are associated students or results.
-                      </p>
-                    </div>
-                  </div>
-                  <div style={styles.modalActions}>
-                    <button 
-                      style={styles.cancelButton}
-                      onClick={() => setShowDeleteModal(null)}
-                    >
-                      Cancel
-                    </button>
-                    <button 
-                      style={styles.deleteButton}
-                      onClick={() => handleDeleteClass(showDeleteModal.id, showDeleteModal.name)}
-                    >
-                      Yes, Delete Permanently
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div style={styles.infoBox}>
-                    <FiAlertTriangle style={styles.infoIcon} />
-                    <div>
-                      <h4 style={styles.infoTitle}>Deactivate Class</h4>
-                      <p style={styles.infoText}>
-                        Are you sure you want to deactivate "{showDeleteModal.name}"?
-                        Deactivating will make the class inactive but preserve all data.
-                        You can reactivate it later.
-                      </p>
-                    </div>
-                  </div>
-                  <div style={styles.modalActions}>
-                    <button 
-                      style={styles.cancelButton}
-                      onClick={() => setShowDeleteModal(null)}
-                    >
-                      Cancel
-                    </button>
-                    <button 
-                      style={styles.deactivateButton}
-                      onClick={() => handleDeactivateClass(showDeleteModal.id, showDeleteModal.name)}
-                    >
-                      Yes, Deactivate
-                    </button>
-                  </div>
-                </>
-              )}
             </div>
           </div>
         )}
@@ -851,50 +1689,72 @@ const styles = {
   main: {
     maxWidth: '1200px',
     margin: '0 auto',
-    padding: '20px'
+    padding: '15px'
   },
   header: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '30px',
+    marginBottom: '25px',
     flexWrap: 'wrap',
-    gap: '20px'
+    gap: '15px'
+  },
+  headerActions: {
+    display: 'flex',
+    gap: '10px',
+    flexWrap: 'wrap'
   },
   title: {
-    fontSize: '32px',
+    fontSize: '26px',
     fontWeight: '700',
     color: '#4B5320',
     margin: '0 0 5px 0'
   },
   subtitle: {
-    fontSize: '16px',
-    color: '#666',
+    fontSize: '14px',
+    color: '#333',
     margin: '0'
   },
   createButton: {
     backgroundColor: '#4B5320',
     color: 'white',
     border: 'none',
-    borderRadius: '8px',
-    padding: '12px 24px',
-    fontSize: '16px',
+    borderRadius: '6px',
+    padding: '10px 18px',
+    fontSize: '14px',
     fontWeight: '600',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
+    gap: '6px',
     transition: 'all 0.3s ease',
     boxShadow: '0 2px 4px rgba(75, 83, 32, 0.2)',
     ':hover': {
       backgroundColor: '#3A4220',
-      transform: 'translateY(-2px)'
+      transform: 'translateY(-1px)'
+    }
+  },
+  refreshButton: {
+    backgroundColor: '#E0E0E0',
+    color: '#333',
+    border: 'none',
+    borderRadius: '6px',
+    padding: '10px 16px',
+    fontSize: '14px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    transition: 'all 0.3s ease',
+    ':hover': {
+      backgroundColor: '#D0D0D0'
     }
   },
   filtersContainer: {
     display: 'flex',
-    gap: '15px',
-    marginBottom: '30px',
+    gap: '12px',
+    marginBottom: '25px',
     flexWrap: 'wrap',
     alignItems: 'center'
   },
@@ -905,68 +1765,55 @@ const styles = {
   },
   searchIcon: {
     position: 'absolute',
-    left: '12px',
+    left: '10px',
     top: '50%',
     transform: 'translateY(-50%)',
-    color: '#666'
+    color: '#666',
+    fontSize: '16px'
   },
   searchInput: {
     width: '100%',
-    padding: '12px 12px 12px 40px',
-    borderRadius: '8px',
+    padding: '10px 10px 10px 35px',
+    borderRadius: '6px',
     border: '1px solid #DDD',
-    fontSize: '16px',
+    fontSize: '14px',
     backgroundColor: 'white',
-    boxSizing: 'border-box'
+    color: '#333',
+    boxSizing: 'border-box',
+    '::placeholder': {
+      color: '#999',
+      fontSize: '13px'
+    }
   },
   filterSelect: {
-    padding: '12px 15px',
-    borderRadius: '8px',
+    padding: '10px 12px',
+    borderRadius: '6px',
     border: '1px solid #DDD',
-    fontSize: '16px',
+    fontSize: '14px',
     backgroundColor: 'white',
     color: '#333',
-    minWidth: '150px'
-  },
-  refreshButton: {
-    backgroundColor: '#E0E0E0',
-    color: '#333',
-    border: 'none',
-    borderRadius: '8px',
-    padding: '12px 20px',
-    fontSize: '16px',
-    fontWeight: '600',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    transition: 'all 0.3s ease',
-    ':hover': {
-      backgroundColor: '#D0D0D0'
-    }
+    minWidth: '140px'
   },
   errorMessage: {
     backgroundColor: '#FFE6E6',
     color: '#B22222',
-    padding: '15px',
-    borderRadius: '8px',
-    marginBottom: '20px',
+    padding: '12px 15px',
+    borderRadius: '6px',
+    marginBottom: '15px',
     display: 'flex',
     alignItems: 'center',
-    gap: '10px',
-    fontSize: '16px',
+    gap: '8px',
     position: 'relative'
   },
   successMessage: {
     backgroundColor: '#E6FFE6',
     color: '#228B22',
-    padding: '15px',
-    borderRadius: '8px',
-    marginBottom: '20px',
+    padding: '12px 15px',
+    borderRadius: '6px',
+    marginBottom: '15px',
     display: 'flex',
     alignItems: 'center',
-    gap: '10px',
-    fontSize: '16px',
+    gap: '8px',
     position: 'relative'
   },
   closeMessageButton: {
@@ -975,7 +1822,7 @@ const styles = {
     color: 'inherit',
     cursor: 'pointer',
     marginLeft: 'auto',
-    fontSize: '18px',
+    fontSize: '16px',
     padding: '0'
   },
   loadingContainer: {
@@ -983,48 +1830,48 @@ const styles = {
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '60px 20px'
+    padding: '50px 15px'
   },
   loadingSpinner: {
-    width: '50px',
-    height: '50px',
-    border: '4px solid #E0E0E0',
-    borderTop: '4px solid #4B5320',
+    width: '40px',
+    height: '40px',
+    border: '3px solid #E0E0E0',
+    borderTop: '3px solid #4B5320',
     borderRadius: '50%',
     animation: 'spin 1s linear infinite',
-    marginBottom: '20px'
+    marginBottom: '15px'
   },
   emptyState: {
     textAlign: 'center',
-    padding: '60px 20px',
+    padding: '50px 15px',
     backgroundColor: 'white',
-    borderRadius: '12px',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+    borderRadius: '10px',
+    boxShadow: '0 2px 6px rgba(0,0,0,0.1)'
   },
   emptyIcon: {
-    fontSize: '64px',
+    fontSize: '52px',
     color: '#4B5320',
-    marginBottom: '20px',
+    marginBottom: '15px',
     opacity: '0.5'
   },
   classesGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))',
-    gap: '20px'
+    gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
+    gap: '15px'
   },
   classCard: {
     backgroundColor: 'white',
-    borderRadius: '12px',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+    borderRadius: '10px',
+    boxShadow: '0 2px 6px rgba(0,0,0,0.1)',
     overflow: 'hidden',
     transition: 'all 0.3s ease',
     ':hover': {
-      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-      transform: 'translateY(-2px)'
+      boxShadow: '0 3px 10px rgba(0,0,0,0.15)',
+      transform: 'translateY(-1px)'
     }
   },
   classHeader: {
-    padding: '20px',
+    padding: '15px',
     cursor: 'pointer',
     display: 'flex',
     justifyContent: 'space-between',
@@ -1036,94 +1883,154 @@ const styles = {
     flex: '1'
   },
   className: {
-    fontSize: '20px',
+    fontSize: '18px',
     fontWeight: '600',
     color: '#4B5320',
-    margin: '0 0 8px 0'
+    margin: '0 0 6px 0'
   },
   classMeta: {
     display: 'flex',
-    gap: '15px',
+    gap: '8px',
     alignItems: 'center',
     flexWrap: 'wrap'
   },
   classShortName: {
     backgroundColor: '#4B5320',
     color: 'white',
-    padding: '4px 12px',
-    borderRadius: '20px',
-    fontSize: '14px',
+    padding: '3px 10px',
+    borderRadius: '15px',
+    fontSize: '12px',
     fontWeight: '600'
   },
   classStat: {
     display: 'flex',
     alignItems: 'center',
-    gap: '5px',
-    fontSize: '14px',
-    color: '#666'
+    gap: '4px',
+    fontSize: '12px',
+    color: '#333'
+  },
+  utilizationBadge: {
+    padding: '3px 8px',
+    borderRadius: '10px',
+    fontSize: '11px',
+    fontWeight: '600'
   },
   expandButton: {
     background: 'none',
     border: 'none',
     cursor: 'pointer',
-    fontSize: '20px',
+    fontSize: '18px',
     color: '#4B5320',
-    padding: '5px'
+    padding: '4px',
+    borderRadius: '4px',
+    ':hover': {
+      backgroundColor: '#F0F0F0'
+    }
   },
   classDetails: {
-    padding: '20px',
+    padding: '15px',
     backgroundColor: 'white'
   },
   detailRow: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '12px',
-    paddingBottom: '12px',
+    marginBottom: '10px',
+    paddingBottom: '10px',
     borderBottom: '1px solid #F0F0F0'
   },
   detailLabel: {
     fontWeight: '600',
-    color: '#666',
-    fontSize: '14px'
+    color: '#333',
+    fontSize: '13px'
   },
   detailValue: {
     color: '#333',
-    fontSize: '14px'
+    fontSize: '13px',
+    fontWeight: '500'
+  },
+  teacherInfo: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
+  },
+  teacherActions: {
+    display: 'flex',
+    gap: '4px'
+  },
+  smallButton: {
+    padding: '3px 6px',
+    border: 'none',
+    borderRadius: '4px',
+    fontSize: '11px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '3px',
+    transition: 'all 0.3s ease'
+  },
+  assignTeacherButton: {
+    backgroundColor: '#4B5320',
+    color: 'white',
+    ':hover': {
+      backgroundColor: '#3A4220'
+    }
+  },
+  removeTeacherButton: {
+    backgroundColor: '#B22222',
+    color: 'white',
+    ':hover': {
+      backgroundColor: '#9A1F1F'
+    }
   },
   statusBadge: {
-    padding: '4px 12px',
-    borderRadius: '20px',
-    fontSize: '12px',
+    padding: '3px 10px',
+    borderRadius: '15px',
+    fontSize: '11px',
     fontWeight: '600',
     textTransform: 'uppercase'
   },
   classActions: {
     display: 'flex',
     flexWrap: 'wrap',
-    gap: '10px',
-    marginTop: '20px'
+    gap: '6px',
+    marginTop: '15px'
   },
   actionButton: {
     flex: '1',
-    minWidth: '120px',
-    padding: '10px 15px',
+    minWidth: '100px',
+    padding: '6px 10px',
     border: 'none',
-    borderRadius: '6px',
-    fontSize: '14px',
+    borderRadius: '5px',
+    fontSize: '12px',
     fontWeight: '600',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: '8px',
+    gap: '5px',
     transition: 'all 0.3s ease'
   },
   viewButton: {
-    backgroundColor: '#E0E0E0',
-    color: '#333',
+    backgroundColor: '#4B5320',
+    color: 'white',
     ':hover': {
-      backgroundColor: '#D0D0D0'
+      backgroundColor: '#3A4220'
+    }
+  },
+  viewStudentsButton: {
+    backgroundColor: '#4B5320',
+    color: 'white',
+    ':hover': {
+      backgroundColor: '#3A4220'
+    }
+  },
+  manageSubjectsButton: {
+    backgroundColor: '#4B5320',
+    color: 'white',
+    ':hover': {
+      backgroundColor: '#3A4220'
     }
   },
   editButton: {
@@ -1140,34 +2047,6 @@ const styles = {
       backgroundColor: '#9A1F1F'
     }
   },
-  deactivateButton: {
-    backgroundColor: '#D4A017',
-    color: 'white',
-    ':hover': {
-      backgroundColor: '#B68A14'
-    }
-  },
-  hardDeleteButton: {
-    backgroundColor: '#8B0000',
-    color: 'white',
-    ':hover': {
-      backgroundColor: '#6B0000'
-    }
-  },
-  reactivateButton: {
-    backgroundColor: '#228B22',
-    color: 'white',
-    ':hover': {
-      backgroundColor: '#1A7A1A'
-    }
-  },
-  assignSubjectsButton: {
-    backgroundColor: '#4B5320',
-    color: 'white',
-    ':hover': {
-      backgroundColor: '#3A4220'
-    }
-  },
   modalOverlay: {
     position: 'fixed',
     top: '0',
@@ -1179,60 +2058,207 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: '1000',
-    padding: '20px'
+    padding: '15px'
   },
   modalContent: {
     backgroundColor: 'white',
-    borderRadius: '12px',
-    padding: '30px',
-    maxWidth: '500px',
+    borderRadius: '10px',
+    padding: '25px',
     width: '100%',
     maxHeight: '90vh',
-    overflowY: 'auto'
+    overflowY: 'auto',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
+  },
+  modalHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: '15px'
   },
   modalTitle: {
-    fontSize: '24px',
+    fontSize: '20px',
     fontWeight: '700',
     color: '#4B5320',
-    margin: '0 0 20px 0'
+    margin: '0'
+  },
+  closeModalButton: {
+    background: 'none',
+    border: 'none',
+    fontSize: '20px',
+    color: '#666',
+    cursor: 'pointer',
+    padding: '4px',
+    borderRadius: '4px',
+    ':hover': {
+      backgroundColor: '#F0F0F0'
+    }
+  },
+  statsBar: {
+    display: 'flex',
+    gap: '15px',
+    marginBottom: '20px',
+    padding: '12px',
+    backgroundColor: '#F8F9FA',
+    borderRadius: '6px',
+    border: '1px solid #E0E0E0'
+  },
+  statItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontWeight: '600'
+  },
+  studentsTableContainer: {
+    overflowX: 'auto',
+    marginBottom: '15px',
+    borderRadius: '6px',
+    border: '1px solid #E0E0E0'
+  },
+  studentsTable: {
+    width: '100%',
+    borderCollapse: 'collapse'
+  },
+  tableHeader: {
+    backgroundColor: '#4B5320',
+    color: 'white',
+    padding: '10px',
+    textAlign: 'left',
+    fontWeight: '600',
+    fontSize: '13px',
+    position: 'sticky',
+    top: '0',
+    borderBottom: '1px solid #E0E0E0'
+  },
+  tableRow: {
+    borderBottom: '1px solid #E0E0E0',
+    ':hover': {
+      backgroundColor: '#F8F9FA'
+    }
+  },
+  tableCell: {
+    padding: '10px',
+    fontSize: '13px',
+    color: '#333'
+  },
+  studentCell: {
+    display: 'flex',
+    alignItems: 'center'
+  },
+  subjectTeachersContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
+    marginBottom: '15px',
+    maxHeight: '400px',
+    overflowY: 'auto',
+    padding: '5px'
+  },
+  subjectTeacherCard: {
+    backgroundColor: 'white',
+    borderRadius: '8px',
+    border: '1px solid #E0E0E0',
+    overflow: 'hidden',
+    transition: 'all 0.3s ease'
+  },
+  subjectTeacherHeader: {
+    padding: '12px 15px',
+    backgroundColor: '#F8F9FA',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderBottom: '1px solid #E0E0E0'
+  },
+  subjectTeacherInfo: {
+    flex: '1'
+  },
+  subjectTeacherName: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#333',
+    margin: '0 0 6px 0'
+  },
+  subjectTeacherCode: {
+    fontSize: '12px',
+    color: '#666',
+    fontWeight: 'normal'
+  },
+  subjectTeacherMeta: {
+    display: 'flex',
+    gap: '8px',
+    alignItems: 'center'
+  },
+  teacherNameBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '3px',
+    padding: '2px 8px',
+    backgroundColor: '#E6F4FF',
+    color: '#0066CC',
+    borderRadius: '10px',
+    fontSize: '11px',
+    fontWeight: '500'
+  },
+  subjectTeacherActions: {
+    display: 'flex',
+    gap: '8px'
+  },
+  modalFooter: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: '15px',
+    paddingTop: '15px',
+    borderTop: '1px solid #E0E0E0'
+  },
+  footerText: {
+    fontSize: '13px',
+    color: '#333',
+    fontWeight: '500',
+    display: 'flex',
+    alignItems: 'center'
   },
   formGroup: {
-    marginBottom: '20px'
+    marginBottom: '15px'
   },
   formLabel: {
     display: 'block',
-    marginBottom: '8px',
+    marginBottom: '6px',
     fontWeight: '600',
     color: '#333',
-    fontSize: '14px'
+    fontSize: '13px'
   },
   formInput: {
     width: '100%',
-    padding: '12px 15px',
-    borderRadius: '8px',
+    padding: '10px 12px',
+    borderRadius: '6px',
     border: '1px solid #DDD',
-    fontSize: '16px',
+    fontSize: '14px',
     backgroundColor: 'white',
-    boxSizing: 'border-box'
+    color: '#333',
+    boxSizing: 'border-box',
+    '::placeholder': {
+      color: '#999',
+      fontSize: '13px'
+    }
   },
   formRow: {
     display: 'grid',
     gridTemplateColumns: '1fr 1fr',
-    gap: '15px'
+    gap: '12px'
   },
   modalActions: {
     display: 'flex',
-    gap: '15px',
-    marginTop: '30px'
+    gap: '12px',
+    marginTop: '20px'
   },
   cancelButton: {
     flex: '1',
     backgroundColor: '#E0E0E0',
     color: '#333',
     border: 'none',
-    borderRadius: '8px',
-    padding: '12px',
-    fontSize: '16px',
+    borderRadius: '6px',
+    padding: '10px',
+    fontSize: '14px',
     fontWeight: '600',
     cursor: 'pointer',
     transition: 'all 0.3s ease',
@@ -1245,200 +2271,246 @@ const styles = {
     backgroundColor: '#4B5320',
     color: 'white',
     border: 'none',
-    borderRadius: '8px',
-    padding: '12px',
-    fontSize: '16px',
+    borderRadius: '6px',
+    padding: '10px',
+    fontSize: '14px',
     fontWeight: '600',
     cursor: 'pointer',
     transition: 'all 0.3s ease',
     ':hover': {
       backgroundColor: '#3A4220'
+    },
+    ':disabled': {
+      backgroundColor: '#CCCCCC',
+      cursor: 'not-allowed'
+    }
+  },
+  deleteButton: {
+    flex: '1',
+    backgroundColor: '#B22222',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    padding: '10px',
+    fontSize: '14px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.3s ease',
+    ':hover': {
+      backgroundColor: '#9A1F1F'
     }
   },
   warningBox: {
-    backgroundColor: '#FFF3CD',
-    border: '1px solid #D4A017',
-    borderRadius: '8px',
-    padding: '15px',
-    marginBottom: '20px',
+    backgroundColor: '#FFE6E6',
+    border: '1px solid #B22222',
+    borderRadius: '6px',
+    padding: '12px',
+    marginBottom: '15px',
     display: 'flex',
     alignItems: 'flex-start',
-    gap: '10px'
-  },
-  infoBox: {
-    backgroundColor: '#E6F4FF',
-    border: '1px solid #4B5320',
-    borderRadius: '8px',
-    padding: '15px',
-    marginBottom: '20px',
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: '10px'
+    gap: '8px'
   },
   warningIcon: {
-    color: '#D4A017',
-    fontSize: '24px',
-    marginTop: '2px'
-  },
-  infoIcon: {
-    color: '#4B5320',
-    fontSize: '24px',
+    color: '#B22222',
+    fontSize: '20px',
     marginTop: '2px'
   },
   warningTitle: {
-    color: '#D4A017',
-    margin: '0 0 8px 0',
-    fontSize: '16px',
-    fontWeight: '600'
-  },
-  infoTitle: {
-    color: '#4B5320',
-    margin: '0 0 8px 0',
-    fontSize: '16px',
+    color: '#B22222',
+    margin: '0 0 6px 0',
+    fontSize: '14px',
     fontWeight: '600'
   },
   warningText: {
     color: '#333',
     margin: '0',
-    fontSize: '14px',
-    lineHeight: '1.5'
-  },
-  infoText: {
-    color: '#333',
-    margin: '0',
-    fontSize: '14px',
-    lineHeight: '1.5'
-  },
-  authRequiredContainer: {
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    minHeight: '50vh'
+    fontSize: '13px',
+    lineHeight: '1.4'
   },
   authErrorMessage: {
     backgroundColor: '#FFF3CD',
-    color: '#D4A017',
-    padding: '20px',
-    borderRadius: '8px',
+    color: '#333',
+    padding: '15px',
+    borderRadius: '6px',
     display: 'flex',
     alignItems: 'center',
-    gap: '15px',
-    maxWidth: '400px'
+    gap: '12px',
+    maxWidth: '400px',
+    border: '1px solid #D4A017'
   },
   errorIcon: {
-    fontSize: '24px'
+    fontSize: '20px',
+    color: '#D4A017'
   },
-  
-  // Subject assignment styles
-  subjectAssignments: {
-    margin: '15px 0',
+  teacherInfoBox: {
+    backgroundColor: '#F8F9FA',
+    borderRadius: '6px',
+    padding: '10px',
+    marginTop: '10px',
+    border: '1px solid #E0E0E0'
+  },
+  teacherInfoRow: {
+    display: 'flex',
+    alignItems: 'center',
+    marginBottom: '5px',
+    ':last-child': {
+      marginBottom: '0'
+    }
+  },
+  subjectInfoBox: {
+    backgroundColor: '#F8F9FA',
+    borderRadius: '6px',
+    padding: '10px',
+    border: '1px solid #E0E0E0'
+  },
+  subjectInfoRow: {
+    display: 'flex',
+    marginBottom: '5px',
+    ':last-child': {
+      marginBottom: '0'
+    }
+  },
+  subjectInfoLabel: {
+    fontWeight: '600',
+    color: '#333',
+    fontSize: '12px',
+    width: '80px'
+  },
+  subjectInfoValue: {
+    color: '#333',
+    fontSize: '12px',
+    flex: '1'
+  },
+  // New styles for class details modal
+  section: {
+    marginBottom: '20px',
     padding: '15px',
     backgroundColor: '#F8F9FA',
-    borderRadius: '8px'
+    borderRadius: '6px',
+    border: '1px solid #E0E0E0'
+  },
+  sectionHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '15px'
   },
   sectionTitle: {
     fontSize: '16px',
     fontWeight: '600',
     color: '#4B5320',
-    margin: '0 0 10px 0'
+    margin: '0'
   },
-  subjectList: {
+  infoGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+    gap: '12px'
+  },
+  infoItem: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '8px'
+    gap: '3px'
   },
-  subjectItem: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '8px 12px',
-    backgroundColor: 'white',
-    borderRadius: '6px',
-    border: '1px solid #E0E0E0'
-  },
-  subjectName: {
-    flex: '1',
+  infoLabel: {
+    fontSize: '12px',
+    color: '#666',
     fontWeight: '500'
   },
-  coreBadge: {
-    padding: '3px 8px',
-    backgroundColor: '#E6FFE6',
-    color: '#228B22',
-    borderRadius: '12px',
-    fontSize: '12px',
-    marginLeft: '10px'
+  infoValue: {
+    fontSize: '13px',
+    color: '#333',
+    fontWeight: '600'
   },
-  removeSubjectButton: {
-    background: 'none',
+  assignButton: {
+    backgroundColor: '#4B5320',
+    color: 'white',
     border: 'none',
-    color: '#B22222',
+    borderRadius: '5px',
+    padding: '6px 12px',
+    fontSize: '12px',
+    fontWeight: '600',
     cursor: 'pointer',
-    fontSize: '16px',
-    padding: '4px',
-    borderRadius: '4px',
-    marginLeft: '10px'
+    display: 'flex',
+    alignItems: 'center',
+    gap: '5px',
+    transition: 'all 0.3s ease',
+    ':hover': {
+      backgroundColor: '#3A4220'
+    }
   },
   subjectsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-    gap: '12px',
-    maxHeight: '400px',
-    overflowY: 'auto',
-    padding: '15px',
-    backgroundColor: '#F8F9FA',
-    borderRadius: '8px',
-    margin: '20px 0'
+    gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
+    gap: '12px'
   },
-  subjectCheckbox: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    padding: '12px',
+  subjectCard: {
     backgroundColor: 'white',
-    border: '2px solid #E0E0E0',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    transition: 'all 0.2s'
+    borderRadius: '6px',
+    padding: '12px',
+    border: '1px solid #E0E0E0',
+    transition: 'all 0.3s ease',
+    ':hover': {
+      boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+    }
   },
-  checkboxInput: {
-    marginRight: '10px',
-    marginTop: '3px'
-  },
-  subjectCheckboxContent: {
+  subjectHeader: {
     display: 'flex',
-    flexDirection: 'column',
-    gap: '4px'
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: '10px'
   },
-  subjectCheckboxName: {
+  subjectName: {
+    fontSize: '14px',
     fontWeight: '600',
-    fontSize: '14px'
+    color: '#333',
+    margin: '0'
   },
-  subjectCheckboxCode: {
+  subjectCode: {
     fontSize: '12px',
-    color: '#666'
-  },
-  subjectCheckboxCategory: {
-    fontSize: '11px',
-    color: '#999',
-    textTransform: 'uppercase'
-  },
-  loadingSubjects: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '40px',
-    gridColumn: '1 / -1'
-  },
-  noSubjects: {
-    textAlign: 'center',
     color: '#666',
-    gridColumn: '1 / -1'
+    fontWeight: 'normal'
   },
-  selectedSubjectsInfo: {
-    textAlign: 'center',
-    marginBottom: '20px',
-    fontWeight: '500',
-    color: '#4B5320'
+  teacherStatus: {
+    padding: '2px 8px',
+    borderRadius: '10px',
+    fontSize: '11px',
+    fontWeight: '600'
+  },
+  subjectDetails: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  subjectInfo: {
+    flex: '1'
+  },
+  subjectInfoLabel: {
+    fontSize: '11px',
+    color: '#666',
+    display: 'block'
+  },
+  subjectInfoValue: {
+    fontSize: '12px',
+    color: '#333',
+    fontWeight: '600'
+  },
+  subjectActions: {
+    display: 'flex',
+    gap: '5px'
+  },
+  changeTeacherButton: {
+    backgroundColor: '#4B5320',
+    color: 'white',
+    padding: '3px 8px',
+    fontSize: '11px',
+    ':hover': {
+      backgroundColor: '#3A4220'
+    }
+  },
+  actionButtons: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '10px'
   }
 };
 

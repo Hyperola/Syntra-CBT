@@ -11,7 +11,7 @@ import EditResults from './pages/EditResults';
 import ClassSubjectsManager from './pages/ClassSubjectsManager';
 import ClassDetails from './pages/ClassDetails';
 import EditClass from './pages/EditClass';
-import Analytics from './components/teacher/Analytics'; // Teacher analytics
+import TeacherAnalytics from './components/teacher/TeacherAnalytics'; 
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider } from './context/AuthContext';
 import AdminLayout from './components/AdminLayout';
@@ -35,12 +35,20 @@ import PromotionPanel from './components/PromotionPanel/PromotionPanel';
 import UserProfile from './pages/UserProfile';
 import AdminScheduling from './pages/AdminScheduling';
 
+// Import the UserDetails component for viewing user details
+import UserDetails from './pages/UserDetails';
+// Import the EditUser component for editing users
+import EditUser from './pages/EditUser';
+
 // Teacher-specific components
 import TestCreation from './pages/TestCreation';
 import AddTestQuestions from './components/teacher/AddTestQuestions';
 
 // Add the Mock Tests component
 import MockTests from './pages/MockTests';
+
+// IMPORT THE NEW PREVIEW TEST COMPONENT
+import PreviewTest from './pages/PreviewTest';
 
 // ADD THIS IMPORT - Make sure the path is correct
 import AnalyticsPage from './pages/AnalyticsPage'; // Admin analytics page
@@ -169,13 +177,14 @@ const AppContent = () => {
         
         {/* Teacher Analytics route (keep this for teachers) */}
         <Route
-          path="/teacher/analytics"
-          element={
-            <ProtectedRoute requiredRole="teacher">
-              <TeacherHome><Analytics /></TeacherHome>
-            </ProtectedRoute>
-          }
-        />
+  path="/teacher/analytics"
+  element={
+    <ProtectedRoute requiredRole="teacher">
+      <TeacherHome><TeacherAnalytics /></TeacherHome> {/* Updated component */}
+    </ProtectedRoute>
+  }
+/>
+
         
         {/* Admin routes */}
         <Route
@@ -292,9 +301,29 @@ const AppContent = () => {
           }
         />
         
-        {/* User profile route - MUST come AFTER create routes */}
+        {/* User Details Route - This is the route for viewing user details */}
         <Route
           path="/admin/users/:userId"
+          element={
+            <ProtectedRoute requiredRoles={['admin', 'super_admin']}>
+              <AdminLayout><UserDetails /></AdminLayout>
+            </ProtectedRoute>
+          }
+        />
+        
+        {/* User Edit Route (for editing other users) - NEW ROUTE */}
+        <Route
+          path="/admin/users/edit/:userId"
+          element={
+            <ProtectedRoute requiredRoles={['admin', 'super_admin', 'teacher']}>
+              <AdminLayout><EditUser /></AdminLayout>
+            </ProtectedRoute>
+          }
+        />
+        
+        {/* User Profile Route (for editing own profile) */}
+        <Route
+          path="/admin/profile"
           element={
             <ProtectedRoute requiredRoles={['admin', 'super_admin']}>
               <AdminLayout><UserProfile /></AdminLayout>
@@ -311,14 +340,17 @@ const AppContent = () => {
             </ProtectedRoute>
           }
         />
+        
+        {/* NEW: Preview Test Route */}
         <Route
-          path="/admin/tests/:testId"
+          path="/admin/tests/:testId/preview"
           element={
-            <ProtectedRoute requiredRoles={['admin', 'super_admin']}>
-              <AdminLayout><TestDetails /></AdminLayout>
+            <ProtectedRoute requiredRoles={['admin', 'super_admin', 'teacher']}>
+              <AdminLayout><PreviewTest /></AdminLayout>
             </ProtectedRoute>
           }
         />
+        
         <Route
           path="/admin/tests/:testId/batch"
           element={
@@ -328,7 +360,7 @@ const AppContent = () => {
           }
         />
         
-        {/* ADDED: Test Scheduling Route */}
+        {/* Test Scheduling Route */}
         <Route
           path="/admin/tests/:testId/schedule"
           element={
@@ -376,7 +408,7 @@ const AppContent = () => {
           }
         />
         
-        {/* CHANGED: Admin Analytics Route - Use AnalyticsPage instead of Analytics */}
+        {/* Admin Analytics Route */}
         <Route
           path="/admin/analytics"
           element={

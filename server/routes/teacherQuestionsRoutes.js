@@ -65,7 +65,7 @@ router.get('/teacher/questions', auth, validateTeacherAccess, async (req, res) =
     console.log('📚 GET /api/teacher/questions - Teacher:', req.user.username);
     
     // Get query parameters
-    const { subject, class: classId, search, page = 1, limit = 20 } = req.query;
+    const { subject, class: classId, search, page = 1, limit = 500 } = req.query;
     const skip = (page - 1) * limit;
     
     // Build filter

@@ -1,10 +1,11 @@
-// routes/classes.js - COMPLETE FIXED VERSION
+// routes/classes.js - COMPLETE UPDATED VERSION WITH PROPER STUDENT COUNTING
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const Class = require('../models/Class');
 const User = require('../models/User');
 const Subject = require('../models/Subject');
+const ClassSubject = require('../models/ClassSubject');
 const { auth } = require('../middleware/auth');
 const { adminOnly, adminOrSuperAdmin } = require('../middleware/auth');
 const { checkPermission } = require('../middleware/permissions');
@@ -36,7 +37,7 @@ const validateObjectId = (req, res, next) => {
 };
 
 // Helper function to format class response
-const formatClassResponse = (classData) => {
+const formatClassResponse = (classData, studentCount = 0) => {
   if (!classData) return null;
   
   return {
@@ -46,12 +47,15 @@ const formatClassResponse = (classData) => {
     shortName: classData.shortName,
     level: classData.level,
     stream: classData.stream || '',
-    fullName: classData.fullName || `${classData.name} ${classData.stream ? `(${classData.stream})` : ''}`.trim(),
+    section: classData.section || '',
+    fullName: classData.fullName || 
+      `${classData.level}${classData.stream ? ` ${classData.stream}` : ''}${classData.section ? ` (${classData.section})` : ''}`.trim(),
     capacity: classData.capacity,
     classTeacher: classData.classTeacher ? {
       id: classData.classTeacher._id,
-      name: `${classData.classTeacher.firstName || ''} ${classData.classTeacher.lastName || ''}`.trim(),
-      email: classData.classTeacher.email
+      name: `${classData.classTeacher.firstName || classData.classTeacher.name || ''} ${classData.classTeacher.lastName || classData.classTeacher.surname || ''}`.trim(),
+      email: classData.classTeacher.email,
+      username: classData.classTeacher.username
     } : null,
     subjectAssignments: Array.isArray(classData.subjectAssignments) ? classData.subjectAssignments.map(assignment => ({
       id: assignment._id,
@@ -66,7 +70,7 @@ const formatClassResponse = (classData) => {
       periodCount: assignment.periodCount || 1,
       displayOrder: assignment.displayOrder || 0
     })) : [],
-    studentCount: Array.isArray(classData.students) ? classData.students.length : 0,
+    studentCount: studentCount,
     subjectCount: Array.isArray(classData.subjectAssignments) ? classData.subjectAssignments.length : 0,
     isActive: classData.isActive !== false,
     displayOrder: classData.displayOrder || 0,
@@ -77,11 +81,24 @@ const formatClassResponse = (classData) => {
 };
 
 // ──────────────────────────────────────────────────────────────
-// 1. GET all classes with subject assignments
+// 0. TEST CONNECTION ROUTE
+// ──────────────────────────────────────────────────────────────
+router.get('/test-connection', (req, res) => {
+  console.log('✅ GET /api/classes/test-connection - Connection test');
+  res.json({
+    success: true,
+    message: 'Classes route is working',
+    timestamp: new Date().toISOString(),
+    database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'
+  });
+});
+
+// ──────────────────────────────────────────────────────────────
+// 1. GET all classes with REAL student counts - UPDATED
 // ──────────────────────────────────────────────────────────────
 router.get('/', auth, async (req, res) => {
   try {
-    console.log('🏫 GET /api/classes - Fetching all classes');
+    console.log('🏫 GET /api/classes - Fetching all classes with student counts');
     
     // Get query parameters
     const { limit = 50, page = 1, level, isActive = 'true', search } = req.query;
@@ -97,18 +114,19 @@ router.get('/', auth, async (req, res) => {
         { name: { $regex: search, $options: 'i' } },
         { shortName: { $regex: search, $options: 'i' } },
         { level: { $regex: search, $options: 'i' } },
-        { stream: { $regex: search, $options: 'i' } }
+        { stream: { $regex: search, $options: 'i' } },
+        { section: { $regex: search, $options: 'i' } }
       ];
     }
     
     // Get total count
     const totalClasses = await Class.countDocuments(filter);
     
-    // Fetch classes
+    // Fetch classes with basic population
     const classes = await Class.find(filter)
       .populate({
         path: 'classTeacher',
-        select: 'firstName lastName email username',
+        select: 'firstName lastName name surname email username',
         model: 'User'
       })
       .populate({
@@ -123,7 +141,41 @@ router.get('/', auth, async (req, res) => {
 
     console.log(`🏫 Found ${classes.length} classes`);
 
-    const result = classes.map(formatClassResponse);
+    // Get student counts for each class
+    const classesWithStudentCounts = await Promise.all(
+      classes.map(async (classData) => {
+        // Count students in this class from User collection
+        const studentCount = await User.countDocuments({
+          class: classData._id,
+          role: 'student',
+          active: true
+        }).maxTimeMS(5000);
+
+        // Also get a few sample students for preview
+        const sampleStudents = await User.find({
+          class: classData._id,
+          role: 'student',
+          active: true
+        })
+          .select('_id firstName lastName name surname username studentId')
+          .limit(5)
+          .lean();
+
+        return {
+          ...classData,
+          studentCount,
+          sampleStudents: sampleStudents.map(s => ({
+            id: s._id,
+            _id: s._id,
+            name: `${s.firstName || s.name || ''} ${s.lastName || s.surname || ''}`.trim(),
+            username: s.username,
+            studentId: s.studentId
+          }))
+        };
+      })
+    );
+
+    const result = classesWithStudentCounts.map(cls => formatClassResponse(cls, cls.studentCount));
 
     res.json({
       success: true,
@@ -147,27 +199,22 @@ router.get('/', auth, async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────
-// 2. GET class by ID
+// 2. GET class by ID with detailed student info - UPDATED
 // ──────────────────────────────────────────────────────────────
 router.get('/:id', auth, validateObjectId, async (req, res) => {
   try {
-    console.log('🏫 GET /api/classes/:id - Fetching class:', req.params.id);
+    console.log('🏫 GET /api/classes/:id - Fetching class with students:', req.params.id);
     
     const classData = await Class.findById(req.params.id)
       .populate({
         path: 'classTeacher',
-        select: 'firstName lastName email phone username',
+        select: 'firstName lastName name surname email phone username',
         model: 'User'
       })
       .populate({
         path: 'subjectAssignments.subject',
         select: 'name code category isCore',
         model: 'Subject'
-      })
-      .populate({
-        path: 'students',
-        select: 'firstName lastName studentId email username',
-        model: 'User'
       })
       .lean();
 
@@ -179,14 +226,32 @@ router.get('/:id', auth, validateObjectId, async (req, res) => {
       });
     }
 
+    // Get ALL students in this class from User collection
+    const students = await User.find({
+      class: req.params.id,
+      role: 'student',
+      active: true
+    })
+      .select('_id firstName lastName name surname studentId email username gender dateOfBirth address phoneNumber')
+      .sort('firstName lastName')
+      .lean()
+      .maxTimeMS(10000);
+
+    const studentCount = students.length;
+
     // Format students
-    const formattedStudents = Array.isArray(classData.students) ? classData.students.map(student => ({
+    const formattedStudents = students.map(student => ({
       id: student._id,
-      name: `${student.firstName || ''} ${student.lastName || ''}`.trim(),
+      _id: student._id,
+      name: `${student.firstName || student.name || ''} ${student.lastName || student.surname || ''}`.trim(),
       studentId: student.studentId,
       email: student.email,
-      username: student.username
-    })) : [];
+      username: student.username,
+      gender: student.gender,
+      dateOfBirth: student.dateOfBirth,
+      phoneNumber: student.phoneNumber,
+      address: student.address
+    }));
 
     // Format subject assignments
     const formattedSubjectAssignments = Array.isArray(classData.subjectAssignments) ? classData.subjectAssignments.map(assignment => ({
@@ -205,16 +270,21 @@ router.get('/:id', auth, validateObjectId, async (req, res) => {
 
     res.json({
       success: true,
-      class: formatClassResponse(classData),
+      class: formatClassResponse(classData, studentCount),
       detailed: {
         students: formattedStudents,
-        subjects: formattedSubjectAssignments,
+        subjectAssignments: formattedSubjectAssignments,
         summary: {
-          totalStudents: formattedStudents.length,
+          totalStudents: studentCount,
           totalSubjects: formattedSubjectAssignments.length,
           capacityUtilization: classData.capacity > 0 
-            ? Math.round((formattedStudents.length / classData.capacity) * 100)
-            : 0
+            ? Math.round((studentCount / classData.capacity) * 100)
+            : 0,
+          genderDistribution: formattedStudents.reduce((acc, student) => {
+            const gender = student.gender || 'Not Specified';
+            acc[gender] = (acc[gender] || 0) + 1;
+            return acc;
+          }, {})
         }
       }
     });
@@ -229,13 +299,113 @@ router.get('/:id', auth, validateObjectId, async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────
+// NEW: Get students in a specific class
+// ──────────────────────────────────────────────────────────────
+router.get('/:id/students', auth, validateObjectId, async (req, res) => {
+  try {
+    console.log('👥 GET /api/classes/:id/students - Fetching students for class:', req.params.id);
+    
+    const { limit = 50, page = 1, search } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    // Verify class exists
+    const classExists = await Class.findById(req.params.id).select('_id name level').lean();
+    if (!classExists) {
+      return res.status(404).json({
+        success: false,
+        error: 'Class not found',
+        classId: req.params.id
+      });
+    }
+
+    // Build student filter
+    const filter = {
+      class: req.params.id,
+      role: 'student',
+      active: true
+    };
+
+    if (search) {
+      filter.$or = [
+        { firstName: { $regex: search, $options: 'i' } },
+        { lastName: { $regex: search, $options: 'i' } },
+        { name: { $regex: search, $options: 'i' } },
+        { surname: { $regex: search, $options: 'i' } },
+        { username: { $regex: search, $options: 'i' } },
+        { studentId: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    // Get total count
+    const totalStudents = await User.countDocuments(filter);
+    
+    // Fetch students
+    const students = await User.find(filter)
+      .select('_id firstName lastName name surname username studentId email gender dateOfBirth phoneNumber')
+      .sort('firstName lastName')
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean()
+      .maxTimeMS(10000);
+
+    const formattedStudents = students.map(student => ({
+      id: student._id,
+      _id: student._id,
+      name: `${student.firstName || student.name || ''} ${student.lastName || student.surname || ''}`.trim(),
+      username: student.username,
+      studentId: student.studentId,
+      email: student.email,
+      gender: student.gender,
+      dateOfBirth: student.dateOfBirth,
+      phoneNumber: student.phoneNumber,
+      className: classExists.name,
+      classLevel: classExists.level
+    }));
+
+    res.json({
+      success: true,
+      class: {
+        id: classExists._id,
+        name: classExists.name,
+        level: classExists.level
+      },
+      students: formattedStudents,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(totalStudents / parseInt(limit)),
+        totalStudents,
+        hasNext: parseInt(page) < Math.ceil(totalStudents / parseInt(limit)),
+        hasPrev: parseInt(page) > 1
+      }
+    });
+  } catch (err) {
+    console.error('❌ GET /classes/:id/students error:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch students in class',
+      details: err.message
+    });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────
 // 3. CREATE new class (Admin/Super Admin only)
 // ──────────────────────────────────────────────────────────────
 router.post('/', auth, adminOrSuperAdmin, async (req, res) => {
   try {
-    const { name, shortName, level, stream, capacity, classTeacherId } = req.body;
+    const { name, shortName, level, stream, section, capacity, classTeacherId } = req.body;
     
-    console.log('🏫 POST /api/classes - Creating class:', { name, level });
+    console.log('🏫 POST /api/classes - Creating class:', { 
+      name, 
+      shortName, 
+      level,
+      stream,
+      section,
+      capacity,
+      classTeacherId,
+      user: req.user.username 
+    });
 
     // Validate required fields
     if (!name || !level) {
@@ -244,6 +414,57 @@ router.post('/', auth, adminOrSuperAdmin, async (req, res) => {
         error: 'Class name and level are required',
         fields: { name: !name ? 'Required' : 'OK', level: !level ? 'Required' : 'OK' }
       });
+    }
+
+    // Get academic year
+    const currentYear = new Date().getFullYear();
+    const academicYear = `${currentYear}/${currentYear + 1}`;
+
+    // Check if class combination already exists
+    const existingClass = await Class.findOne({
+      level: level.toUpperCase(),
+      stream: stream ? stream.trim().toUpperCase() : '',
+      section: section ? section.trim().toUpperCase() : '',
+      academicYear: academicYear,
+      isActive: true
+    });
+
+    if (existingClass) {
+      return res.status(409).json({
+        success: false,
+        error: 'Class already exists',
+        details: `A ${level}${stream ? ` ${stream}` : ''}${section ? ` (${section})` : ''} class already exists for ${academicYear}`,
+        existingClass: existingClass.name
+      });
+    }
+
+    // Check if class name already exists
+    const existingClassName = await Class.findOne({ 
+      name: name.trim().toUpperCase(),
+      academicYear: academicYear
+    });
+    if (existingClassName) {
+      return res.status(409).json({
+        success: false,
+        error: 'Class name already exists',
+        details: `A class with name "${name}" already exists for ${academicYear}`
+      });
+    }
+
+    // Check if short name already exists
+    const generatedShortName = shortName ? shortName.trim().toUpperCase() : null;
+    if (generatedShortName) {
+      const existingShortName = await Class.findOne({ 
+        shortName: generatedShortName,
+        academicYear: academicYear 
+      });
+      if (existingShortName) {
+        return res.status(409).json({
+          success: false,
+          error: 'Class short name already exists',
+          details: `A class with short name "${generatedShortName}" already exists for ${academicYear}`
+        });
+      }
     }
 
     // Validate class teacher if provided
@@ -258,29 +479,38 @@ router.post('/', auth, adminOrSuperAdmin, async (req, res) => {
       }
     }
 
+    // Build class data
     const classData = {
       name: name.trim().toUpperCase(),
       level: level.toUpperCase(),
       capacity: capacity || 40,
+      academicYear: academicYear,
       metadata: {
         createdBy: req.user.id,
         lastModifiedBy: req.user.id,
         lastModifiedAt: new Date(),
-        notes: []
+        notes: [`Class created by ${req.user.username} on ${new Date().toLocaleDateString()}`]
       }
     };
 
     if (shortName) classData.shortName = shortName.trim().toUpperCase();
     if (stream) classData.stream = stream.trim().toUpperCase();
+    if (section) classData.section = section.trim().toUpperCase();
     if (classTeacherId) classData.classTeacher = classTeacherId;
+
+    console.log('Creating class with data:', classData);
 
     const newClass = new Class(classData);
     await newClass.save();
 
-    console.log('✅ Class created:', {
+    console.log('✅ Class created successfully:', {
       id: newClass._id,
       name: newClass.name,
+      shortName: newClass.shortName,
       level: newClass.level,
+      stream: newClass.stream,
+      section: newClass.section,
+      academicYear: newClass.academicYear,
       by: req.user.username
     });
 
@@ -292,22 +522,34 @@ router.post('/', auth, adminOrSuperAdmin, async (req, res) => {
     res.status(201).json({
       success: true,
       message: 'Class created successfully',
-      class: formatClassResponse(populatedClass)
+      class: formatClassResponse(populatedClass, 0)
     });
   } catch (err) {
+    console.error('❌ POST /classes error details:', err);
+    
     if (err.code === 11000) {
+      const duplicateFields = err.keyValue;
       return res.status(409).json({
         success: false,
-        error: 'Class already exists',
-        details: 'A class with the same name or short name already exists'
+        error: 'Duplicate class combination',
+        details: `A class with level "${duplicateFields.level}", stream "${duplicateFields.stream || ''}", section "${duplicateFields.section || ''}" already exists for academic year ${duplicateFields.academicYear}`,
+        duplicateFields
       });
     }
     
-    console.error('❌ POST /classes error:', err);
+    if (err.name === 'ValidationError') {
+      const errors = Object.values(err.errors).map(e => e.message);
+      return res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        details: errors.join(', ')
+      });
+    }
+    
     res.status(500).json({
       success: false,
       error: 'Failed to create class',
-      details: err.message
+      details: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
     });
   }
 });
@@ -354,6 +596,13 @@ router.put('/:id', auth, adminOrSuperAdmin, validateObjectId, async (req, res) =
       by: req.user.username
     });
 
+    // Get student count for updated class
+    const studentCount = await User.countDocuments({
+      class: req.params.id,
+      role: 'student',
+      active: true
+    });
+
     // Get populated class
     const populatedClass = await Class.findById(classData._id)
       .populate('classTeacher', 'firstName lastName email')
@@ -362,7 +611,7 @@ router.put('/:id', auth, adminOrSuperAdmin, validateObjectId, async (req, res) =
     res.json({
       success: true,
       message: 'Class updated successfully',
-      class: formatClassResponse(populatedClass)
+      class: formatClassResponse(populatedClass, studentCount)
     });
   } catch (err) {
     if (err.code === 11000) {
@@ -383,7 +632,7 @@ router.put('/:id', auth, adminOrSuperAdmin, validateObjectId, async (req, res) =
 });
 
 // ──────────────────────────────────────────────────────────────
-// 5. HARD DELETE class (permanent - Super Admin only) - FIXED
+// 5. HARD DELETE class (permanent - Super Admin only)
 // ──────────────────────────────────────────────────────────────
 router.delete('/:id/hard', auth, adminOrSuperAdmin, validateObjectId, async (req, res) => {
   try {
@@ -408,23 +657,18 @@ router.delete('/:id/hard', auth, adminOrSuperAdmin, validateObjectId, async (req
       });
     }
 
-    // Check if class has students
-    if (Array.isArray(classData.students) && classData.students.length > 0) {
+    // Check if class has students from User collection
+    const studentCount = await User.countDocuments({
+      class: req.params.id,
+      role: 'student',
+      active: true
+    });
+    
+    if (studentCount > 0) {
       return res.status(400).json({
         success: false,
-        error: `Cannot delete class with ${classData.students.length} students. Please remove all students first.`,
-        studentCount: classData.students.length
-      });
-    }
-
-    // Check for any results associated with this class
-    const Result = require('../models/Result');
-    const resultCount = await Result.countDocuments({ class: req.params.id });
-    if (resultCount > 0) {
-      return res.status(400).json({
-        success: false,
-        error: `Cannot delete class with ${resultCount} exam results. Please delete the results first.`,
-        resultCount
+        error: `Cannot delete class with ${studentCount} students. Please remove all students first.`,
+        studentCount: studentCount
       });
     }
 
@@ -457,14 +701,28 @@ router.delete('/:id/hard', auth, adminOrSuperAdmin, validateObjectId, async (req
 });
 
 // ──────────────────────────────────────────────────────────────
-// 6. SOFT DELETE class (deactivate - Admin/Super Admin only) - FIXED
+// 6. DELETE class (deactivate - Admin/Super Admin only)
 // ──────────────────────────────────────────────────────────────
 router.delete('/:id', auth, adminOrSuperAdmin, validateObjectId, async (req, res) => {
   try {
     console.log('🏫 DELETE /api/classes/:id - Soft deleting class:', req.params.id);
     
-    const classData = await Class.findById(req.params.id);
-    
+    // Use findByIdAndUpdate to avoid validation issues
+    const classData = await Class.findByIdAndUpdate(
+      req.params.id,
+      {
+        isActive: false,
+        $set: {
+          'metadata.lastModifiedBy': req.user.id,
+          'metadata.lastModifiedAt': new Date()
+        }
+      },
+      { 
+        new: true,
+        runValidators: false // IMPORTANT: Disable validators for deactivation
+      }
+    );
+
     if (!classData) {
       return res.status(404).json({
         success: false,
@@ -473,30 +731,22 @@ router.delete('/:id', auth, adminOrSuperAdmin, validateObjectId, async (req, res
       });
     }
 
-    // Soft delete - mark as inactive
-    classData.isActive = false;
-    
-    // Initialize metadata if it doesn't exist
+    // Add note to metadata
     if (!classData.metadata) {
       classData.metadata = {
+        notes: [],
+        createdBy: req.user.id,
         lastModifiedBy: req.user.id,
-        lastModifiedAt: new Date(),
-        notes: []
+        lastModifiedAt: new Date()
       };
-    } else {
-      classData.metadata.lastModifiedBy = req.user.id;
-      classData.metadata.lastModifiedAt = new Date();
-      
-      // Initialize notes array if it doesn't exist
-      if (!Array.isArray(classData.metadata.notes)) {
-        classData.metadata.notes = [];
-      }
     }
     
-    // Add note about deactivation
-    classData.metadata.notes.push(`Deactivated by ${req.user.username} on ${new Date().toLocaleDateString()}`);
+    if (!Array.isArray(classData.metadata.notes)) {
+      classData.metadata.notes = [];
+    }
     
-    await classData.save();
+    classData.metadata.notes.push(`Deactivated by ${req.user.username} on ${new Date().toLocaleDateString()}`);
+    await classData.save({ validateBeforeSave: false });
 
     console.log('✅ Class deactivated:', {
       id: classData._id,
@@ -504,10 +754,22 @@ router.delete('/:id', auth, adminOrSuperAdmin, validateObjectId, async (req, res
       by: req.user.username
     });
 
+    // Get student count
+    const studentCount = await User.countDocuments({
+      class: req.params.id,
+      role: 'student',
+      active: true
+    });
+
+    // Get the updated class with populated data
+    const updatedClass = await Class.findById(classData._id)
+      .populate('classTeacher', 'firstName lastName email')
+      .lean();
+
     res.json({
       success: true,
       message: 'Class deactivated successfully',
-      class: formatClassResponse(classData.toObject())
+      class: formatClassResponse(updatedClass, studentCount)
     });
   } catch (err) {
     console.error('❌ DELETE /classes/:id error:', err);
@@ -520,14 +782,28 @@ router.delete('/:id', auth, adminOrSuperAdmin, validateObjectId, async (req, res
 });
 
 // ──────────────────────────────────────────────────────────────
-// 7. DEACTIVATE class (alternative PATCH method) - FIXED
+// 7. DEACTIVATE class (alternative PATCH method)
 // ──────────────────────────────────────────────────────────────
 router.patch('/:id/deactivate', auth, adminOrSuperAdmin, validateObjectId, async (req, res) => {
   try {
     console.log('🏫 PATCH /api/classes/:id/deactivate - Deactivating class:', req.params.id);
     
-    const classData = await Class.findById(req.params.id);
-    
+    // Use findByIdAndUpdate to avoid validation issues
+    const classData = await Class.findByIdAndUpdate(
+      req.params.id,
+      {
+        isActive: false,
+        $set: {
+          'metadata.lastModifiedBy': req.user.id,
+          'metadata.lastModifiedAt': new Date()
+        }
+      },
+      { 
+        new: true,
+        runValidators: false // Disable validators
+      }
+    );
+
     if (!classData) {
       return res.status(404).json({
         success: false,
@@ -536,30 +812,22 @@ router.patch('/:id/deactivate', auth, adminOrSuperAdmin, validateObjectId, async
       });
     }
 
-    // Soft delete - mark as inactive
-    classData.isActive = false;
-    
-    // Initialize metadata if it doesn't exist
+    // Add note to metadata
     if (!classData.metadata) {
       classData.metadata = {
+        notes: [],
+        createdBy: req.user.id,
         lastModifiedBy: req.user.id,
-        lastModifiedAt: new Date(),
-        notes: []
+        lastModifiedAt: new Date()
       };
-    } else {
-      classData.metadata.lastModifiedBy = req.user.id;
-      classData.metadata.lastModifiedAt = new Date();
-      
-      // Initialize notes array if it doesn't exist
-      if (!Array.isArray(classData.metadata.notes)) {
-        classData.metadata.notes = [];
-      }
     }
     
-    // Add note about deactivation
-    classData.metadata.notes.push(`Deactivated by ${req.user.username} on ${new Date().toLocaleDateString()}`);
+    if (!Array.isArray(classData.metadata.notes)) {
+      classData.metadata.notes = [];
+    }
     
-    await classData.save();
+    classData.metadata.notes.push(`Deactivated by ${req.user.username} on ${new Date().toLocaleDateString()}`);
+    await classData.save({ validateBeforeSave: false });
 
     console.log('✅ Class deactivated via PATCH:', {
       id: classData._id,
@@ -567,10 +835,22 @@ router.patch('/:id/deactivate', auth, adminOrSuperAdmin, validateObjectId, async
       by: req.user.username
     });
 
+    // Get student count
+    const studentCount = await User.countDocuments({
+      class: req.params.id,
+      role: 'student',
+      active: true
+    });
+
+    // Get updated class with populated data
+    const updatedClass = await Class.findById(classData._id)
+      .populate('classTeacher', 'firstName lastName email')
+      .lean();
+
     res.json({
       success: true,
       message: 'Class deactivated successfully',
-      class: formatClassResponse(classData.toObject())
+      class: formatClassResponse(updatedClass, studentCount)
     });
   } catch (err) {
     console.error('❌ PATCH /classes/:id/deactivate error:', err);
@@ -583,14 +863,28 @@ router.patch('/:id/deactivate', auth, adminOrSuperAdmin, validateObjectId, async
 });
 
 // ──────────────────────────────────────────────────────────────
-// 8. REACTIVATE deactivated class - FIXED
+// 8. REACTIVATE deactivated class
 // ──────────────────────────────────────────────────────────────
 router.patch('/:id/reactivate', auth, adminOrSuperAdmin, validateObjectId, async (req, res) => {
   try {
     console.log('🏫 PATCH /api/classes/:id/reactivate - Reactivating class:', req.params.id);
     
-    const classData = await Class.findById(req.params.id);
-    
+    // Use findByIdAndUpdate to avoid validation issues
+    const classData = await Class.findByIdAndUpdate(
+      req.params.id,
+      {
+        isActive: true,
+        $set: {
+          'metadata.lastModifiedBy': req.user.id,
+          'metadata.lastModifiedAt': new Date()
+        }
+      },
+      { 
+        new: true,
+        runValidators: false // Disable validators
+      }
+    );
+
     if (!classData) {
       return res.status(404).json({
         success: false,
@@ -599,30 +893,22 @@ router.patch('/:id/reactivate', auth, adminOrSuperAdmin, validateObjectId, async
       });
     }
 
-    // Reactivate - mark as active
-    classData.isActive = true;
-    
-    // Initialize metadata if it doesn't exist
+    // Add note to metadata
     if (!classData.metadata) {
       classData.metadata = {
+        notes: [],
+        createdBy: req.user.id,
         lastModifiedBy: req.user.id,
-        lastModifiedAt: new Date(),
-        notes: []
+        lastModifiedAt: new Date()
       };
-    } else {
-      classData.metadata.lastModifiedBy = req.user.id;
-      classData.metadata.lastModifiedAt = new Date();
-      
-      // Initialize notes array if it doesn't exist
-      if (!Array.isArray(classData.metadata.notes)) {
-        classData.metadata.notes = [];
-      }
     }
     
-    // Add note about reactivation
-    classData.metadata.notes.push(`Reactivated by ${req.user.username} on ${new Date().toLocaleDateString()}`);
+    if (!Array.isArray(classData.metadata.notes)) {
+      classData.metadata.notes = [];
+    }
     
-    await classData.save();
+    classData.metadata.notes.push(`Reactivated by ${req.user.username} on ${new Date().toLocaleDateString()}`);
+    await classData.save({ validateBeforeSave: false });
 
     console.log('✅ Class reactivated:', {
       id: classData._id,
@@ -630,10 +916,22 @@ router.patch('/:id/reactivate', auth, adminOrSuperAdmin, validateObjectId, async
       by: req.user.username
     });
 
+    // Get student count
+    const studentCount = await User.countDocuments({
+      class: req.params.id,
+      role: 'student',
+      active: true
+    });
+
+    // Get updated class with populated data
+    const updatedClass = await Class.findById(classData._id)
+      .populate('classTeacher', 'firstName lastName email')
+      .lean();
+
     res.json({
       success: true,
       message: 'Class reactivated successfully',
-      class: formatClassResponse(classData.toObject())
+      class: formatClassResponse(updatedClass, studentCount)
     });
   } catch (err) {
     console.error('❌ PATCH /classes/:id/reactivate error:', err);
@@ -665,7 +963,19 @@ router.get('/level/:level', auth, async (req, res) => {
       .sort({ displayOrder: 1, name: 1 })
       .lean();
 
-    const formattedClasses = classes.map(formatClassResponse);
+    // Get student counts for each class
+    const classesWithStudentCounts = await Promise.all(
+      classes.map(async (classData) => {
+        const studentCount = await User.countDocuments({
+          class: classData._id,
+          role: 'student',
+          active: true
+        });
+        return { ...classData, studentCount };
+      })
+    );
+
+    const formattedClasses = classesWithStudentCounts.map(cls => formatClassResponse(cls, cls.studentCount));
 
     res.json({
       success: true,
@@ -673,7 +983,7 @@ router.get('/level/:level', auth, async (req, res) => {
       classes: formattedClasses,
       total: classes.length,
       summary: {
-        totalStudents: classes.reduce((sum, cls) => sum + (cls.students?.length || 0), 0),
+        totalStudents: classesWithStudentCounts.reduce((sum, cls) => sum + cls.studentCount, 0),
         totalCapacity: classes.reduce((sum, cls) => sum + cls.capacity, 0),
         totalSubjects: classes.reduce((sum, cls) => sum + (cls.subjectAssignments?.length || 0), 0)
       }
@@ -713,31 +1023,43 @@ router.post('/:id/students/:studentId', auth, adminOrSuperAdmin, validateObjectI
       });
     }
 
-    // Check capacity
-    if (classData.students.length >= classData.capacity) {
+    // Check capacity - get current student count
+    const currentStudentCount = await User.countDocuments({
+      class: id,
+      role: 'student',
+      active: true
+    });
+    
+    if (currentStudentCount >= classData.capacity) {
       return res.status(400).json({
         success: false,
         error: 'Class is at full capacity',
         capacity: classData.capacity,
-        current: classData.students.length
+        current: currentStudentCount
       });
     }
 
     // Check if student is already in a class
-    const existingClass = await Class.findOne({ students: studentId, isActive: true });
-    if (existingClass) {
-      return res.status(400).json({
-        success: false,
-        error: 'Student is already enrolled in another class',
-        currentClass: existingClass.name
-      });
+    if (student.class) {
+      const existingClass = await Class.findById(student.class);
+      if (existingClass) {
+        return res.status(400).json({
+          success: false,
+          error: 'Student is already enrolled in another class',
+          currentClass: existingClass.name
+        });
+      }
     }
 
-    await classData.addStudent(studentId);
-    
     // Update student's class reference
     student.class = classData._id;
     await student.save();
+
+    // Add student to class's students array (optional)
+    if (!classData.students.includes(studentId)) {
+      classData.students.push(studentId);
+      await classData.save();
+    }
 
     console.log('✅ Student added to class:', {
       student: student.username,
@@ -745,17 +1067,24 @@ router.post('/:id/students/:studentId', auth, adminOrSuperAdmin, validateObjectI
       by: req.user.username
     });
 
+    // Get updated student count
+    const newStudentCount = await User.countDocuments({
+      class: id,
+      role: 'student',
+      active: true
+    });
+
     const updatedClass = await Class.findById(id)
-      .populate('students', 'firstName lastName studentId')
+      .populate('classTeacher', 'firstName lastName email')
       .lean();
 
     res.json({
       success: true,
       message: 'Student added to class successfully',
-      class: formatClassResponse(updatedClass),
+      class: formatClassResponse(updatedClass, newStudentCount),
       student: {
         id: student._id,
-        name: `${student.firstName} ${student.lastName}`,
+        name: `${student.firstName || student.name || ''} ${student.lastName || student.surname || ''}`.trim(),
         studentId: student.studentId
       }
     });
@@ -792,11 +1121,21 @@ router.delete('/:id/students/:studentId', auth, adminOrSuperAdmin, validateObjec
       });
     }
 
-    await classData.removeStudent(studentId);
-    
+    // Check if student is actually in this class
+    if (student.class?.toString() !== id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Student is not enrolled in this class'
+      });
+    }
+
     // Remove class reference from student
     student.class = null;
     await student.save();
+
+    // Remove student from class's students array (optional)
+    classData.students = classData.students.filter(sid => sid.toString() !== studentId);
+    await classData.save();
 
     console.log('✅ Student removed from class:', {
       student: student.username,
@@ -804,13 +1143,20 @@ router.delete('/:id/students/:studentId', auth, adminOrSuperAdmin, validateObjec
       by: req.user.username
     });
 
+    // Get updated student count
+    const newStudentCount = await User.countDocuments({
+      class: id,
+      role: 'student',
+      active: true
+    });
+
     res.json({
       success: true,
       message: 'Student removed from class successfully',
-      class: formatClassResponse(classData.toObject()),
+      class: formatClassResponse(classData.toObject(), newStudentCount),
       student: {
         id: student._id,
-        name: `${student.firstName} ${student.lastName}`
+        name: `${student.firstName || student.name || ''} ${student.lastName || student.surname || ''}`.trim()
       }
     });
   } catch (err) {
@@ -824,12 +1170,11 @@ router.delete('/:id/students/:studentId', auth, adminOrSuperAdmin, validateObjec
 });
 
 // ──────────────────────────────────────────────────────────────
-// 12. GET class summary/statistics
+// 12. GET class summary/statistics - UPDATED
 // ──────────────────────────────────────────────────────────────
 router.get('/:id/summary', auth, async (req, res) => {
   try {
     const classData = await Class.findById(req.params.id)
-      .populate('students', 'firstName lastName studentId gender')
       .populate({
         path: 'subjectAssignments.subject',
         select: 'name code category isCore',
@@ -844,14 +1189,23 @@ router.get('/:id/summary', auth, async (req, res) => {
       });
     }
 
+    // Get students from User collection
+    const students = await User.find({
+      class: req.params.id,
+      role: 'student',
+      active: true
+    })
+      .select('firstName lastName name surname studentId gender')
+      .lean();
+
+    const studentCount = students.length;
+
     // Calculate gender distribution
     const genderDistribution = {};
-    if (Array.isArray(classData.students)) {
-      classData.students.forEach(student => {
-        const gender = student.gender || 'Not Specified';
-        genderDistribution[gender] = (genderDistribution[gender] || 0) + 1;
-      });
-    }
+    students.forEach(student => {
+      const gender = student.gender || 'Not Specified';
+      genderDistribution[gender] = (genderDistribution[gender] || 0) + 1;
+    });
 
     // Calculate category distribution
     const categoryDistribution = {};
@@ -864,9 +1218,9 @@ router.get('/:id/summary', auth, async (req, res) => {
 
     const summary = {
       success: true,
-      class: formatClassResponse(classData),
+      class: formatClassResponse(classData, studentCount),
       students: {
-        total: classData.students?.length || 0,
+        total: studentCount,
         byGender: genderDistribution
       },
       subjects: {
@@ -877,10 +1231,10 @@ router.get('/:id/summary', auth, async (req, res) => {
       },
       capacity: {
         total: classData.capacity,
-        used: classData.students?.length || 0,
-        available: classData.capacity - (classData.students?.length || 0),
+        used: studentCount,
+        available: classData.capacity - studentCount,
         utilization: classData.capacity > 0 
-          ? Math.round(((classData.students?.length || 0) / classData.capacity) * 100)
+          ? Math.round((studentCount / classData.capacity) * 100)
           : 0
       }
     };
@@ -897,14 +1251,22 @@ router.get('/:id/summary', auth, async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────
-// 13. Assign subjects to class
+// 13. Assign subjects to class - FIXED VERSION
 // ──────────────────────────────────────────────────────────────
 router.post('/:id/subjects', auth, adminOrSuperAdmin, validateObjectId, async (req, res) => {
   try {
-    const { subjectIds, isCore = true } = req.body;
     const classId = req.params.id;
-
+    const { subjectIds, isCore = true } = req.body;
+    
     console.log('📚 Assigning subjects to class:', { classId, subjectIds, isCore });
+
+    // Validate input
+    if (!subjectIds || !Array.isArray(subjectIds) || subjectIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'subjectIds must be a non-empty array'
+      });
+    }
 
     // Verify class exists
     const classData = await Class.findById(classId);
@@ -928,34 +1290,100 @@ router.post('/:id/subjects', auth, adminOrSuperAdmin, validateObjectId, async (r
       });
     }
 
-    // Add each subject to class
-    for (const subjectId of subjectIds) {
-      await classData.addSubjectAssignment(subjectId, isCore);
+    // Initialize subjectAssignments array if it doesn't exist
+    if (!Array.isArray(classData.subjectAssignments)) {
+      classData.subjectAssignments = [];
     }
 
-    // Get updated class
+    // Add or update subject assignments
+    const newAssignments = [];
+    for (const subjectId of subjectIds) {
+      // Check if subject is already assigned
+      const existingIndex = classData.subjectAssignments.findIndex(
+        assignment => assignment.subject && assignment.subject.toString() === subjectId
+      );
+      
+      if (existingIndex >= 0) {
+        // Update existing assignment
+        classData.subjectAssignments[existingIndex] = {
+          ...classData.subjectAssignments[existingIndex].toObject(),
+          isCore: isCore,
+          updatedAt: new Date()
+        };
+        newAssignments.push(classData.subjectAssignments[existingIndex]);
+      } else {
+        // Add new assignment
+        const newAssignment = {
+          subject: subjectId,
+          isCore: isCore,
+          assignedDate: new Date(),
+          updatedAt: new Date()
+        };
+        classData.subjectAssignments.push(newAssignment);
+        newAssignments.push(newAssignment);
+      }
+    }
+
+    // Save the updated class
+    await classData.save();
+
+    // Also create ClassSubject records for better management
+    try {
+      await Promise.all(
+        subjectIds.map(subjectId => 
+          ClassSubject.findOneAndUpdate(
+            { class: classId, subject: subjectId },
+            { 
+              class: classId, 
+              subject: subjectId, 
+              isCompulsory: isCore,
+              periodCount: 3,
+              academicYear: classData.academicYear || `${new Date().getFullYear()}/${new Date().getFullYear() + 1}`
+            },
+            { upsert: true, new: true }
+          )
+        )
+      );
+    } catch (classSubjectError) {
+      console.log('Note: Could not create ClassSubject records, but class assignment was successful:', classSubjectError.message);
+    }
+
+    console.log('✅ Subjects assigned successfully to class:', {
+      class: classData.name,
+      subjects: subjectIds.length,
+      newAssignments: newAssignments.length
+    });
+
+    // Get updated class with populated data
     const updatedClass = await Class.findById(classId)
-      .populate('subjectAssignments.subject', 'name code category isCore')
+      .populate({
+        path: 'subjectAssignments.subject',
+        select: 'name code category isCore',
+        model: 'Subject'
+      })
+      .populate('classTeacher', 'firstName lastName email')
       .lean();
 
-    console.log('✅ Subjects assigned to class:', {
-      class: updatedClass.name,
-      subjects: subjectIds.length
+    // Get student count
+    const studentCount = await User.countDocuments({
+      class: classId,
+      role: 'student',
+      active: true
     });
 
-    res.json({
+    res.status(200).json({
       success: true,
-      message: `Successfully assigned ${subjectIds.length} subjects to ${updatedClass.name}`,
-      class: formatClassResponse(updatedClass),
-      subjectAssignments: updatedClass.subjectAssignments
+      message: `${subjectIds.length} subjects assigned to class successfully`,
+      class: formatClassResponse(updatedClass, studentCount),
+      subjectAssignments: updatedClass.subjectAssignments || []
     });
 
-  } catch (err) {
-    console.error('❌ POST /classes/:id/subjects error:', err);
-    res.status(500).json({
+  } catch (error) {
+    console.error('❌ POST /classes/:id/subjects error:', error);
+    res.status(500).json({ 
       success: false,
       error: 'Failed to assign subjects to class',
-      details: err.message
+      details: error.message 
     });
   }
 });
@@ -983,6 +1411,13 @@ router.delete('/:classId/subjects/:subjectId', auth, adminOrSuperAdmin, validate
       subjectId
     });
 
+    // Get student count
+    const studentCount = await User.countDocuments({
+      class: classId,
+      role: 'student',
+      active: true
+    });
+
     const updatedClass = await Class.findById(classId)
       .populate('subjectAssignments.subject', 'name code category isCore')
       .lean();
@@ -990,7 +1425,7 @@ router.delete('/:classId/subjects/:subjectId', auth, adminOrSuperAdmin, validate
     res.json({
       success: true,
       message: 'Subject removed from class successfully',
-      class: formatClassResponse(updatedClass)
+      class: formatClassResponse(updatedClass, studentCount)
     });
 
   } catch (err) {
@@ -1076,6 +1511,13 @@ router.patch('/:classId/subjects/:subjectId/core', auth, adminOrSuperAdmin, vali
 
     await classData.updateSubjectCoreStatus(subjectId, isCore);
 
+    // Get student count
+    const studentCount = await User.countDocuments({
+      class: classId,
+      role: 'student',
+      active: true
+    });
+
     const updatedClass = await Class.findById(classId)
       .populate('subjectAssignments.subject', 'name code category isCore')
       .lean();
@@ -1089,7 +1531,7 @@ router.patch('/:classId/subjects/:subjectId/core', auth, adminOrSuperAdmin, vali
     res.json({
       success: true,
       message: 'Subject core status updated successfully',
-      class: formatClassResponse(updatedClass)
+      class: formatClassResponse(updatedClass, studentCount)
     });
 
   } catch (err) {
@@ -1110,19 +1552,36 @@ router.get('/assignment/classes', auth, async (req, res) => {
     console.log('📚 GET /api/classes/assignment/classes - Fetching classes for assignment');
     
     const classes = await Class.find({ isActive: true })
-      .select('_id name shortName level fullName')
+      .select('_id name shortName level fullName stream section capacity')
       .sort({ level: 1, name: 1 })
       .lean();
 
+    // Get student counts for each class
+    const classesWithStudentCounts = await Promise.all(
+      classes.map(async (cls) => {
+        const studentCount = await User.countDocuments({
+          class: cls._id,
+          role: 'student',
+          active: true
+        });
+        return { ...cls, studentCount };
+      })
+    );
+
     res.json({
       success: true,
-      classes: classes.map(cls => ({
+      classes: classesWithStudentCounts.map(cls => ({
         id: cls._id,
         _id: cls._id,
         name: cls.name,
         shortName: cls.shortName,
         level: cls.level,
-        fullName: cls.fullName || `${cls.name} ${cls.shortName ? `(${cls.shortName})` : ''}`.trim(),
+        stream: cls.stream,
+        section: cls.section,
+        fullName: cls.fullName || 
+          `${cls.level}${cls.stream ? ` ${cls.stream}` : ''}${cls.section ? ` (${cls.section})` : ''}`.trim(),
+        capacity: cls.capacity,
+        studentCount: cls.studentCount,
         label: cls.fullName || cls.name
       })),
       total: classes.length
@@ -1192,27 +1651,12 @@ router.post('/bulk-delete', auth, adminOrSuperAdmin, async (req, res) => {
         }
 
         if (action === 'deactivate') {
-          classData.isActive = false;
-          
-          // Initialize metadata if needed
-          if (!classData.metadata) {
-            classData.metadata = {
-              lastModifiedBy: req.user.id,
-              lastModifiedAt: new Date(),
-              notes: []
-            };
-          } else {
-            classData.metadata.lastModifiedBy = req.user.id;
-            classData.metadata.lastModifiedAt = new Date();
-            
-            if (!Array.isArray(classData.metadata.notes)) {
-              classData.metadata.notes = [];
-            }
-          }
-          
-          classData.metadata.notes.push(`Bulk deactivated by ${req.user.username} on ${new Date().toLocaleDateString()}`);
-          
-          await classData.save();
+          // Use findByIdAndUpdate to avoid validation
+          await Class.findByIdAndUpdate(
+            classId,
+            { isActive: false },
+            { runValidators: false }
+          );
           
           results.details.push({
             classId,
@@ -1221,12 +1665,18 @@ router.post('/bulk-delete', auth, adminOrSuperAdmin, async (req, res) => {
             className: classData.name
           });
         } else if (action === 'delete' && req.user.role === 'super_admin') {
-          // Check if class has students
-          if (Array.isArray(classData.students) && classData.students.length > 0) {
+          // Check if class has students from User collection
+          const studentCount = await User.countDocuments({
+            class: classId,
+            role: 'student',
+            active: true
+          });
+          
+          if (studentCount > 0) {
             results.details.push({
               classId,
               success: false,
-              error: `Cannot delete class with ${classData.students.length} students`
+              error: `Cannot delete class with ${studentCount} students`
             });
             results.failed++;
             continue;
@@ -1296,7 +1746,19 @@ router.get('/inactive', auth, adminOrSuperAdmin, async (req, res) => {
       .limit(parseInt(limit))
       .lean();
 
-    const result = classes.map(formatClassResponse);
+    // Get student counts for each class
+    const classesWithStudentCounts = await Promise.all(
+      classes.map(async (classData) => {
+        const studentCount = await User.countDocuments({
+          class: classData._id,
+          role: 'student',
+          active: true
+        });
+        return { ...classData, studentCount };
+      })
+    );
+
+    const result = classesWithStudentCounts.map(cls => formatClassResponse(cls, cls.studentCount));
 
     res.json({
       success: true,
@@ -1336,9 +1798,17 @@ router.get('/debug/:id', auth, validateObjectId, async (req, res) => {
       });
     }
 
+    // Get student count
+    const studentCount = await User.countDocuments({
+      class: req.params.id,
+      role: 'student',
+      active: true
+    });
+
     res.json({
       success: true,
       class: classData,
+      studentCount: studentCount,
       metadata: classData.metadata || 'No metadata',
       metadataType: typeof classData.metadata,
       metadataStructure: classData.metadata ? {
@@ -1361,7 +1831,7 @@ router.get('/debug/:id', auth, validateObjectId, async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────
-// 21. GET class availability (for student enrollment)
+// 21. GET class availability (for student enrollment) - UPDATED
 // ──────────────────────────────────────────────────────────────
 router.get('/availability/:level', auth, async (req, res) => {
   try {
@@ -1371,17 +1841,31 @@ router.get('/availability/:level', auth, async (req, res) => {
       level: level.toUpperCase(),
       isActive: true 
     })
-      .select('_id name shortName capacity students')
+      .select('_id name shortName capacity stream section')
       .lean();
 
-    const availableClasses = classes.map(cls => ({
+    // Get student counts for each class
+    const classesWithStudentCounts = await Promise.all(
+      classes.map(async (cls) => {
+        const studentCount = await User.countDocuments({
+          class: cls._id,
+          role: 'student',
+          active: true
+        });
+        return { ...cls, studentCount };
+      })
+    );
+
+    const availableClasses = classesWithStudentCounts.map(cls => ({
       id: cls._id,
       name: cls.name,
       shortName: cls.shortName,
+      stream: cls.stream,
+      section: cls.section,
       capacity: cls.capacity,
-      enrolled: Array.isArray(cls.students) ? cls.students.length : 0,
-      available: cls.capacity - (Array.isArray(cls.students) ? cls.students.length : 0),
-      isFull: cls.capacity <= (Array.isArray(cls.students) ? cls.students.length : 0)
+      enrolled: cls.studentCount,
+      available: cls.capacity - cls.studentCount,
+      isFull: cls.capacity <= cls.studentCount
     }));
 
     res.json({
@@ -1402,6 +1886,7 @@ router.get('/availability/:level', auth, async (req, res) => {
     });
   }
 });
+
 
 // ──────────────────────────────────────────────────────────────
 // 22. TEST ROUTES
@@ -1443,14 +1928,22 @@ router.patch('/:id/reset-metadata', auth, adminOrSuperAdmin, validateObjectId, a
       });
     }
 
+    // Get student count
+    const studentCount = await User.countDocuments({
+      class: req.params.id,
+      role: 'student',
+      active: true
+    });
+
     // Reset metadata to clean state
     classData.metadata = {
+      notes: [`Metadata reset by ${req.user.username} on ${new Date().toLocaleDateString()}`],
       lastModifiedBy: req.user.id,
       lastModifiedAt: new Date(),
-      notes: [`Metadata reset by ${req.user.username} on ${new Date().toLocaleDateString()}`]
+      createdBy: classData.metadata?.createdBy || req.user.id
     };
     
-    await classData.save();
+    await classData.save({ validateBeforeSave: false });
 
     console.log('✅ Class metadata reset:', {
       id: classData._id,
@@ -1461,7 +1954,7 @@ router.patch('/:id/reset-metadata', auth, adminOrSuperAdmin, validateObjectId, a
     res.json({
       success: true,
       message: 'Class metadata reset successfully',
-      class: formatClassResponse(classData.toObject()),
+      class: formatClassResponse(classData.toObject(), studentCount),
       metadata: classData.metadata
     });
   } catch (err) {
@@ -1469,6 +1962,310 @@ router.patch('/:id/reset-metadata', auth, adminOrSuperAdmin, validateObjectId, a
     res.status(500).json({
       success: false,
       error: 'Failed to reset class metadata',
+      details: err.message
+    });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────
+// 24. SIMPLE CREATE route for testing (bypasses some validation)
+// ──────────────────────────────────────────────────────────────
+router.post('/simple-create', auth, adminOrSuperAdmin, async (req, res) => {
+  try {
+    const { name, level } = req.body;
+    
+    console.log('🏫 POST /api/classes/simple-create - Creating simple class:', { name, level });
+
+    if (!name || !level) {
+      return res.status(400).json({
+        success: false,
+        error: 'Name and level are required'
+      });
+    }
+
+    // Generate a unique short name
+    const timestamp = Date.now().toString().slice(-4);
+    const shortName = `${level.replace('SS', '')}${timestamp}`;
+
+    const classData = {
+      name: name.trim().toUpperCase(),
+      shortName: shortName,
+      level: level.toUpperCase(),
+      metadata: {
+        notes: [`Class created via simple-create by ${req.user.username}`],
+        createdBy: req.user.id,
+        lastModifiedBy: req.user.id,
+        lastModifiedAt: new Date()
+      }
+    };
+
+    const newClass = new Class(classData);
+    await newClass.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Class created successfully (simple)',
+      class: {
+        id: newClass._id,
+        name: newClass.name,
+        shortName: newClass.shortName,
+        level: newClass.level
+      }
+    });
+  } catch (err) {
+    console.error('❌ POST /classes/simple-create error:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create class',
+      details: err.message
+    });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────
+// 25. EMERGENCY FIX: Repair corrupted class data
+// ──────────────────────────────────────────────────────────────
+router.patch('/:id/repair', auth, adminOrSuperAdmin, validateObjectId, async (req, res) => {
+  try {
+    console.log('🔧 PATCH /api/classes/:id/repair - Repairing class:', req.params.id);
+    
+    const classData = await Class.findById(req.params.id).lean();
+    
+    if (!classData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Class not found',
+        classId: req.params.id
+      });
+    }
+
+    // Create update object with minimal required fields
+    const updates = {};
+    
+    // Fix level if it's invalid
+    if (classData.level && !['JSS1', 'JSS2', 'JSS3', 'SSS1', 'SSS2', 'SSS3'].includes(classData.level)) {
+      console.log('Fixing invalid level:', classData.level);
+      // Try to extract level from name
+      const name = classData.name || '';
+      if (name.includes('JSS1') || name.includes('JSS 1')) {
+        updates.level = 'JSS1';
+      } else if (name.includes('JSS2') || name.includes('JSS 2')) {
+        updates.level = 'JSS2';
+      } else if (name.includes('JSS3') || name.includes('JSS 3')) {
+        updates.level = 'JSS3';
+      } else if (name.includes('SSS1') || name.includes('SSS 1')) {
+        updates.level = 'SSS1';
+      } else if (name.includes('SSS2') || name.includes('SSS 2')) {
+        updates.level = 'SSS2';
+      } else if (name.includes('SSS3') || name.includes('SSS 3')) {
+        updates.level = 'SSS3';
+      } else {
+        updates.level = 'JSS1'; // Default
+      }
+    }
+
+    // Fix shortName if missing
+    if (!classData.shortName && classData.name) {
+      updates.shortName = classData.name.replace(/\s+/g, '').substring(0, 10).toUpperCase();
+    }
+
+    // Fix name if missing
+    if (!classData.name && classData.level) {
+      updates.name = `${classData.level}${classData.stream ? ` ${classData.stream}` : ''}`;
+    }
+
+    // Add metadata if missing
+    if (!classData.metadata) {
+      updates.metadata = {
+        notes: [`Repaired by ${req.user.username} on ${new Date().toLocaleDateString()}`],
+        lastModifiedBy: req.user.id,
+        lastModifiedAt: new Date(),
+        createdBy: classData.metadata?.createdBy || req.user.id
+      };
+    }
+
+    if (Object.keys(updates).length > 0) {
+      const updatedClass = await Class.findByIdAndUpdate(
+        req.params.id,
+        updates,
+        { new: true, runValidators: true }
+      );
+
+      // Get student count
+      const studentCount = await User.countDocuments({
+        class: req.params.id,
+        role: 'student',
+        active: true
+      });
+
+      console.log('✅ Class repaired:', {
+        id: updatedClass._id,
+        updates: Object.keys(updates)
+      });
+
+      res.json({
+        success: true,
+        message: 'Class repaired successfully',
+        repairs: Object.keys(updates),
+        class: formatClassResponse(updatedClass.toObject(), studentCount)
+      });
+    } else {
+      // Get student count even if no repairs needed
+      const studentCount = await User.countDocuments({
+        class: req.params.id,
+        role: 'student',
+        active: true
+      });
+      
+      res.json({
+        success: true,
+        message: 'Class does not need repair',
+        class: formatClassResponse(classData, studentCount)
+      });
+    }
+  } catch (err) {
+    console.error('❌ PATCH /classes/:id/repair error:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to repair class',
+      details: err.message
+    });
+  }
+});
+
+
+// ──────────────────────────────────────────────────────────────
+// 26. BULK add students to class
+// ──────────────────────────────────────────────────────────────
+router.post('/:id/students/bulk', auth, adminOrSuperAdmin, validateObjectId, async (req, res) => {
+  try {
+    const { studentIds } = req.body;
+    const classId = req.params.id;
+
+    if (!Array.isArray(studentIds) || studentIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No student IDs provided'
+      });
+    }
+
+    console.log('👥 POST /api/classes/:id/students/bulk - Bulk adding students:', {
+      classId,
+      studentCount: studentIds.length,
+      by: req.user.username
+    });
+
+    const classData = await Class.findById(classId);
+    if (!classData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Class not found'
+      });
+    }
+
+    // Get current student count
+    const currentStudentCount = await User.countDocuments({
+      class: classId,
+      role: 'student',
+      active: true
+    });
+
+    // Check capacity
+    if (currentStudentCount + studentIds.length > classData.capacity) {
+      return res.status(400).json({
+        success: false,
+        error: 'Exceeds class capacity',
+        capacity: classData.capacity,
+        current: currentStudentCount,
+        attempting: studentIds.length,
+        available: classData.capacity - currentStudentCount
+      });
+    }
+
+    const results = {
+      total: studentIds.length,
+      successful: 0,
+      failed: 0,
+      details: []
+    };
+
+    for (const studentId of studentIds) {
+      try {
+        const student = await User.findById(studentId);
+        if (!student || student.role !== 'student') {
+          results.details.push({
+            studentId,
+            success: false,
+            error: 'Not a valid student'
+          });
+          results.failed++;
+          continue;
+        }
+
+        if (student.class) {
+          results.details.push({
+            studentId,
+            success: false,
+            error: 'Student already in a class',
+            currentClass: student.class
+          });
+          results.failed++;
+          continue;
+        }
+
+        // Update student's class
+        student.class = classId;
+        await student.save();
+
+        // Add to class's students array
+        if (!classData.students.includes(studentId)) {
+          classData.students.push(studentId);
+        }
+
+        results.details.push({
+          studentId,
+          success: true,
+          studentName: `${student.firstName || student.name || ''} ${student.lastName || student.surname || ''}`.trim()
+        });
+        results.successful++;
+      } catch (err) {
+        results.details.push({
+          studentId,
+          success: false,
+          error: err.message
+        });
+        results.failed++;
+      }
+    }
+
+    // Save class with updated students array
+    await classData.save();
+
+    // Get updated student count
+    const newStudentCount = await User.countDocuments({
+      class: classId,
+      role: 'student',
+      active: true
+    });
+
+    console.log('✅ Bulk student addition completed:', {
+      class: classData.name,
+      successful: results.successful,
+      failed: results.failed
+    });
+
+    res.json({
+      success: true,
+      message: `Successfully added ${results.successful} students to class`,
+      class: formatClassResponse(classData, newStudentCount),
+      results
+    });
+
+  } catch (err) {
+    console.error('❌ POST /classes/:id/students/bulk error:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to bulk add students to class',
       details: err.message
     });
   }

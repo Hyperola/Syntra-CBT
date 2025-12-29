@@ -491,7 +491,6 @@ const DataExports = () => {
       if (!token) throw new Error('No authentication token found.');
       
       const endpoint = `${API_BASE_URL}/api/reports/signatures`;
-      console.log('Uploading signatures to:', endpoint);
       
       await axios.post(endpoint, formData, {
         headers: { 
@@ -561,11 +560,15 @@ const DataExports = () => {
 
   const exportResults = async () => {
     setExporting(true);
+    setError(null);
+    setSuccess(null);
+    
     try {
       const token = localStorage.getItem('token');
       if (!token) throw new Error('No authentication token found.');
       
       let results = [];
+      let endpoint = `${API_BASE_URL}/api/results`;
       
       if (filters.resultType === 'class' && filters.resultClass) {
         // Get results for the entire class for a specific term
@@ -581,38 +584,64 @@ const DataExports = () => {
           limit: 1000
         };
         
-        // Add optional filters
-        if (filters.resultSubject) {
-          params.subject = filters.resultSubject;
-        }
-        if (filters.resultTerm) {
+        // Add term filter if selected
+        if (filters.resultTerm && filters.resultTerm !== '') {
           params.term = filters.resultTerm;
         }
-        if (filters.reportSession) {
-          params.session = filters.reportSession;
+        
+        // Add subject filter if selected
+        if (filters.resultSubject && filters.resultSubject !== '') {
+          params.subject = filters.resultSubject;
         }
         
-        const res = await axios.get(`${API_BASE_URL}/api/results`, {
+        // Add session filter if selected
+        if (filters.reportSession && filters.reportSession !== '') {
+          // Try to extract just the session part (before the term)
+          const sessionParts = filters.reportSession.split(' ');
+          if (sessionParts.length > 2) {
+            // If it's in format "2025/2026 First Term", extract just "2025/2026"
+            params.session = sessionParts.slice(0, -2).join(' ');
+          } else {
+            params.session = filters.reportSession;
+          }
+        }
+        
+        const res = await axios.get(endpoint, {
           headers: { Authorization: `Bearer ${token}` },
           params: params,
-          timeout: 15000,
+          timeout: 20000,
         });
         
         if (res.data && res.data.success) {
           results = res.data.results || [];
         }
         
-      } else if (filters.resultType === 'student' && filters.resultStudent && filters.reportSession && filters.resultTerm) {
-        // Get results for a specific student for a specific term
-        const res = await axios.get(`${API_BASE_URL}/api/results`, {
+      } else if (filters.resultType === 'student' && filters.resultStudent) {
+        // Get results for a specific student
+        const params = {
+          studentId: filters.resultStudent,
+          limit: 1000
+        };
+        
+        // Add term filter if selected
+        if (filters.resultTerm && filters.resultTerm !== '') {
+          params.term = filters.resultTerm;
+        }
+        
+        // Add session filter if selected
+        if (filters.reportSession && filters.reportSession !== '') {
+          const sessionParts = filters.reportSession.split(' ');
+          if (sessionParts.length > 2) {
+            params.session = sessionParts.slice(0, -2).join(' ');
+          } else {
+            params.session = filters.reportSession;
+          }
+        }
+        
+        const res = await axios.get(endpoint, {
           headers: { Authorization: `Bearer ${token}` },
-          params: {
-            studentId: filters.resultStudent,
-            session: filters.reportSession,
-            term: filters.resultTerm,
-            limit: 1000
-          },
-          timeout: 15000,
+          params: params,
+          timeout: 20000,
         });
         
         if (res.data && res.data.success) {
@@ -624,7 +653,7 @@ const DataExports = () => {
       }
       
       if (results.length === 0) {
-        setError('No results found for the selected filters.');
+        setError(`No results found for the selected filters.`);
         return;
       }
       
@@ -645,12 +674,31 @@ const DataExports = () => {
       }));
       
       const csv = Papa.unparse(csvData);
-      downloadCSV(csv, `results_${filters.resultType}_${filters.resultClass || filters.resultStudent}_${filters.resultTerm || 'all'}_${new Date().getTime()}.csv`);
+      const filename = `results_${filters.resultType}_${filters.resultClass || filters.resultStudent}_${filters.resultTerm || 'all'}_${new Date().getTime()}.csv`;
+      downloadCSV(csv, filename);
       setSuccess(`Exported ${results.length} results successfully.`);
       setError(null);
+      
     } catch (err) {
       console.error('Error exporting results:', err);
-      setError(err.response?.data?.error || 'Failed to export results. Please check your filters and try again.');
+      
+      let errorMessage = 'Failed to export results. ';
+      
+      if (err.response) {
+        if (err.response.status === 404) {
+          errorMessage += 'No results found for the selected filters.';
+        } else if (err.response.status === 400) {
+          errorMessage += 'Invalid parameters. Please check your filters.';
+        } else if (err.response.data?.error) {
+          errorMessage += err.response.data.error;
+        }
+      } else if (err.request) {
+        errorMessage += 'No response from server. Please check your connection.';
+      } else {
+        errorMessage += err.message;
+      }
+      
+      setError(errorMessage);
       setSuccess(null);
     } finally {
       setExporting(false);
@@ -677,14 +725,6 @@ const DataExports = () => {
       // Use the correct endpoint with query parameters
       const endpoint = `${API_BASE_URL}/api/reports/export/report/${filters.reportStudent}/${encodeURIComponent(sessionName)}?term=${encodeURIComponent(term)}`;
       
-      console.log('📤 Exporting report card from:', endpoint);
-      console.log('📋 Details:', {
-        studentId: filters.reportStudent,
-        session: sessionName,
-        term: term,
-        fullEndpoint: endpoint
-      });
-      
       const res = await axios.get(endpoint, {
         headers: { Authorization: `Bearer ${token}` },
         responseType: 'blob',
@@ -693,7 +733,6 @@ const DataExports = () => {
       
       // Check if response is PDF
       if (res.headers['content-type'] !== 'application/pdf') {
-        console.error('Response is not PDF:', res.headers['content-type']);
         throw new Error('Server returned non-PDF response');
       }
       
@@ -710,17 +749,10 @@ const DataExports = () => {
       setSuccess('Report card exported successfully.');
       setError(null);
     } catch (err) {
-      console.error('❌ Error exporting report card:', err);
+      console.error('Error exporting report card:', err);
       let errorMessage = 'Failed to export report card.';
       
       if (err.response) {
-        console.error('Response details:', {
-          status: err.response.status,
-          statusText: err.response.statusText,
-          headers: err.response.headers,
-          data: err.response.data
-        });
-        
         if (err.response.status === 404) {
           errorMessage = 'No results found for the selected student and session.';
         } else if (err.response.status === 400) {
@@ -753,54 +785,6 @@ const DataExports = () => {
       
       setError(errorMessage);
       setSuccess(null);
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  // Alternative report card export using results.js endpoint
-  const exportReportCardAlt = async () => {
-    setExporting(true);
-    try {
-      if (!filters.reportStudent || !filters.reportSession) {
-        setError('Please select a student and session for report card export.');
-        return;
-      }
-      
-      const token = localStorage.getItem('token');
-      if (!token) throw new Error('No authentication token found.');
-      
-      // Parse the combined session
-      const sessionParts = filters.reportSession.split(' ');
-      const sessionName = sessionParts.slice(0, -2).join(' ');
-      const term = sessionParts.slice(-2).join(' ');
-      
-      // Alternative endpoint from results.js
-      const endpoint = `${API_BASE_URL}/api/results/export/report/${filters.reportStudent}/${encodeURIComponent(sessionName)}/${encodeURIComponent(term)}`;
-      
-      console.log('📤 Exporting report card (alternative) from:', endpoint);
-      
-      const res = await axios.get(endpoint, {
-        headers: { Authorization: `Bearer ${token}` },
-        responseType: 'blob',
-        timeout: 30000,
-      });
-      
-      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
-      const link = document.createElement('a');
-      link.href = url;
-      const filename = `report_alt_${filters.reportStudent}_${sessionName.replace(/\//g, '_')}_${term.replace(/\s/g, '_')}.pdf`;
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-      
-      setSuccess('Report card exported successfully (alternative endpoint).');
-      setError(null);
-    } catch (err) {
-      console.error('Error exporting report card (alternative):', err);
-      setError('Failed to export report card using alternative endpoint.');
     } finally {
       setExporting(false);
     }
@@ -880,31 +864,6 @@ const DataExports = () => {
       setError('Failed to export results');
     } finally {
       setExporting(false);
-    }
-  };
-
-  // Test endpoint function
-  const testEndpoint = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      if (!token) throw new Error('No authentication token found.');
-      
-      // Test with a known working example
-      const testEndpoint = `${API_BASE_URL}/api/results/export/report/69340bb643e15fa3f5b42a6e/2025/2026/First Term`;
-      
-      console.log('Testing endpoint:', testEndpoint);
-      
-      const response = await axios.get(testEndpoint, {
-        headers: { Authorization: `Bearer ${token}` },
-        responseType: 'blob',
-        timeout: 10000,
-      });
-      
-      console.log('✅ Endpoint works!', response.status);
-      setSuccess('Endpoint test successful!');
-    } catch (err) {
-      console.log('❌ Endpoint failed:', err.response?.status, err.message);
-      setError(`Endpoint test failed: ${err.message}`);
     }
   };
 
@@ -1798,53 +1757,6 @@ const DataExports = () => {
                       </div>
                     </div>
                   </div>
-                  
-                  {/* Debug Section */}
-                  {(user?.role === 'admin' || user?.role === 'super_admin') && (
-                    <div style={{
-                      background: 'rgba(59, 130, 246, 0.1)',
-                      borderLeft: `4px solid ${colors.blue}`,
-                      padding: '1rem',
-                      borderRadius: '0 4px 4px 0',
-                      marginTop: '1rem',
-                    }}>
-                      <h4 style={{ fontSize: '0.875rem', fontWeight: '600', color: colors.blue, marginBottom: '0.5rem' }}>
-                        Admin Tools
-                      </h4>
-                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                        <button
-                          onClick={testEndpoint}
-                          style={{
-                            padding: '0.5rem 1rem',
-                            background: colors.blue,
-                            color: colors.white,
-                            border: 'none',
-                            borderRadius: '6px',
-                            fontSize: '0.75rem',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Test Endpoint
-                        </button>
-                        <button
-                          onClick={exportReportCardAlt}
-                          disabled={!filters.reportStudent || !filters.reportSession}
-                          style={{
-                            padding: '0.5rem 1rem',
-                            background: colors.green,
-                            color: colors.white,
-                            border: 'none',
-                            borderRadius: '6px',
-                            fontSize: '0.75rem',
-                            cursor: (!filters.reportStudent || !filters.reportSession) ? 'not-allowed' : 'pointer',
-                            opacity: (!filters.reportStudent || !filters.reportSession) ? 0.6 : 1,
-                          }}
-                        >
-                          Try Alternative Export
-                        </button>
-                      </div>
-                    </div>
-                  )}
                 </div>
                 
                 <div>

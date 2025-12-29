@@ -161,6 +161,11 @@ app.get('/', (req, res) => {
     reportEndpoints: {
       reports: '/api/reports/export/report/:studentId/:session',
       results: '/api/results/export/report/:studentId/:session/:term'
+    },
+    promotionEndpoints: {
+      status: '/api/promotions/status',
+      eligibility: '/api/promotions/session-eligibility/:classId',
+      bulkPromote: '/api/promotions/bulk-promote'
     }
   });
 });
@@ -231,6 +236,7 @@ app.get('/api/debug-routes', (req, res) => {
     totalRoutes: routes.length,
     routes: routes.filter(r => r.path.includes('/api/')),
     teacherRoutes: routes.filter(r => r.path.includes('/api/teacher')),
+    promotionRoutes: routes.filter(r => r.path.includes('/api/promotion')),
     reportRoutes: routes.filter(r => r.path.includes('/api/reports')),
     timestamp: new Date().toISOString()
   });
@@ -305,6 +311,11 @@ app.get('/api/debug/user-info', auth, (req, res) => {
       reports: {
         export: `/api/reports/export/report/:studentId/:session`,
         results: `/api/results/export/report/:studentId/:session/:term`
+      },
+      promotion: {
+        status: '/api/promotions/status',
+        eligibility: '/api/promotions/session-eligibility/:classId',
+        bulkPromote: '/api/promotions/bulk-promote'
       }
     }
   });
@@ -452,6 +463,23 @@ app.post('/api/teacher/questions/simple-test', auth, async (req, res) => {
 });
 
 // ================================
+// PROMOTION DEBUG ROUTE - ADD THIS
+// ================================
+
+app.get('/api/promotions/test', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Promotion routes are working!',
+    timestamp: new Date().toISOString(),
+    endpoints: [
+      'GET /api/promotions/status',
+      'GET /api/promotions/session-eligibility/:classId',
+      'POST /api/promotions/bulk-promote'
+    ]
+  });
+});
+
+// ================================
 // ✅ CRITICAL FIX: ROUTES MOUNTING ORDER
 // ================================
 
@@ -471,7 +499,8 @@ try {
   console.log('   ✅ analyticsRoutes:', !!analyticsRoutes);
   console.log('   ✅ testRoutes:', !!testRoutes);
   console.log('   ✅ teacherQuestionsRoutes:', !!teacherQuestionsRoutes);
-  console.log('   ✅ reportCardsRoutes:', !!reportCardsRoutes); // Added this line
+  console.log('   ✅ promotionRoutes:', !!promotionRoutes);
+  console.log('   ✅ reportCardsRoutes:', !!reportCardsRoutes);
 } catch (error) {
   console.log('❌ Error checking routes:', error.message);
 }
@@ -497,13 +526,17 @@ app.use('/api/classes', classRoutes);
 app.use('/api/results', resultsRoutes);
 app.use('/api/subjects', subjectsRoutes);
 app.use('/api/sessions', sessionsRoutes);
-app.use('/api/promotion', promotionRoutes);
+app.use('/api/promotions', promotionRoutes); // ✅ FIXED: Changed from /api/promotion to /api/promotions
 app.use('/api/transcript', transcriptRoutes);
 app.use('/api/class-setup', classSetupRoutes);
 app.use('/api/class-subjects', classSubjectsRoutes);
-app.use('/api/reports', reportCardsRoutes); // ADD THIS LINE - Mount reportcard route
+app.use('/api/reports', reportCardsRoutes);
 
 console.log('✅ All routes mounted successfully');
+console.log('🎯 IMPORTANT: Promotion routes are now accessible at:');
+console.log('   📍 /api/promotions/status');
+console.log('   📍 /api/promotions/session-eligibility/:classId');
+console.log('   📍 /api/promotions/bulk-promote');
 console.log('🎯 IMPORTANT: Teacher routes are now accessible at:');
 console.log('   📍 /api/teacher/questions-test');
 console.log('   📍 /api/teacher/questions');
@@ -594,6 +627,11 @@ app.get('/api/test', (req, res) => {
     reportEndpoints: {
       reports: '/api/reports/export/report/:studentId/:session?term=First Term',
       results: '/api/results/export/report/:studentId/:session/:term'
+    },
+    promotionEndpoints: {
+      status: '/api/promotions/status',
+      eligibility: '/api/promotions/session-eligibility/:classId',
+      bulkPromote: '/api/promotions/bulk-promote'
     }
   });
 });
@@ -626,6 +664,14 @@ app.get('/api/health', (req, res) => {
         endpoints: [
           '/api/reports/export/report/:studentId/:session',
           '/api/results/export/report/:studentId/:session/:term'
+        ]
+      },
+      promotionRoutes: {
+        working: true,
+        endpoints: [
+          '/api/promotions/status',
+          '/api/promotions/session-eligibility/:classId',
+          '/api/promotions/bulk-promote'
         ]
       }
     };
@@ -782,6 +828,11 @@ app.use('/api/*', (req, res) => {
       reports: [
         '/api/reports/export/report/:studentId/:session',
         '/api/results/export/report/:studentId/:session/:term'
+      ],
+      promotion: [
+        '/api/promotions/status',
+        '/api/promotions/session-eligibility/:classId',
+        '/api/promotions/bulk-promote'
       ],
       auth: '/api/auth/*',
       users: '/api/users/*',
@@ -948,6 +999,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`   📍 Teacher Classes: http://localhost:${PORT}/api/users/teachers/classes`);
   console.log(`   📍 Teacher Test: http://localhost:${PORT}/api/users/teachers/test`);
   console.log(`   📍 Teacher Routes Debug: http://localhost:${PORT}/api/debug-teacher-routes`);
+  console.log(`   📍 Promotion Test: http://localhost:${PORT}/api/promotions/test`);
   console.log('');
   console.log('📚 TEACHER QUESTION ENDPOINTS (CRITICAL):');
   console.log(`   📍 Teacher Questions Test: http://localhost:${PORT}/api/teacher/questions-test`);
@@ -959,6 +1011,11 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`   📍 Teacher Classes: http://localhost:${PORT}/api/users/teachers/6931b8ec77ceafcb4e65b2f9/classes`);
   console.log(`   📍 Teacher Assignments: http://localhost:${PORT}/api/users/teachers/6931b8ec77ceafcb4e65b2f9/assignments`);
   console.log('');
+  console.log('🎓 PROMOTION ENDPOINTS:');
+  console.log(`   📍 Promotion Status: http://localhost:${PORT}/api/promotions/status`);
+  console.log(`   📍 Session Eligibility: http://localhost:${PORT}/api/promotions/session-eligibility/692f04ca5bf8dc34546e7623?session=2025/2026`);
+  console.log(`   📍 Bulk Promote: http://localhost:${PORT}/api/promotions/bulk-promote (POST)`);
+  console.log('');
   console.log('📊 REPORT ENDPOINTS:');
   console.log(`   📍 Reports Export: http://localhost:${PORT}/api/reports/export/report/:studentId/:session`);
   console.log(`   📍 Results Export: http://localhost:${PORT}/api/results/export/report/:studentId/:session/:term`);
@@ -968,7 +1025,8 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`   1. 📍 http://localhost:${PORT}/api/teacher/questions-test`);
   console.log(`   2. 📍 http://localhost:${PORT}/api/debug-teacher-routes`);
   console.log(`   3. Use POST to: http://localhost:${PORT}/api/teacher/questions/simple-test`);
-  console.log(`   4. Test reports: http://localhost:${PORT}/api/reports/export/report/69340bb643e15fa3f5b42a6e/2025/2026?term=First Term`);
+  console.log(`   4. Test promotion: http://localhost:${PORT}/api/promotions/test`);
+  console.log(`   5. Test reports: http://localhost:${PORT}/api/reports/export/report/69340bb643e15fa3f5b42a6e/2025/2026?term=First Term`);
   console.log('🎉 ================================');
 });
 

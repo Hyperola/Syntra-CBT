@@ -1,4 +1,4 @@
-// pages/CreateTeacherWithSubjects.js - UPDATED TO MATCH MANAGEUSERS.JS FORMAT
+// pages/CreateTeacherWithSubjects.js - UPDATED WITH CORRECT ASSIGNMENT SAVING
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -7,7 +7,7 @@ import {
   FiUser, FiBook, FiCheck, FiX, FiPlus, FiTrash2,
   FiChevronDown, FiChevronUp, FiAlertCircle, FiCheckCircle,
   FiLock, FiMail, FiPhone, FiLoader, FiAlertTriangle,
-  FiXCircle, FiSave
+  FiXCircle, FiSave, FiUpload, FiImage, FiMapPin, FiCalendar
 } from 'react-icons/fi';
 
 const CreateTeacherWithSubjects = () => {
@@ -24,16 +24,23 @@ const CreateTeacherWithSubjects = () => {
     password: '',
     confirmPassword: '',
     email: '',
-    name: '',
-    surname: '',
+    firstName: '',
+    middleName: '',
+    lastName: '',
     phoneNumber: '',
-    class: '', // Primary class (optional)
+    class: '',
     active: true,
     dateOfBirth: '',
     address: '',
     sex: '',
-    age: ''
+    age: '',
+    picture: null
   });
+  
+  // Image upload state
+  const [profileImage, setProfileImage] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
   
   // Class and subject assignments
   const [classes, setClasses] = useState([]);
@@ -46,6 +53,7 @@ const CreateTeacherWithSubjects = () => {
   const [availableSubjectsForAssignment, setAvailableSubjectsForAssignment] = useState([]);
   const [loadingAssignmentSubjects, setLoadingAssignmentSubjects] = useState(false);
   const [loadingClasses, setLoadingClasses] = useState(false);
+  const [subjectCache, setSubjectCache] = useState({}); // Cache for subject names
   
   // Form validation
   const [errors, setErrors] = useState({});
@@ -58,7 +66,7 @@ const CreateTeacherWithSubjects = () => {
     setLoadingClasses(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get('http://localhost:5000/api/users/assignment/classes', {
+      const res = await axios.get('http://localhost:5000/api/classes', {
         headers: { Authorization: `Bearer ${token}` }
       });
       
@@ -73,7 +81,15 @@ const CreateTeacherWithSubjects = () => {
         if (!cls) return null;
         
         const classId = cls._id || cls.id;
-        const className = cls.name || cls.fullName || `Class ${classId?.substring(0, 4)}...`;
+        let className = cls.name || cls.fullName || `Class ${classId?.substring(0, 4)}...`;
+        
+        if (cls.level && cls.stream) {
+          className = `${cls.level} ${cls.stream}`;
+        } else if (cls.level) {
+          className = cls.level;
+        } else if (cls.shortName) {
+          className = cls.shortName;
+        }
         
         return {
           _id: classId,
@@ -109,20 +125,8 @@ const CreateTeacherWithSubjects = () => {
       let subjectsList = [];
       
       try {
+        // Try the new endpoint first
         const res = await axios.get(`http://localhost:5000/api/users/assignment/classes/${classId}/subjects`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        
-        if (res.data && res.data.subjects) {
-          subjectsList = res.data.subjects;
-        } else if (res.data && res.data.success && Array.isArray(res.data.data)) {
-          subjectsList = res.data.data;
-        }
-      } catch (firstErr) {
-        console.log('First API attempt failed, trying alternative...', firstErr);
-        
-        // Try alternative endpoint
-        const res = await axios.get(`http://localhost:5000/api/classes/${classId}/subjects`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         
@@ -131,18 +135,62 @@ const CreateTeacherWithSubjects = () => {
         } else if (res.data && res.data.success && Array.isArray(res.data.data)) {
           subjectsList = res.data.data;
         }
+      } catch (firstErr) {
+        console.warn('Assignment subjects API failed, trying alternative...');
+        try {
+          // Try class subjects endpoint
+          const res = await axios.get(`http://localhost:5000/api/classes/${classId}/subjects`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          
+          if (res.data && Array.isArray(res.data.subjects)) {
+            subjectsList = res.data.subjects;
+          } else if (res.data && res.data.success && Array.isArray(res.data.data)) {
+            subjectsList = res.data.data;
+          }
+        } catch (secondErr) {
+          console.warn('Second API failed, trying all subjects...');
+          const res = await axios.get('http://localhost:5000/api/subjects', {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          
+          if (res.data && Array.isArray(res.data.subjects)) {
+            subjectsList = res.data.subjects.filter(sub => 
+              sub.classId === classId || sub.class === classId || 
+              (sub.classes && sub.classes.includes(classId))
+            );
+          } else if (res.data && res.data.success && Array.isArray(res.data.data)) {
+            subjectsList = res.data.data.filter(sub => 
+              sub.classId === classId || sub.class === classId || 
+              (sub.classes && sub.classes.includes(classId))
+            );
+          } else if (Array.isArray(res.data)) {
+            subjectsList = res.data.filter(sub => 
+              sub.classId === classId || sub.class === classId || 
+              (sub.classes && sub.classes.includes(classId))
+            );
+          }
+        }
       }
       
       const formattedSubjects = subjectsList.map(sub => ({
         id: sub._id || sub.id || sub.subjectId,
         _id: sub._id || sub.id || sub.subjectId,
-        name: sub.name || sub.displayName || sub.subjectName || 'Unknown Subject',
+        name: sub.name || sub.displayName || sub.subjectName || sub.subject?.name || 'Unknown Subject',
         code: sub.code || sub.subjectCode || '',
         isCore: sub.isCore || false
       })).filter(Boolean);
       
-      console.log('📚 Assignment subjects for class', classId, ':', formattedSubjects);
       setAvailableSubjectsForAssignment(formattedSubjects);
+      
+      // Cache subject names for later use
+      const newCache = { ...subjectCache };
+      formattedSubjects.forEach(sub => {
+        if (sub.id && sub.name) {
+          newCache[sub.id] = sub.name;
+        }
+      });
+      setSubjectCache(newCache);
       
     } catch (err) {
       console.error('Error fetching assignment subjects:', err);
@@ -192,7 +240,7 @@ const CreateTeacherWithSubjects = () => {
     });
   };
 
-  const addTeacherAssignment = () => {
+  const addTeacherAssignment = async () => {
     if (!teacherAssignmentModal.selectedClass || teacherAssignmentModal.selectedSubjects.length === 0) {
       setError('Please select a class and at least one subject');
       return;
@@ -201,40 +249,127 @@ const CreateTeacherWithSubjects = () => {
     const selectedClass = classes.find(c => c._id === teacherAssignmentModal.selectedClass);
     if (!selectedClass) return;
 
-    const newAssignment = {
-      classId: teacherAssignmentModal.selectedClass,
-      className: selectedClass.name,
-      subjects: teacherAssignmentModal.selectedSubjects.map(subjectId => {
-        const subject = availableSubjectsForAssignment.find(s => s.id === subjectId);
-        return {
-          subjectId: subjectId,
-          subjectName: subject?.name || 'Unknown Subject'
-        };
-      })
-    };
+    try {
+      // First, get subject names from backend for accuracy
+      const token = localStorage.getItem('token');
+      const subjectPromises = teacherAssignmentModal.selectedSubjects.map(async (subjectId) => {
+        try {
+          const res = await axios.get(`http://localhost:5000/api/subjects/${subjectId}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          
+          if (res.data && res.data.subject) {
+            return {
+              id: subjectId,
+              name: res.data.subject.name || res.data.subject.displayName || 'Unknown Subject'
+            };
+          }
+        } catch (err) {
+          console.warn(`Could not fetch subject ${subjectId}:`, err.message);
+          return {
+            id: subjectId,
+            name: subjectCache[subjectId] || `Subject ${subjectId}`
+          };
+        }
+      });
 
-    // Check if this class is already assigned
-    const existingIndex = teacherAssignments.findIndex(
-      assignment => assignment.classId === teacherAssignmentModal.selectedClass
-    );
+      const subjectsWithNames = await Promise.all(subjectPromises);
 
-    if (existingIndex >= 0) {
-      // Update existing assignment
-      const updatedAssignments = [...teacherAssignments];
-      updatedAssignments[existingIndex] = newAssignment;
+      // Format assignment according to backend expectations
+      const newAssignment = {
+        class: teacherAssignmentModal.selectedClass, // Backend expects 'class' (ObjectId)
+        subjects: subjectsWithNames.map(subject => ({
+          subject: subject.id, // Backend expects 'subject' (ObjectId)
+          subjectName: subject.name // Backend expects 'subjectName' (String)
+        }))
+      };
+
+      // Check if this class is already assigned
+      const existingIndex = teacherAssignments.findIndex(
+        assignment => assignment.class === teacherAssignmentModal.selectedClass
+      );
+
+      let updatedAssignments;
+      if (existingIndex >= 0) {
+        // Update existing assignment - merge subjects
+        updatedAssignments = [...teacherAssignments];
+        const existingAssignment = updatedAssignments[existingIndex];
+        
+        // Combine subjects, avoiding duplicates
+        const existingSubjectIds = existingAssignment.subjects.map(s => s.subject);
+        const newSubjects = newAssignment.subjects.filter(
+          subject => !existingSubjectIds.includes(subject.subject)
+        );
+        
+        if (newSubjects.length > 0) {
+          updatedAssignments[existingIndex] = {
+            ...existingAssignment,
+            subjects: [...existingAssignment.subjects, ...newSubjects]
+          };
+        } else {
+          setError('All selected subjects are already assigned to this class.');
+          return;
+        }
+      } else {
+        // Add new assignment
+        updatedAssignments = [...teacherAssignments, newAssignment];
+      }
+
       setTeacherAssignments(updatedAssignments);
-    } else {
-      // Add new assignment
-      setTeacherAssignments([...teacherAssignments, newAssignment]);
+      closeTeacherAssignmentModal();
+      
+      setSuccess(`Added ${subjectsWithNames.length} subject(s) to ${selectedClass.name}`);
+      setTimeout(() => setSuccess(null), 3000);
+      
+    } catch (err) {
+      console.error('Error adding assignment:', err);
+      setError('Failed to fetch subject details. Please try again.');
     }
-
-    closeTeacherAssignmentModal();
   };
 
   const removeTeacherAssignment = (classId) => {
     setTeacherAssignments(prev => 
-      prev.filter(assignment => assignment.classId !== classId)
+      prev.filter(assignment => assignment.class !== classId)
     );
+  };
+
+  const handleImageUpload = async (file) => {
+    if (!file) return;
+    
+    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    const maxSize = 5 * 1024 * 1024;
+    
+    if (!validTypes.includes(file.type)) {
+      setError('Please upload a valid image file (JPG, PNG, GIF, WebP).');
+      return;
+    }
+    
+    if (file.size > maxSize) {
+      setError('Image size must be less than 5MB.');
+      return;
+    }
+    
+    setUploadingImage(true);
+    try {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result);
+      };
+      reader.readAsDataURL(file);
+      
+      setProfileImage(file);
+      setTeacherData(prev => ({ ...prev, picture: file.name }));
+    } catch (err) {
+      setError('Failed to process image.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const removeProfileImage = () => {
+    setProfileImage(null);
+    setImagePreview(null);
+    setTeacherData(prev => ({ ...prev, picture: null }));
   };
 
   const calculateAge = (dateOfBirth) => {
@@ -270,29 +405,25 @@ const CreateTeacherWithSubjects = () => {
     const newErrors = {};
     const cleanedUsername = cleanUsername(teacherData.username);
     
-    // Basic teacher info validation
     if (!cleanedUsername.trim()) newErrors.username = 'Username is required';
     if (!teacherData.password.trim()) newErrors.password = 'Password is required';
     if (teacherData.password.length < 6) newErrors.password = 'Password must be at least 6 characters';
     if (!teacherData.confirmPassword.trim()) newErrors.confirmPassword = 'Please confirm password';
     if (teacherData.password !== teacherData.confirmPassword) newErrors.confirmPassword = 'Passwords do not match';
     if (!teacherData.email.trim()) newErrors.email = 'Email is required';
-    if (!teacherData.name.trim()) newErrors.name = 'Name is required';
-    if (!teacherData.surname.trim()) newErrors.surname = 'Surname is required';
+    if (!teacherData.firstName.trim()) newErrors.firstName = 'First name is required';
+    if (!teacherData.lastName.trim()) newErrors.lastName = 'Last name is required';
     
-    // Username format validation
     const usernameRegex = /^[a-zA-Z0-9_]+$/;
     if (!usernameRegex.test(cleanedUsername)) {
       newErrors.username = 'Username can only contain letters, numbers, and underscores. No spaces allowed.';
     }
     
-    // Email validation
     const emailRegex = /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/;
     if (teacherData.email && !emailRegex.test(teacherData.email)) {
       newErrors.email = 'Please enter a valid email address';
     }
     
-    // Teacher assignments validation
     if (teacherAssignments.length === 0) {
       newErrors.teacherAssignments = 'At least one class assignment is required';
     }
@@ -321,23 +452,32 @@ const CreateTeacherWithSubjects = () => {
       
       const cleanedUsername = cleanUsername(teacherData.username);
       
-      // Format teacher assignments exactly like ManageUsers.js does
-      const formattedAssignments = teacherAssignments.map(assignment => ({
-        class: assignment.classId,
-        className: assignment.className,
-        subjects: assignment.subjects.map(subject => ({
-          subject: subject.subjectId,
-          subjectName: subject.subjectName
-        }))
-      }));
+      // FORMAT TEACHER ASSIGNMENTS CORRECTLY
+      // This is the key fix - match backend expectations exactly
+      const formattedAssignments = teacherAssignments.map(assignment => {
+        // Get class name for this assignment
+        const classObj = classes.find(c => c._id === assignment.class);
+        const className = classObj ? classObj.name : 'Unknown Class';
+        
+        return {
+          class: assignment.class, // ObjectId
+          subjects: assignment.subjects.map(subject => ({
+            subject: subject.subject, // ObjectId
+            subjectName: subject.subjectName // String
+          }))
+        };
+      });
       
-      // Build teacher data according to your backend POST /users format
+      console.log('📤 Formatted assignments for backend:', JSON.stringify(formattedAssignments, null, 2));
+      
+      // Build teacher data according to backend expectations
       const teacherDataToSend = {
         username: cleanedUsername,
         password: teacherData.password,
         email: teacherData.email.trim().toLowerCase(),
-        name: teacherData.name.trim(),
-        surname: teacherData.surname.trim(),
+        firstName: teacherData.firstName.trim(),
+        middleName: teacherData.middleName?.trim() || '',
+        lastName: teacherData.lastName.trim(),
         role: 'teacher',
         class: teacherData.class || undefined,
         phoneNumber: teacherData.phoneNumber?.trim() || undefined,
@@ -346,24 +486,62 @@ const CreateTeacherWithSubjects = () => {
         address: teacherData.address?.trim() || undefined,
         sex: teacherData.sex || undefined,
         age: teacherData.age ? parseInt(teacherData.age) : undefined,
-        teacherAssignments: formattedAssignments
+        teacherAssignments: formattedAssignments // This is the key field
       };
       
       console.log('📤 Creating teacher with data:', JSON.stringify(teacherDataToSend, null, 2));
       
-      // Create the teacher in one API call
+      // Step 1: Create the teacher with all data including assignments
       const response = await axios.post('http://localhost:5000/api/users', 
         teacherDataToSend, 
         {
           headers: { 
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json'
-          }
+          },
+          timeout: 15000
         }
       );
       
       console.log('✅ Teacher created successfully:', response.data);
-      setSuccess('Teacher created successfully!');
+      
+      const teacherId = response.data.user?._id || response.data.data?._id || response.data._id || response.data.id;
+      
+      if (!teacherId) {
+        throw new Error('Could not retrieve teacher ID from response');
+      }
+      
+      // Step 2: Upload profile image if selected
+      if (profileImage && teacherId) {
+        try {
+          // Convert image to base64
+          const reader = new FileReader();
+          const base64Image = await new Promise((resolve, reject) => {
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(profileImage);
+          });
+          
+          // Send base64 image with user update
+          await axios.put(
+            `http://localhost:5000/api/users/${teacherId}`,
+            { profileImage: base64Image },
+            {
+              headers: { 
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+          
+          console.log('✅ Profile image uploaded successfully');
+        } catch (imageErr) {
+          console.warn('⚠️ Could not upload profile image:', imageErr.message);
+          // Continue even if image upload fails
+        }
+      }
+      
+      setSuccess('Teacher created successfully with assignments!');
       
       // Reset form
       setTeacherData({
@@ -371,17 +549,23 @@ const CreateTeacherWithSubjects = () => {
         password: '',
         confirmPassword: '',
         email: '',
-        name: '',
-        surname: '',
+        firstName: '',
+        middleName: '',
+        lastName: '',
         phoneNumber: '',
         class: '',
         active: true,
         dateOfBirth: '',
         address: '',
         sex: '',
-        age: ''
+        age: '',
+        picture: null
       });
       setTeacherAssignments([]);
+      setProfileImage(null);
+      setImagePreview(null);
+      setSubjectCache({});
+      setErrors({});
       
       // Navigate back after 2 seconds
       setTimeout(() => {
@@ -391,34 +575,42 @@ const CreateTeacherWithSubjects = () => {
     } catch (err) {
       console.error('❌ Error creating teacher:', err);
       
+      let errorMessage = 'Failed to create teacher';
+      
       if (err.response) {
-        console.error('❌ Server error details:', {
-          status: err.response.status,
-          data: err.response.data,
-          headers: err.response.headers
-        });
+        console.error('❌ Server error details:', err.response.data);
         
-        let errorMessage = 'Server error occurred';
         if (err.response.data) {
           if (err.response.data.message) {
             errorMessage = err.response.data.message;
           } else if (err.response.data.error) {
             errorMessage = err.response.data.error;
           } else if (err.response.data.errors) {
-            // Handle validation errors
             errorMessage = Object.values(err.response.data.errors).join(', ');
+          } else if (typeof err.response.data === 'string') {
+            errorMessage = err.response.data;
           }
         }
         setError(`Server Error (${err.response.status}): ${errorMessage}`);
+      } else if (err.request) {
+        setError('Network error. Please check your connection.');
       } else {
-        setError(`Request Error: ${err.message}`);
+        setError(`Error: ${err.message}`);
       }
     } finally {
       setLoading(false);
     }
   };
 
-  // Check authorization
+  const getClassName = (classId) => {
+    const classObj = classes.find(c => c._id === classId);
+    return classObj ? classObj.name : 'Unknown Class';
+  };
+
+  const getSubjectName = (subjectId) => {
+    return subjectCache[subjectId] || `Subject ${subjectId?.substring(0, 4)}...`;
+  };
+
   if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) {
     return (
       <div style={styles.authRequired}>
@@ -461,6 +653,62 @@ const CreateTeacherWithSubjects = () => {
       )}
 
       <form onSubmit={handleSubmit} style={styles.form}>
+        {/* Profile Image Upload Section */}
+        <div style={styles.imageUploadSection}>
+          <h3 style={styles.sectionTitle}>Profile Image</h3>
+          <div style={styles.imageUploadContainer}>
+            <div style={styles.imagePreviewArea}>
+              {imagePreview ? (
+                <img src={imagePreview} alt="Preview" style={styles.imagePreview} />
+              ) : (
+                <div style={styles.imagePlaceholder}>
+                  <FiImage size={40} color="#718096" />
+                  <span style={styles.placeholderText}>No Image</span>
+                </div>
+              )}
+            </div>
+            <div style={styles.imageUploadControls}>
+              <input
+                type="file"
+                id="profileImage"
+                accept="image/jpeg,image/png,image/gif,image/webp"
+                onChange={(e) => handleImageUpload(e.target.files[0])}
+                style={{ display: 'none' }}
+                disabled={uploadingImage}
+              />
+              <label htmlFor="profileImage" style={styles.uploadButton}>
+                {uploadingImage ? (
+                  <>
+                    <FiLoader style={{animation: 'spin 1s linear infinite'}} />
+                    Uploading...
+                  </>
+                ) : imagePreview ? (
+                  <>
+                    <FiUpload /> Change Photo
+                  </>
+                ) : (
+                  <>
+                    <FiUpload /> Upload Photo
+                  </>
+                )}
+              </label>
+              {imagePreview && (
+                <button
+                  type="button"
+                  onClick={removeProfileImage}
+                  style={styles.removeImageButton}
+                  disabled={uploadingImage}
+                >
+                  <FiXCircle /> Remove
+                </button>
+              )}
+              <div style={styles.imageUploadInfo}>
+                <small>JPG, PNG, GIF, WebP up to 5MB</small>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Basic Teacher Information */}
         <div style={styles.section}>
           <h3 style={styles.sectionTitle}>
@@ -469,7 +717,9 @@ const CreateTeacherWithSubjects = () => {
           
           <div style={styles.formGrid}>
             <div style={styles.formGroup}>
-              <label>Username *</label>
+              <label style={styles.formLabel}>
+                Username <span style={styles.required}>*</span>
+              </label>
               <input
                 type="text"
                 value={teacherData.username}
@@ -482,7 +732,9 @@ const CreateTeacherWithSubjects = () => {
             </div>
             
             <div style={styles.formGroup}>
-              <label>Email *</label>
+              <label style={styles.formLabel}>
+                Email <span style={styles.required}>*</span>
+              </label>
               <input
                 type="email"
                 value={teacherData.email}
@@ -494,31 +746,48 @@ const CreateTeacherWithSubjects = () => {
             </div>
             
             <div style={styles.formGroup}>
-              <label>Name *</label>
+              <label style={styles.formLabel}>
+                First Name <span style={styles.required}>*</span>
+              </label>
               <input
                 type="text"
-                value={teacherData.name}
-                onChange={(e) => setTeacherData({...teacherData, name: e.target.value})}
+                value={teacherData.firstName}
+                onChange={(e) => setTeacherData({...teacherData, firstName: e.target.value})}
                 placeholder="John"
-                style={{...styles.input, ...(errors.name && styles.inputError)}}
+                style={{...styles.input, ...(errors.firstName && styles.inputError)}}
               />
-              {errors.name && <span style={styles.errorText}>{errors.name}</span>}
+              {errors.firstName && <span style={styles.errorText}>{errors.firstName}</span>}
             </div>
             
             <div style={styles.formGroup}>
-              <label>Surname *</label>
+              <label style={styles.formLabel}>Middle Name</label>
               <input
                 type="text"
-                value={teacherData.surname}
-                onChange={(e) => setTeacherData({...teacherData, surname: e.target.value})}
-                placeholder="Doe"
-                style={{...styles.input, ...(errors.surname && styles.inputError)}}
+                value={teacherData.middleName}
+                onChange={(e) => setTeacherData({...teacherData, middleName: e.target.value})}
+                placeholder="Michael (optional)"
+                style={styles.input}
               />
-              {errors.surname && <span style={styles.errorText}>{errors.surname}</span>}
             </div>
             
             <div style={styles.formGroup}>
-              <label>Password *</label>
+              <label style={styles.formLabel}>
+                Last Name <span style={styles.required}>*</span>
+              </label>
+              <input
+                type="text"
+                value={teacherData.lastName}
+                onChange={(e) => setTeacherData({...teacherData, lastName: e.target.value})}
+                placeholder="Doe"
+                style={{...styles.input, ...(errors.lastName && styles.inputError)}}
+              />
+              {errors.lastName && <span style={styles.errorText}>{errors.lastName}</span>}
+            </div>
+            
+            <div style={styles.formGroup}>
+              <label style={styles.formLabel}>
+                Password <span style={styles.required}>*</span>
+              </label>
               <input
                 type="password"
                 value={teacherData.password}
@@ -531,7 +800,9 @@ const CreateTeacherWithSubjects = () => {
             </div>
             
             <div style={styles.formGroup}>
-              <label>Confirm Password *</label>
+              <label style={styles.formLabel}>
+                Confirm Password <span style={styles.required}>*</span>
+              </label>
               <input
                 type="password"
                 value={teacherData.confirmPassword}
@@ -543,7 +814,7 @@ const CreateTeacherWithSubjects = () => {
             </div>
             
             <div style={styles.formGroup}>
-              <label>Phone Number</label>
+              <label style={styles.formLabel}>Phone Number</label>
               <input
                 type="tel"
                 value={teacherData.phoneNumber}
@@ -554,7 +825,7 @@ const CreateTeacherWithSubjects = () => {
             </div>
             
             <div style={styles.formGroup}>
-              <label>Date of Birth</label>
+              <label style={styles.formLabel}>Date of Birth</label>
               <input
                 type="date"
                 value={teacherData.dateOfBirth}
@@ -564,17 +835,17 @@ const CreateTeacherWithSubjects = () => {
             </div>
             
             <div style={styles.formGroup}>
-              <label>Age</label>
+              <label style={styles.formLabel}>Age</label>
               <input
                 type="number"
                 value={teacherData.age}
                 readOnly
-                style={{...styles.input, backgroundColor: '#F0F0F0'}}
+                style={{...styles.input, backgroundColor: '#F5F7FA'}}
               />
             </div>
             
             <div style={styles.formGroup}>
-              <label>Sex</label>
+              <label style={styles.formLabel}>Sex</label>
               <select
                 value={teacherData.sex}
                 onChange={(e) => setTeacherData({...teacherData, sex: e.target.value})}
@@ -588,7 +859,7 @@ const CreateTeacherWithSubjects = () => {
             </div>
             
             <div style={styles.formGroup}>
-              <label>Address</label>
+              <label style={styles.formLabel}>Address</label>
               <input
                 type="text"
                 value={teacherData.address}
@@ -599,7 +870,7 @@ const CreateTeacherWithSubjects = () => {
             </div>
             
             <div style={styles.formGroup}>
-              <label>Primary Class (Optional)</label>
+              <label style={styles.formLabel}>Primary Class (Optional)</label>
               <select
                 value={teacherData.class}
                 onChange={(e) => setTeacherData({...teacherData, class: e.target.value})}
@@ -618,7 +889,7 @@ const CreateTeacherWithSubjects = () => {
             </div>
             
             <div style={styles.formGroup}>
-              <label>Status</label>
+              <label style={styles.formLabel}>Status</label>
               <select
                 value={teacherData.active}
                 onChange={(e) => setTeacherData({...teacherData, active: e.target.value === 'true'})}
@@ -631,11 +902,11 @@ const CreateTeacherWithSubjects = () => {
           </div>
         </div>
 
-        {/* Teacher Assignments Section - Matching ManageUsers.js format */}
+        {/* Teacher Assignments Section */}
         <div style={styles.section}>
           <div style={styles.sectionHeader}>
             <h3 style={styles.sectionTitle}>
-              <FiBook /> Teacher Assignments *
+              <FiBook /> Teacher Assignments <span style={styles.required}>*</span>
             </h3>
             {errors.teacherAssignments && (
               <span style={styles.errorText}>{errors.teacherAssignments}</span>
@@ -663,10 +934,10 @@ const CreateTeacherWithSubjects = () => {
               {teacherAssignments.map((assignment, index) => (
                 <div key={index} style={styles.assignmentItem}>
                   <div style={styles.assignmentHeader}>
-                    <strong>{assignment.className}</strong>
+                    <strong>{getClassName(assignment.class)}</strong>
                     <button
                       type="button"
-                      onClick={() => removeTeacherAssignment(assignment.classId)}
+                      onClick={() => removeTeacherAssignment(assignment.class)}
                       style={styles.removeAssignmentButton}
                       disabled={loading}
                     >
@@ -676,7 +947,7 @@ const CreateTeacherWithSubjects = () => {
                   <div style={styles.assignmentSubjects}>
                     {assignment.subjects.map((subject, subIndex) => (
                       <span key={subIndex} style={styles.assignmentSubjectBadge}>
-                        {subject.subjectName}
+                        {subject.subjectName || getSubjectName(subject.subject)}
                       </span>
                     ))}
                   </div>
@@ -692,14 +963,14 @@ const CreateTeacherWithSubjects = () => {
             type="button"
             onClick={() => navigate('/admin/users')}
             style={styles.cancelButton}
-            disabled={loading}
+            disabled={loading || uploadingImage}
           >
             <FiX /> Cancel
           </button>
           <button
             type="submit"
             style={styles.submitButton}
-            disabled={loading}
+            disabled={loading || uploadingImage}
           >
             {loading ? (
               <>
@@ -719,7 +990,7 @@ const CreateTeacherWithSubjects = () => {
         <div style={styles.modalOverlay}>
           <div style={{...styles.modalContent, maxWidth: '600px'}}>
             <div style={styles.modalHeader}>
-              <h3>Add Teacher Assignment</h3>
+              <h3 style={{color: '#2D3748', margin: 0}}>Add Teacher Assignment</h3>
               <button onClick={closeTeacherAssignmentModal} style={styles.modalCloseButton}>
                 <FiX />
               </button>
@@ -727,7 +998,7 @@ const CreateTeacherWithSubjects = () => {
             
             <div style={styles.modalBody}>
               <div style={styles.formGroup}>
-                <label>Select Class</label>
+                <label style={styles.formLabel}>Select Class</label>
                 <select
                   value={teacherAssignmentModal.selectedClass}
                   onChange={(e) => handleAssignmentClassChange(e.target.value)}
@@ -745,7 +1016,9 @@ const CreateTeacherWithSubjects = () => {
 
               {teacherAssignmentModal.selectedClass && (
                 <div style={styles.formGroup}>
-                  <label>Select Subjects for {classes.find(c => c._id === teacherAssignmentModal.selectedClass)?.name}</label>
+                  <label style={styles.formLabel}>
+                    Select Subjects for {getClassName(teacherAssignmentModal.selectedClass)}
+                  </label>
                   {loadingAssignmentSubjects ? (
                     <div style={styles.loadingSubjects}>
                       <div style={styles.smallSpinner}></div>
@@ -770,7 +1043,7 @@ const CreateTeacherWithSubjects = () => {
                           </label>
                         ))}
                       </div>
-                      <small style={{ color: '#666', fontSize: '12px' }}>
+                      <small style={{ color: '#718096', fontSize: '12px' }}>
                         {teacherAssignmentModal.selectedSubjects.length} subject(s) selected
                       </small>
                     </>
@@ -808,7 +1081,7 @@ const styles = {
     margin: '0 auto',
     padding: '24px',
     fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#F5F7FA',
     minHeight: '100vh'
   },
   header: {
@@ -820,14 +1093,18 @@ const styles = {
     top: '0',
     right: '0',
     padding: '8px 16px',
-    backgroundColor: '#6B7280',
+    backgroundColor: '#718096',
     color: 'white',
     border: 'none',
     borderRadius: '4px',
     cursor: 'pointer',
     fontSize: '14px',
     fontWeight: '500',
-    transition: 'all 0.2s'
+    transition: 'all 0.2s',
+    '&:hover': {
+      backgroundColor: '#4A5568',
+      transform: 'translateY(-2px)'
+    }
   },
   title: {
     fontSize: '28px',
@@ -836,7 +1113,7 @@ const styles = {
     margin: '0 0 8px 0'
   },
   subtitle: {
-    color: '#666',
+    color: '#718096',
     margin: 0,
     fontSize: '16px'
   },
@@ -846,11 +1123,11 @@ const styles = {
     justifyContent: 'center',
     minHeight: '100vh',
     padding: '24px',
-    backgroundColor: '#F8F9FA'
+    backgroundColor: '#F5F7FA'
   },
   errorMessage: {
-    backgroundColor: '#FFF3F3',
-    color: '#B22222',
+    backgroundColor: '#FED7D7',
+    color: '#9B2C2C',
     padding: '16px',
     borderRadius: '8px',
     marginBottom: '24px',
@@ -859,11 +1136,11 @@ const styles = {
     justifyContent: 'space-between',
     gap: '12px',
     fontWeight: '500',
-    border: '1px solid #FFCCCC'
+    borderLeft: '4px solid #E53E3E'
   },
   successMessage: {
-    backgroundColor: '#E6FFE6',
-    color: '#228B22',
+    backgroundColor: '#C6F6D5',
+    color: '#22543D',
     padding: '16px',
     borderRadius: '8px',
     marginBottom: '24px',
@@ -872,7 +1149,7 @@ const styles = {
     justifyContent: 'space-between',
     gap: '12px',
     fontWeight: '500',
-    border: '1px solid #C8E6C9'
+    borderLeft: '4px solid #38A169'
   },
   closeMessageButton: {
     background: 'none',
@@ -882,19 +1159,22 @@ const styles = {
     fontSize: '16px',
     padding: '4px',
     borderRadius: '4px',
-    transition: 'background-color 0.2s'
+    transition: 'background-color 0.2s',
+    '&:hover': {
+      backgroundColor: 'rgba(0,0,0,0.1)'
+    }
   },
   form: {
     backgroundColor: 'white',
     borderRadius: '12px',
     padding: '32px',
     boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
-    border: '1px solid #E0E0E0'
+    border: '1px solid #E2E8F0'
   },
   section: {
     marginBottom: '32px',
     paddingBottom: '24px',
-    borderBottom: '1px solid #E0E0E0'
+    borderBottom: '1px solid #E2E8F0'
   },
   sectionHeader: {
     display: 'flex',
@@ -905,16 +1185,18 @@ const styles = {
     gap: '16px'
   },
   sectionTitle: {
-    fontSize: '20px',
+    fontSize: '18px',
     fontWeight: '600',
-    color: '#4B5320',
+    color: '#2D3748',
     margin: 0,
     display: 'flex',
     alignItems: 'center',
-    gap: '8px'
+    gap: '8px',
+    borderBottom: '2px solid #D69E2E',
+    paddingBottom: '8px'
   },
   helpText: {
-    color: '#666',
+    color: '#718096',
     fontSize: '14px',
     margin: '0 0 20px 0',
     lineHeight: '1.5'
@@ -927,39 +1209,158 @@ const styles = {
   formGroup: {
     marginBottom: '20px'
   },
+  formLabel: {
+    display: 'block',
+    marginBottom: '6px',
+    fontSize: '14px',
+    fontWeight: '500',
+    color: '#2D3748'
+  },
+  required: {
+    color: '#E53E3E',
+    marginLeft: '2px'
+  },
   input: {
     width: '100%',
-    padding: '12px',
-    border: '1px solid #D0D0D0',
-    borderRadius: '6px',
+    padding: '10px 12px',
+    border: '1px solid #E2E8F0',
+    borderRadius: '4px',
     fontSize: '14px',
     transition: 'border-color 0.2s, box-shadow 0.2s',
-    backgroundColor: 'white'
+    backgroundColor: 'white',
+    color: '#2D3748',
+    '&:focus': {
+      outline: 'none',
+      borderColor: '#3182CE',
+      boxShadow: '0 0 0 3px rgba(49, 130, 206, 0.1)'
+    }
   },
   inputError: {
-    borderColor: '#B22222',
-    backgroundColor: '#FFF9F9',
-    border: '1px solid #B22222'
+    borderColor: '#E53E3E',
+    backgroundColor: '#FFF5F5',
+    border: '1px solid #E53E3E'
   },
   select: {
     width: '100%',
-    padding: '12px',
-    border: '1px solid #D0D0D0',
-    borderRadius: '6px',
+    padding: '10px 12px',
+    border: '1px solid #E2E8F0',
+    borderRadius: '4px',
     fontSize: '14px',
     backgroundColor: 'white',
-    transition: 'border-color 0.2s'
+    color: '#2D3748',
+    transition: 'border-color 0.2s',
+    cursor: 'pointer',
+    '&:focus': {
+      outline: 'none',
+      borderColor: '#3182CE',
+      boxShadow: '0 0 0 3px rgba(49, 130, 206, 0.1)'
+    },
+    '&:disabled': {
+      backgroundColor: '#F5F7FA',
+      cursor: 'not-allowed'
+    }
   },
   errorText: {
-    color: '#B22222',
+    color: '#E53E3E',
     fontSize: '12px',
     marginTop: '4px',
     display: 'block'
   },
   loadingText: {
     fontSize: '12px',
-    color: '#D4A017',
+    color: '#D69E2E',
     marginLeft: '8px'
+  },
+  // Image Upload Styles
+  imageUploadSection: {
+    marginBottom: '32px',
+    padding: '20px',
+    backgroundColor: '#F5F7FA',
+    borderRadius: '8px',
+    border: '1px solid #E2E8F0'
+  },
+  imageUploadContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '20px',
+    '@media (max-width: 768px)': {
+      flexDirection: 'column'
+    }
+  },
+  imagePreviewArea: {
+    width: '150px',
+    height: '150px',
+    borderRadius: '50%',
+    backgroundColor: 'white',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    border: '2px dashed #CBD5E0'
+  },
+  imagePreview: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover'
+  },
+  imagePlaceholder: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '8px'
+  },
+  placeholderText: {
+    fontSize: '12px',
+    color: '#718096'
+  },
+  imageUploadControls: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+    flex: 1
+  },
+  uploadButton: {
+    padding: '10px 20px',
+    backgroundColor: '#3182CE',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    justifyContent: 'center',
+    transition: 'all 0.2s',
+    '&:hover': {
+      backgroundColor: '#2C5282',
+      transform: 'translateY(-2px)'
+    }
+  },
+  removeImageButton: {
+    padding: '10px 20px',
+    backgroundColor: '#FED7D7',
+    color: '#9B2C2C',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    justifyContent: 'center',
+    transition: 'all 0.2s',
+    '&:hover': {
+      backgroundColor: '#FEB2B2',
+      transform: 'translateY(-2px)'
+    }
+  },
+  imageUploadInfo: {
+    color: '#718096',
+    fontSize: '12px',
+    textAlign: 'center'
   },
   addButton: {
     padding: '10px 20px',
@@ -973,18 +1374,26 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    transition: 'all 0.2s'
+    transition: 'all 0.2s',
+    '&:hover:not(:disabled)': {
+      backgroundColor: '#3A4218',
+      transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.6,
+      cursor: 'not-allowed'
+    }
   },
   emptyAssignments: {
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#F5F7FA',
     padding: '24px',
     borderRadius: '8px',
     textAlign: 'center',
-    color: '#666',
-    border: '1px dashed #D0D0D0'
+    color: '#718096',
+    border: '1px dashed #CBD5E0'
   },
   assignmentsContainer: {
-    border: '1px solid #E0E0E0',
+    border: '1px solid #E2E8F0',
     borderRadius: '4px',
     padding: '12px',
     backgroundColor: 'white'
@@ -992,9 +1401,9 @@ const styles = {
   assignmentItem: {
     marginBottom: '12px',
     padding: '12px',
-    border: '1px solid #E0E0E0',
+    border: '1px solid #E2E8F0',
     borderRadius: '4px',
-    backgroundColor: '#F8F9FA'
+    backgroundColor: '#F5F7FA'
   },
   assignmentHeader: {
     display: 'flex',
@@ -1005,10 +1414,20 @@ const styles = {
   removeAssignmentButton: {
     background: 'none',
     border: 'none',
-    color: '#B22222',
+    color: '#E53E3E',
     cursor: 'pointer',
     fontSize: '16px',
-    padding: '4px'
+    padding: '4px',
+    borderRadius: '4px',
+    transition: 'all 0.2s',
+    '&:hover:not(:disabled)': {
+      backgroundColor: '#FED7D7',
+      transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.6,
+      cursor: 'not-allowed'
+    }
   },
   assignmentSubjects: {
     display: 'flex',
@@ -1029,7 +1448,7 @@ const styles = {
     maxHeight: '300px',
     overflowY: 'auto',
     padding: '10px',
-    border: '1px solid #E0E0E0',
+    border: '1px solid #E2E8F0',
     borderRadius: '4px',
     backgroundColor: 'white'
   },
@@ -1039,15 +1458,21 @@ const styles = {
     gap: '8px',
     fontSize: '14px',
     padding: '8px',
-    border: '1px solid #E0E0E0',
+    border: '1px solid #E2E8F0',
     borderRadius: '4px',
-    backgroundColor: '#F8F9FA',
-    cursor: 'pointer'
+    backgroundColor: '#F5F7FA',
+    cursor: 'pointer',
+    color: '#2D3748',
+    transition: 'all 0.2s',
+    '&:hover': {
+      backgroundColor: '#F0F4F8',
+      borderColor: '#CBD5E0'
+    }
   },
   coreBadge: {
     fontSize: '10px',
-    color: '#228B22',
-    backgroundColor: '#E6FFE6',
+    color: '#22543D',
+    backgroundColor: '#C6F6D5',
     padding: '2px 6px',
     borderRadius: '10px',
     marginLeft: '4px',
@@ -1057,9 +1482,9 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     padding: '20px',
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#F5F7FA',
     borderRadius: '4px',
-    color: '#666',
+    color: '#718096',
     fontSize: '14px'
   },
   noSubjectsMessage: {
@@ -1095,11 +1520,11 @@ const styles = {
     gap: '16px',
     marginTop: '32px',
     paddingTop: '24px',
-    borderTop: '1px solid #E0E0E0'
+    borderTop: '1px solid #E2E8F0'
   },
   cancelButton: {
     padding: '12px 24px',
-    backgroundColor: '#6B7280',
+    backgroundColor: '#718096',
     color: 'white',
     border: 'none',
     borderRadius: '6px',
@@ -1109,11 +1534,19 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    transition: 'all 0.2s'
+    transition: 'all 0.2s',
+    '&:hover:not(:disabled)': {
+      backgroundColor: '#4A5568',
+      transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.5,
+      cursor: 'not-allowed'
+    }
   },
   submitButton: {
     padding: '12px 24px',
-    backgroundColor: '#D4A017',
+    backgroundColor: '#D69E2E',
     color: '#4B5320',
     border: 'none',
     borderRadius: '6px',
@@ -1123,8 +1556,19 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    transition: 'all 0.2s'
+    transition: 'all 0.2s',
+    '&:hover:not(:disabled)': {
+      backgroundColor: '#B7791F',
+      transform: 'translateY(-2px)',
+      color: 'white'
+    },
+    '&:disabled': {
+      opacity: 0.5,
+      cursor: 'not-allowed',
+      backgroundColor: '#D69E2E'
+    }
   },
+  // Modal Styles
   modalOverlay: {
     position: 'fixed',
     top: 0,
@@ -1135,17 +1579,19 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 1000
+    zIndex: 1000,
+    backdropFilter: 'blur(2px)'
   },
   modalContent: {
     backgroundColor: 'white',
-    borderRadius: '8px',
+    borderRadius: '12px',
     width: '90%',
-    maxWidth: '500px'
+    maxWidth: '500px',
+    boxShadow: '0 10px 25px rgba(0,0,0,0.2)'
   },
   modalHeader: {
     padding: '20px',
-    borderBottom: '1px solid #E0E0E0',
+    borderBottom: '1px solid #E2E8F0',
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center'
@@ -1154,23 +1600,27 @@ const styles = {
     background: 'none',
     border: 'none',
     fontSize: '20px',
-    color: '#666',
+    color: '#718096',
     cursor: 'pointer',
-    padding: '4px'
+    padding: '4px',
+    borderRadius: '4px',
+    '&:hover': {
+      backgroundColor: '#F5F7FA'
+    }
   },
   modalBody: {
     padding: '20px'
   },
   modalFooter: {
     padding: '20px',
-    borderTop: '1px solid #E0E0E0',
+    borderTop: '1px solid #E2E8F0',
     display: 'flex',
     justifyContent: 'flex-end',
     gap: '12px'
   },
   modalSubmitButton: {
     padding: '10px 20px',
-    backgroundColor: '#D4A017',
+    backgroundColor: '#D69E2E',
     color: '#4B5320',
     border: 'none',
     borderRadius: '6px',
@@ -1179,16 +1629,31 @@ const styles = {
     fontWeight: '600',
     display: 'flex',
     alignItems: 'center',
-    gap: '8px'
+    gap: '8px',
+    transition: 'all 0.2s',
+    '&:hover:not(:disabled)': {
+      backgroundColor: '#B7791F',
+      transform: 'translateY(-2px)',
+      color: 'white'
+    },
+    '&:disabled': {
+      opacity: 0.6,
+      cursor: 'not-allowed'
+    }
   },
   modalCancelButton: {
     padding: '10px 20px',
-    backgroundColor: '#6B7280',
+    backgroundColor: '#718096',
     color: 'white',
     border: 'none',
     borderRadius: '6px',
     cursor: 'pointer',
-    fontSize: '14px'
+    fontSize: '14px',
+    transition: 'all 0.2s',
+    '&:hover': {
+      backgroundColor: '#4A5568',
+      transform: 'translateY(-2px)'
+    }
   }
 };
 
@@ -1212,40 +1677,44 @@ styleSheet.textContent = `
     transform: none !important;
   }
   
-  .addButton:hover:not(:disabled) {
-    background-color: #3A4218;
+  input[type="checkbox"] {
+    cursor: pointer;
+    accent-color: #3182CE;
   }
   
-  .removeAssignmentButton:hover:not(:disabled) {
-    background-color: #FFE6E6;
+  .subjectCheckbox input[type="checkbox"]:checked + span {
+    font-weight: 600;
+    color: #2D3748;
   }
   
-  .cancelButton:hover:not(:disabled) {
-    background-color: #5A6268;
-  }
-  
-  .submitButton:hover:not(:disabled) {
-    background-color: #C09015;
-  }
-  
-  .modalSubmitButton:hover:not(:disabled) {
-    background-color: #C09015;
-  }
-  
-  .modalCancelButton:hover:not(:disabled) {
-    background-color: #5A6268;
-  }
-  
-  .closeMessageButton:hover {
-    background-color: rgba(0,0,0,0.1);
-  }
-  
-  .backButton:hover:not(:disabled) {
-    background-color: #5A6268;
-  }
-  
-  .subjectCheckbox:hover {
-    background-color: #F0F0F0;
+  @media (max-width: 768px) {
+    .imageUploadContainer {
+      flex-direction: column;
+      text-align: center;
+    }
+    
+    .imagePreviewArea {
+      margin: 0 auto;
+    }
+    
+    .sectionHeader {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    
+    .addButton {
+      width: 100%;
+      justify-content: center;
+    }
+    
+    .formActions {
+      flex-direction: column;
+    }
+    
+    .submitButton, .cancelButton {
+      width: 100%;
+      justify-content: center;
+    }
   }
 `;
 document.head.appendChild(styleSheet);
