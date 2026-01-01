@@ -695,86 +695,137 @@ const Results = () => {
             <>
               {/* Table */}
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'sans-serif' }}>
                   <thead>
-                    <tr style={{ backgroundColor: '#f8f9fa' }}>
+                    <tr style={{ backgroundColor: '#2c3e50' }}>
                       <th 
                         style={{ 
                           padding: '16px 12px', 
                           textAlign: 'left', 
-                          color: '#4B5320',
+                          color: 'white',
                           fontWeight: '600',
                           fontSize: '14px',
-                          borderBottom: '1px solid #e9ecef',
-                          cursor: 'pointer'
+                          borderBottom: '1px solid #34495e',
+                          cursor: 'pointer',
+                          position: 'relative',
+                          minWidth: '150px'
                         }}
                         onClick={() => handleSort('name')}
                       >
-                        Student {sortConfig.key === 'name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                        Student
+                        {sortConfig.key === 'name' && (
+                          <span style={{ 
+                            marginLeft: '6px',
+                            fontSize: '12px'
+                          }}>
+                            {sortConfig.direction === 'asc' ? '↑' : '↓'}
+                          </span>
+                        )}
                       </th>
                       <th 
                         style={{ 
                           padding: '16px 12px', 
                           textAlign: 'left', 
-                          color: '#4B5320',
+                          color: 'white',
                           fontWeight: '600',
                           fontSize: '14px',
-                          borderBottom: '1px solid #e9ecef',
-                          cursor: 'pointer'
+                          borderBottom: '1px solid #34495e',
+                          cursor: 'pointer',
+                          position: 'relative',
+                          minWidth: '100px'
                         }}
                         onClick={() => handleSort('score')}
                       >
-                        Score {sortConfig.key === 'score' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                        Score
+                        {sortConfig.key === 'score' && (
+                          <span style={{ 
+                            marginLeft: '6px',
+                            fontSize: '12px'
+                          }}>
+                            {sortConfig.direction === 'asc' ? '↑' : '↓'}
+                          </span>
+                        )}
                       </th>
                       <th 
                         style={{ 
                           padding: '16px 12px', 
                           textAlign: 'left', 
-                          color: '#4B5320',
+                          color: 'white',
                           fontWeight: '600',
                           fontSize: '14px',
-                          borderBottom: '1px solid #e9ecef',
-                          cursor: 'pointer'
+                          borderBottom: '1px solid #34495e',
+                          cursor: 'pointer',
+                          position: 'relative',
+                          minWidth: '80px'
                         }}
                         onClick={() => handleSort('percentage')}
                       >
-                        % {sortConfig.key === 'percentage' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                        %
+                        {sortConfig.key === 'percentage' && (
+                          <span style={{ 
+                            marginLeft: '6px',
+                            fontSize: '12px'
+                          }}>
+                            {sortConfig.direction === 'asc' ? '↑' : '↓'}
+                          </span>
+                        )}
                       </th>
                       <th 
                         style={{ 
                           padding: '16px 12px', 
                           textAlign: 'left', 
-                          color: '#4B5320',
+                          color: 'white',
                           fontWeight: '600',
                           fontSize: '14px',
-                          borderBottom: '1px solid #e9ecef',
-                          cursor: 'pointer'
+                          borderBottom: '1px solid #34495e',
+                          cursor: 'pointer',
+                          position: 'relative',
+                          minWidth: '80px'
                         }}
                         onClick={() => handleSort('grade')}
                       >
-                        Grade {sortConfig.key === 'grade' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                        Grade
+                        {sortConfig.key === 'grade' && (
+                          <span style={{ 
+                            marginLeft: '6px',
+                            fontSize: '12px'
+                          }}>
+                            {sortConfig.direction === 'asc' ? '↑' : '↓'}
+                          </span>
+                        )}
                       </th>
                       <th 
                         style={{ 
                           padding: '16px 12px', 
                           textAlign: 'left', 
-                          color: '#4B5320',
+                          color: 'white',
                           fontWeight: '600',
                           fontSize: '14px',
-                          borderBottom: '1px solid #e9ecef',
-                          cursor: 'pointer'
+                          borderBottom: '1px solid #34495e',
+                          cursor: 'pointer',
+                          position: 'relative',
+                          minWidth: '120px'
                         }}
                         onClick={() => handleSort('submittedAt')}
                       >
-                        Submitted {sortConfig.key === 'submittedAt' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                        Submitted
+                        {sortConfig.key === 'submittedAt' && (
+                          <span style={{ 
+                            marginLeft: '6px',
+                            fontSize: '12px'
+                          }}>
+                            {sortConfig.direction === 'asc' ? '↑' : '↓'}
+                          </span>
+                        )}
                       </th>
                       <th style={{ 
                         padding: '16px 12px', 
                         textAlign: 'left', 
-                        color: '#4B5320',
+                        color: 'white',
                         fontWeight: '600',
                         fontSize: '14px',
-                        borderBottom: '1px solid #e9ecef'
+                        borderBottom: '1px solid #34495e',
+                        minWidth: '150px'
                       }}>
                         Actions
                       </th>

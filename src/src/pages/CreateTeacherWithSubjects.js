@@ -1,4 +1,4 @@
-// pages/CreateTeacherWithSubjects.js - UPDATED WITH CORRECT ASSIGNMENT SAVING
+// pages/CreateTeacherWithSubjects.js - UPDATED WITH SINGLE REQUEST PROFILE IMAGE UPLOAD
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -11,7 +11,7 @@ import {
 } from 'react-icons/fi';
 
 const CreateTeacherWithSubjects = () => {
-  const { user } = useContext(AuthContext);
+  const { user, token } = useContext(AuthContext);
   const navigate = useNavigate();
   
   const [loading, setLoading] = useState(false);
@@ -34,10 +34,9 @@ const CreateTeacherWithSubjects = () => {
     address: '',
     sex: '',
     age: '',
-    picture: null
   });
   
-  // Image upload state
+  // Image upload state - UPDATED WITH SINGLE REQUEST APPROACH
   const [profileImage, setProfileImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -53,7 +52,7 @@ const CreateTeacherWithSubjects = () => {
   const [availableSubjectsForAssignment, setAvailableSubjectsForAssignment] = useState([]);
   const [loadingAssignmentSubjects, setLoadingAssignmentSubjects] = useState(false);
   const [loadingClasses, setLoadingClasses] = useState(false);
-  const [subjectCache, setSubjectCache] = useState({}); // Cache for subject names
+  const [subjectCache, setSubjectCache] = useState({});
   
   // Form validation
   const [errors, setErrors] = useState({});
@@ -65,9 +64,9 @@ const CreateTeacherWithSubjects = () => {
   const fetchClasses = async () => {
     setLoadingClasses(true);
     try {
-      const token = localStorage.getItem('token');
+      const authToken = token || localStorage.getItem('token');
       const res = await axios.get('http://localhost:5000/api/classes', {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${authToken}` }
       });
       
       let classesData = [];
@@ -120,14 +119,13 @@ const CreateTeacherWithSubjects = () => {
 
     setLoadingAssignmentSubjects(true);
     try {
-      const token = localStorage.getItem('token');
+      const authToken = token || localStorage.getItem('token');
       
       let subjectsList = [];
       
       try {
-        // Try the new endpoint first
         const res = await axios.get(`http://localhost:5000/api/users/assignment/classes/${classId}/subjects`, {
-          headers: { Authorization: `Bearer ${token}` }
+          headers: { Authorization: `Bearer ${authToken}` }
         });
         
         if (res.data && Array.isArray(res.data.subjects)) {
@@ -138,9 +136,8 @@ const CreateTeacherWithSubjects = () => {
       } catch (firstErr) {
         console.warn('Assignment subjects API failed, trying alternative...');
         try {
-          // Try class subjects endpoint
           const res = await axios.get(`http://localhost:5000/api/classes/${classId}/subjects`, {
-            headers: { Authorization: `Bearer ${token}` }
+            headers: { Authorization: `Bearer ${authToken}` }
           });
           
           if (res.data && Array.isArray(res.data.subjects)) {
@@ -151,7 +148,7 @@ const CreateTeacherWithSubjects = () => {
         } catch (secondErr) {
           console.warn('Second API failed, trying all subjects...');
           const res = await axios.get('http://localhost:5000/api/subjects', {
-            headers: { Authorization: `Bearer ${token}` }
+            headers: { Authorization: `Bearer ${authToken}` }
           });
           
           if (res.data && Array.isArray(res.data.subjects)) {
@@ -183,7 +180,6 @@ const CreateTeacherWithSubjects = () => {
       
       setAvailableSubjectsForAssignment(formattedSubjects);
       
-      // Cache subject names for later use
       const newCache = { ...subjectCache };
       formattedSubjects.forEach(sub => {
         if (sub.id && sub.name) {
@@ -250,12 +246,11 @@ const CreateTeacherWithSubjects = () => {
     if (!selectedClass) return;
 
     try {
-      // First, get subject names from backend for accuracy
-      const token = localStorage.getItem('token');
+      const authToken = token || localStorage.getItem('token');
       const subjectPromises = teacherAssignmentModal.selectedSubjects.map(async (subjectId) => {
         try {
           const res = await axios.get(`http://localhost:5000/api/subjects/${subjectId}`, {
-            headers: { Authorization: `Bearer ${token}` }
+            headers: { Authorization: `Bearer ${authToken}` }
           });
           
           if (res.data && res.data.subject) {
@@ -275,27 +270,23 @@ const CreateTeacherWithSubjects = () => {
 
       const subjectsWithNames = await Promise.all(subjectPromises);
 
-      // Format assignment according to backend expectations
       const newAssignment = {
-        class: teacherAssignmentModal.selectedClass, // Backend expects 'class' (ObjectId)
+        class: teacherAssignmentModal.selectedClass,
         subjects: subjectsWithNames.map(subject => ({
-          subject: subject.id, // Backend expects 'subject' (ObjectId)
-          subjectName: subject.name // Backend expects 'subjectName' (String)
+          subject: subject.id,
+          subjectName: subject.name
         }))
       };
 
-      // Check if this class is already assigned
       const existingIndex = teacherAssignments.findIndex(
         assignment => assignment.class === teacherAssignmentModal.selectedClass
       );
 
       let updatedAssignments;
       if (existingIndex >= 0) {
-        // Update existing assignment - merge subjects
         updatedAssignments = [...teacherAssignments];
         const existingAssignment = updatedAssignments[existingIndex];
         
-        // Combine subjects, avoiding duplicates
         const existingSubjectIds = existingAssignment.subjects.map(s => s.subject);
         const newSubjects = newAssignment.subjects.filter(
           subject => !existingSubjectIds.includes(subject.subject)
@@ -311,7 +302,6 @@ const CreateTeacherWithSubjects = () => {
           return;
         }
       } else {
-        // Add new assignment
         updatedAssignments = [...teacherAssignments, newAssignment];
       }
 
@@ -333,11 +323,23 @@ const CreateTeacherWithSubjects = () => {
     );
   };
 
+  // Helper function to convert image to base64 - FROM CREATEADMIN.JS
+  const convertImageToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = error => reject(error);
+    });
+  };
+
+  // UPDATED: Handle image upload with base64 conversion
   const handleImageUpload = async (file) => {
     if (!file) return;
     
+    // Validate file
     const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    const maxSize = 5 * 1024 * 1024;
+    const maxSize = 5 * 1024 * 1024; // 5MB
     
     if (!validTypes.includes(file.type)) {
       setError('Please upload a valid image file (JPG, PNG, GIF, WebP).');
@@ -351,6 +353,7 @@ const CreateTeacherWithSubjects = () => {
     
     setUploadingImage(true);
     try {
+      // Create preview
       const reader = new FileReader();
       reader.onloadend = () => {
         setImagePreview(reader.result);
@@ -358,7 +361,6 @@ const CreateTeacherWithSubjects = () => {
       reader.readAsDataURL(file);
       
       setProfileImage(file);
-      setTeacherData(prev => ({ ...prev, picture: file.name }));
     } catch (err) {
       setError('Failed to process image.');
     } finally {
@@ -369,7 +371,6 @@ const CreateTeacherWithSubjects = () => {
   const removeProfileImage = () => {
     setProfileImage(null);
     setImagePreview(null);
-    setTeacherData(prev => ({ ...prev, picture: null }));
   };
 
   const calculateAge = (dateOfBirth) => {
@@ -432,6 +433,7 @@ const CreateTeacherWithSubjects = () => {
     return Object.keys(newErrors).length === 0;
   };
 
+  // UPDATED: Handle submit with single request including base64 image
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -445,32 +447,42 @@ const CreateTeacherWithSubjects = () => {
     setSuccess(null);
     
     try {
-      const token = localStorage.getItem('token');
-      if (!token) {
+      const authToken = token || localStorage.getItem('token');
+      if (!authToken) {
         throw new Error('No authentication token found.');
       }
       
       const cleanedUsername = cleanUsername(teacherData.username);
       
-      // FORMAT TEACHER ASSIGNMENTS CORRECTLY
-      // This is the key fix - match backend expectations exactly
+      // Convert image to base64 if exists
+      let profileImageBase64 = null;
+      if (profileImage) {
+        try {
+          profileImageBase64 = await convertImageToBase64(profileImage);
+          console.log('✅ Image converted to base64, length:', profileImageBase64.length);
+        } catch (imageErr) {
+          console.warn('⚠️ Could not convert image to base64:', imageErr);
+          // Continue without image - don't fail the whole request
+        }
+      }
+      
+      // Format teacher assignments correctly
       const formattedAssignments = teacherAssignments.map(assignment => {
-        // Get class name for this assignment
         const classObj = classes.find(c => c._id === assignment.class);
         const className = classObj ? classObj.name : 'Unknown Class';
         
         return {
-          class: assignment.class, // ObjectId
+          class: assignment.class,
           subjects: assignment.subjects.map(subject => ({
-            subject: subject.subject, // ObjectId
-            subjectName: subject.subjectName // String
+            subject: subject.subject,
+            subjectName: subject.subjectName
           }))
         };
       });
       
       console.log('📤 Formatted assignments for backend:', JSON.stringify(formattedAssignments, null, 2));
       
-      // Build teacher data according to backend expectations
+      // Build teacher data with profile image as base64
       const teacherDataToSend = {
         username: cleanedUsername,
         password: teacherData.password,
@@ -486,119 +498,129 @@ const CreateTeacherWithSubjects = () => {
         address: teacherData.address?.trim() || undefined,
         sex: teacherData.sex || undefined,
         age: teacherData.age ? parseInt(teacherData.age) : undefined,
-        teacherAssignments: formattedAssignments // This is the key field
+        teacherAssignments: formattedAssignments,
+        // Add profile image as base64 if available
+        ...(profileImageBase64 && { profileImage: profileImageBase64 })
       };
       
-      console.log('📤 Creating teacher with data:', JSON.stringify(teacherDataToSend, null, 2));
+      console.log('📤 Creating teacher with data (SINGLE REQUEST):', {
+        ...teacherDataToSend,
+        password: '***',
+        profileImage: profileImageBase64 ? 'BASE64_IMAGE_INCLUDED' : 'NO_IMAGE',
+      });
       
-      // Step 1: Create the teacher with all data including assignments
+      // SINGLE REQUEST: Create teacher with profile image in one request
       const response = await axios.post('http://localhost:5000/api/users', 
         teacherDataToSend, 
         {
           headers: { 
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${authToken}`,
             'Content-Type': 'application/json'
           },
-          timeout: 15000
+          timeout: 30000
         }
       );
       
-      console.log('✅ Teacher created successfully:', response.data);
-      
-      const teacherId = response.data.user?._id || response.data.data?._id || response.data._id || response.data.id;
-      
-      if (!teacherId) {
-        throw new Error('Could not retrieve teacher ID from response');
-      }
-      
-      // Step 2: Upload profile image if selected
-      if (profileImage && teacherId) {
-        try {
-          // Convert image to base64
-          const reader = new FileReader();
-          const base64Image = await new Promise((resolve, reject) => {
-            reader.onloadend = () => resolve(reader.result);
-            reader.onerror = reject;
-            reader.readAsDataURL(profileImage);
-          });
-          
-          // Send base64 image with user update
-          await axios.put(
-            `http://localhost:5000/api/users/${teacherId}`,
-            { profileImage: base64Image },
-            {
-              headers: { 
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'application/json'
-              }
-            }
-          );
-          
-          console.log('✅ Profile image uploaded successfully');
-        } catch (imageErr) {
-          console.warn('⚠️ Could not upload profile image:', imageErr.message);
-          // Continue even if image upload fails
-        }
-      }
-      
-      setSuccess('Teacher created successfully with assignments!');
-      
-      // Reset form
-      setTeacherData({
-        username: '',
-        password: '',
-        confirmPassword: '',
-        email: '',
-        firstName: '',
-        middleName: '',
-        lastName: '',
-        phoneNumber: '',
-        class: '',
-        active: true,
-        dateOfBirth: '',
-        address: '',
-        sex: '',
-        age: '',
-        picture: null
+      console.log('✅ Teacher creation response:', {
+        success: response.data.success,
+        userId: response.data.user?._id || response.data.data?._id
       });
-      setTeacherAssignments([]);
-      setProfileImage(null);
-      setImagePreview(null);
-      setSubjectCache({});
-      setErrors({});
       
-      // Navigate back after 2 seconds
-      setTimeout(() => {
-        navigate('/admin/users');
-      }, 2000);
+      if (response.data.success) {
+        setSuccess('Teacher created successfully with assignments and profile image! Redirecting...');
+        
+        // Reset form
+        setTeacherData({
+          username: '',
+          password: '',
+          confirmPassword: '',
+          email: '',
+          firstName: '',
+          middleName: '',
+          lastName: '',
+          phoneNumber: '',
+          class: '',
+          active: true,
+          dateOfBirth: '',
+          address: '',
+          sex: '',
+          age: '',
+        });
+        setTeacherAssignments([]);
+        setProfileImage(null);
+        setImagePreview(null);
+        setSubjectCache({});
+        setErrors({});
+        
+        // Navigate back after 2 seconds
+        setTimeout(() => {
+          navigate('/admin/users');
+        }, 2000);
+      } else {
+        setError(response.data.message || 'Failed to create teacher');
+      }
       
     } catch (err) {
       console.error('❌ Error creating teacher:', err);
       
-      let errorMessage = 'Failed to create teacher';
-      
       if (err.response) {
-        console.error('❌ Server error details:', err.response.data);
+        console.error('📡 Response error details:', {
+          status: err.response.status,
+          data: err.response.data,
+          headers: err.response.headers
+        });
         
-        if (err.response.data) {
-          if (err.response.data.message) {
-            errorMessage = err.response.data.message;
-          } else if (err.response.data.error) {
-            errorMessage = err.response.data.error;
-          } else if (err.response.data.errors) {
-            errorMessage = Object.values(err.response.data.errors).join(', ');
-          } else if (typeof err.response.data === 'string') {
-            errorMessage = err.response.data;
+        if (err.response.status === 400) {
+          const errorMsg = err.response.data.message || 'Validation error. Please check the form.';
+          setError(errorMsg);
+          
+          // Handle validation errors
+          if (err.response.data.errors) {
+            const validationErrors = {};
+            err.response.data.errors.forEach(errorMsg => {
+              if (errorMsg.includes('Username')) validationErrors.username = errorMsg;
+              if (errorMsg.includes('Email')) validationErrors.email = errorMsg;
+              if (errorMsg.includes('Password')) validationErrors.password = errorMsg;
+              if (errorMsg.includes('First name')) validationErrors.firstName = errorMsg;
+              if (errorMsg.includes('Last name')) validationErrors.lastName = errorMsg;
+              if (errorMsg.includes('profile image')) validationErrors.profileImage = errorMsg;
+            });
+            setErrors(validationErrors);
           }
+        } else if (err.response.status === 401) {
+          setError('Authentication failed. Please log in again.');
+          setTimeout(() => navigate('/login'), 2000);
+        } else if (err.response.status === 403) {
+          setError('Permission denied. You do not have access to create teachers.');
+        } else if (err.response.status === 409) {
+          setError('User with this username or email already exists.');
+        } else {
+          setError(err.response.data?.message || `Server error: ${err.response.status}`);
         }
-        setError(`Server Error (${err.response.status}): ${errorMessage}`);
       } else if (err.request) {
-        setError('Network error. Please check your connection.');
+        console.error('🌐 Network error details:', err.request);
+        setError('Network error. Please check your connection and try again.');
       } else {
-        setError(`Error: ${err.message}`);
+        setError('An unexpected error occurred. Please try again.');
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setTeacherData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    
+    // Clear error for this field when user starts typing
+    if (errors[name]) {
+      setErrors(prev => ({
+        ...prev,
+        [name]: null
+      }));
     }
   };
 
@@ -653,9 +675,12 @@ const CreateTeacherWithSubjects = () => {
       )}
 
       <form onSubmit={handleSubmit} style={styles.form}>
-        {/* Profile Image Upload Section */}
+        {/* Profile Image Upload Section - UPDATED */}
         <div style={styles.imageUploadSection}>
-          <h3 style={styles.sectionTitle}>Profile Image</h3>
+          <h3 style={styles.sectionTitle}>Profile Image (Optional)</h3>
+          <p style={styles.imageUploadHelp}>
+            Image will be sent as base64 in the same request with teacher data.
+          </p>
           <div style={styles.imageUploadContainer}>
             <div style={styles.imagePreviewArea}>
               {imagePreview ? (
@@ -674,7 +699,7 @@ const CreateTeacherWithSubjects = () => {
                 accept="image/jpeg,image/png,image/gif,image/webp"
                 onChange={(e) => handleImageUpload(e.target.files[0])}
                 style={{ display: 'none' }}
-                disabled={uploadingImage}
+                disabled={uploadingImage || loading}
               />
               <label htmlFor="profileImage" style={styles.uploadButton}>
                 {uploadingImage ? (
@@ -697,13 +722,15 @@ const CreateTeacherWithSubjects = () => {
                   type="button"
                   onClick={removeProfileImage}
                   style={styles.removeImageButton}
-                  disabled={uploadingImage}
+                  disabled={uploadingImage || loading}
                 >
                   <FiXCircle /> Remove
                 </button>
               )}
               <div style={styles.imageUploadInfo}>
                 <small>JPG, PNG, GIF, WebP up to 5MB</small>
+                <br />
+                <small>Image will be saved with teacher creation</small>
               </div>
             </div>
           </div>
@@ -722,10 +749,13 @@ const CreateTeacherWithSubjects = () => {
               </label>
               <input
                 type="text"
+                name="username"
                 value={teacherData.username}
-                onChange={(e) => setTeacherData({...teacherData, username: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="john_doe"
                 style={{...styles.input, ...(errors.username && styles.inputError)}}
+                disabled={loading}
+                autoComplete="new-username"
               />
               {errors.username && <span style={styles.errorText}>{errors.username}</span>}
               <small style={styles.helpText}>No spaces allowed. Use underscores if needed.</small>
@@ -737,10 +767,13 @@ const CreateTeacherWithSubjects = () => {
               </label>
               <input
                 type="email"
+                name="email"
                 value={teacherData.email}
-                onChange={(e) => setTeacherData({...teacherData, email: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="john@school.com"
                 style={{...styles.input, ...(errors.email && styles.inputError)}}
+                disabled={loading}
+                autoComplete="email"
               />
               {errors.email && <span style={styles.errorText}>{errors.email}</span>}
             </div>
@@ -751,10 +784,13 @@ const CreateTeacherWithSubjects = () => {
               </label>
               <input
                 type="text"
+                name="firstName"
                 value={teacherData.firstName}
-                onChange={(e) => setTeacherData({...teacherData, firstName: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="John"
                 style={{...styles.input, ...(errors.firstName && styles.inputError)}}
+                disabled={loading}
+                autoComplete="given-name"
               />
               {errors.firstName && <span style={styles.errorText}>{errors.firstName}</span>}
             </div>
@@ -763,10 +799,13 @@ const CreateTeacherWithSubjects = () => {
               <label style={styles.formLabel}>Middle Name</label>
               <input
                 type="text"
+                name="middleName"
                 value={teacherData.middleName}
-                onChange={(e) => setTeacherData({...teacherData, middleName: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="Michael (optional)"
                 style={styles.input}
+                disabled={loading}
+                autoComplete="additional-name"
               />
             </div>
             
@@ -776,10 +815,13 @@ const CreateTeacherWithSubjects = () => {
               </label>
               <input
                 type="text"
+                name="lastName"
                 value={teacherData.lastName}
-                onChange={(e) => setTeacherData({...teacherData, lastName: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="Doe"
                 style={{...styles.input, ...(errors.lastName && styles.inputError)}}
+                disabled={loading}
+                autoComplete="family-name"
               />
               {errors.lastName && <span style={styles.errorText}>{errors.lastName}</span>}
             </div>
@@ -790,10 +832,14 @@ const CreateTeacherWithSubjects = () => {
               </label>
               <input
                 type="password"
+                name="password"
                 value={teacherData.password}
-                onChange={(e) => setTeacherData({...teacherData, password: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="••••••••"
                 style={{...styles.input, ...(errors.password && styles.inputError)}}
+                disabled={loading}
+                autoComplete="new-password"
+                minLength="6"
               />
               {errors.password && <span style={styles.errorText}>{errors.password}</span>}
               <small style={styles.helpText}>Minimum 6 characters</small>
@@ -805,10 +851,13 @@ const CreateTeacherWithSubjects = () => {
               </label>
               <input
                 type="password"
+                name="confirmPassword"
                 value={teacherData.confirmPassword}
-                onChange={(e) => setTeacherData({...teacherData, confirmPassword: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="••••••••"
                 style={{...styles.input, ...(errors.confirmPassword && styles.inputError)}}
+                disabled={loading}
+                autoComplete="new-password"
               />
               {errors.confirmPassword && <span style={styles.errorText}>{errors.confirmPassword}</span>}
             </div>
@@ -817,10 +866,13 @@ const CreateTeacherWithSubjects = () => {
               <label style={styles.formLabel}>Phone Number</label>
               <input
                 type="tel"
+                name="phoneNumber"
                 value={teacherData.phoneNumber}
-                onChange={(e) => setTeacherData({...teacherData, phoneNumber: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="+1234567890"
                 style={styles.input}
+                disabled={loading}
+                autoComplete="tel"
               />
             </div>
             
@@ -828,9 +880,11 @@ const CreateTeacherWithSubjects = () => {
               <label style={styles.formLabel}>Date of Birth</label>
               <input
                 type="date"
+                name="dateOfBirth"
                 value={teacherData.dateOfBirth}
                 onChange={(e) => handleDateOfBirthChange(e.target.value)}
                 style={styles.input}
+                disabled={loading}
               />
             </div>
             
@@ -841,15 +895,18 @@ const CreateTeacherWithSubjects = () => {
                 value={teacherData.age}
                 readOnly
                 style={{...styles.input, backgroundColor: '#F5F7FA'}}
+                disabled={loading}
               />
             </div>
             
             <div style={styles.formGroup}>
               <label style={styles.formLabel}>Sex</label>
               <select
+                name="sex"
                 value={teacherData.sex}
-                onChange={(e) => setTeacherData({...teacherData, sex: e.target.value})}
+                onChange={handleInputChange}
                 style={styles.select}
+                disabled={loading}
               >
                 <option value="">Select Sex</option>
                 <option value="male">Male</option>
@@ -862,20 +919,24 @@ const CreateTeacherWithSubjects = () => {
               <label style={styles.formLabel}>Address</label>
               <input
                 type="text"
+                name="address"
                 value={teacherData.address}
-                onChange={(e) => setTeacherData({...teacherData, address: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="e.g., 123 Main St"
                 style={styles.input}
+                disabled={loading}
+                autoComplete="street-address"
               />
             </div>
             
             <div style={styles.formGroup}>
               <label style={styles.formLabel}>Primary Class (Optional)</label>
               <select
+                name="class"
                 value={teacherData.class}
-                onChange={(e) => setTeacherData({...teacherData, class: e.target.value})}
+                onChange={handleInputChange}
                 style={styles.select}
-                disabled={loadingClasses}
+                disabled={loadingClasses || loading}
               >
                 <option value="">Select Primary Class</option>
                 {classes.map(cls => (
@@ -891,12 +952,14 @@ const CreateTeacherWithSubjects = () => {
             <div style={styles.formGroup}>
               <label style={styles.formLabel}>Status</label>
               <select
+                name="active"
                 value={teacherData.active}
-                onChange={(e) => setTeacherData({...teacherData, active: e.target.value === 'true'})}
+                onChange={handleInputChange}
                 style={styles.select}
+                disabled={loading}
               >
-                <option value="true">Active</option>
-                <option value="false">Inactive</option>
+                <option value={true}>Active</option>
+                <option value={false}>Inactive</option>
               </select>
             </div>
           </div>
@@ -1003,7 +1066,7 @@ const CreateTeacherWithSubjects = () => {
                   value={teacherAssignmentModal.selectedClass}
                   onChange={(e) => handleAssignmentClassChange(e.target.value)}
                   style={styles.input}
-                  disabled={loadingAssignmentSubjects}
+                  disabled={loadingAssignmentSubjects || loading}
                 >
                   <option value="">Select a Class</option>
                   {classes.map(cls => (
@@ -1059,7 +1122,7 @@ const CreateTeacherWithSubjects = () => {
             <div style={styles.modalFooter}>
               <button
                 onClick={addTeacherAssignment}
-                disabled={!teacherAssignmentModal.selectedClass || teacherAssignmentModal.selectedSubjects.length === 0}
+                disabled={!teacherAssignmentModal.selectedClass || teacherAssignmentModal.selectedSubjects.length === 0 || loading}
                 style={styles.modalSubmitButton}
               >
                 <FiSave /> Add Assignment
@@ -1195,6 +1258,114 @@ const styles = {
     borderBottom: '2px solid #D69E2E',
     paddingBottom: '8px'
   },
+  // Image Upload Styles - UPDATED
+  imageUploadSection: {
+    marginBottom: '32px',
+    padding: '20px',
+    backgroundColor: '#F5F7FA',
+    borderRadius: '8px',
+    border: '1px solid #E2E8F0'
+  },
+  imageUploadHelp: {
+    color: '#718096',
+    fontSize: '14px',
+    marginBottom: '16px',
+    fontStyle: 'italic'
+  },
+  imageUploadContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '20px',
+    '@media (max-width: 768px)': {
+      flexDirection: 'column'
+    }
+  },
+  imagePreviewArea: {
+    width: '150px',
+    height: '150px',
+    borderRadius: '50%',
+    backgroundColor: 'white',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    border: '2px dashed #CBD5E0',
+    flexShrink: 0
+  },
+  imagePreview: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover'
+  },
+  imagePlaceholder: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '8px'
+  },
+  placeholderText: {
+    fontSize: '12px',
+    color: '#718096'
+  },
+  imageUploadControls: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+    flex: 1
+  },
+  uploadButton: {
+    padding: '10px 20px',
+    backgroundColor: '#3182CE',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    justifyContent: 'center',
+    transition: 'all 0.2s',
+    width: 'fit-content',
+    '&:hover:not(:disabled)': {
+      backgroundColor: '#2C5282',
+      transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.5,
+      cursor: 'not-allowed'
+    }
+  },
+  removeImageButton: {
+    padding: '10px 20px',
+    backgroundColor: '#FED7D7',
+    color: '#9B2C2C',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    justifyContent: 'center',
+    transition: 'all 0.2s',
+    width: 'fit-content',
+    '&:hover:not(:disabled)': {
+      backgroundColor: '#FEB2B2',
+      transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.5,
+      cursor: 'not-allowed'
+    }
+  },
+  imageUploadInfo: {
+    color: '#718096',
+    fontSize: '12px',
+    lineHeight: '1.5'
+  },
   helpText: {
     color: '#718096',
     fontSize: '14px',
@@ -1233,6 +1404,10 @@ const styles = {
       outline: 'none',
       borderColor: '#3182CE',
       boxShadow: '0 0 0 3px rgba(49, 130, 206, 0.1)'
+    },
+    '&:disabled': {
+      backgroundColor: '#F5F7FA',
+      cursor: 'not-allowed'
     }
   },
   inputError: {
@@ -1270,97 +1445,6 @@ const styles = {
     fontSize: '12px',
     color: '#D69E2E',
     marginLeft: '8px'
-  },
-  // Image Upload Styles
-  imageUploadSection: {
-    marginBottom: '32px',
-    padding: '20px',
-    backgroundColor: '#F5F7FA',
-    borderRadius: '8px',
-    border: '1px solid #E2E8F0'
-  },
-  imageUploadContainer: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '20px',
-    '@media (max-width: 768px)': {
-      flexDirection: 'column'
-    }
-  },
-  imagePreviewArea: {
-    width: '150px',
-    height: '150px',
-    borderRadius: '50%',
-    backgroundColor: 'white',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-    border: '2px dashed #CBD5E0'
-  },
-  imagePreview: {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover'
-  },
-  imagePlaceholder: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '8px'
-  },
-  placeholderText: {
-    fontSize: '12px',
-    color: '#718096'
-  },
-  imageUploadControls: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px',
-    flex: 1
-  },
-  uploadButton: {
-    padding: '10px 20px',
-    backgroundColor: '#3182CE',
-    color: 'white',
-    border: 'none',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '500',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    justifyContent: 'center',
-    transition: 'all 0.2s',
-    '&:hover': {
-      backgroundColor: '#2C5282',
-      transform: 'translateY(-2px)'
-    }
-  },
-  removeImageButton: {
-    padding: '10px 20px',
-    backgroundColor: '#FED7D7',
-    color: '#9B2C2C',
-    border: 'none',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '500',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    justifyContent: 'center',
-    transition: 'all 0.2s',
-    '&:hover': {
-      backgroundColor: '#FEB2B2',
-      transform: 'translateY(-2px)'
-    }
-  },
-  imageUploadInfo: {
-    color: '#718096',
-    fontSize: '12px',
-    textAlign: 'center'
   },
   addButton: {
     padding: '10px 20px',

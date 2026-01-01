@@ -71,6 +71,66 @@ const TestTaking = () => {
   const [navigationMode, setNavigationMode] = useState('standard');
   const [compactMode, setCompactMode] = useState(false);
 
+  // Profile picture state
+  const [profileImageUrl, setProfileImageUrl] = useState('');
+  const [loadingProfile, setLoadingProfile] = useState(false);
+
+  // Get student name
+  const getStudentName = () => {
+    return user?.name || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'Student';
+  };
+
+  // Get student initials for fallback avatar
+  const getStudentInitials = () => {
+    const name = getStudentName();
+    return name.charAt(0).toUpperCase();
+  };
+
+  // Fetch student profile data including profile image
+  const fetchStudentProfile = async () => {
+    if (!user || user.role !== 'student') return;
+
+    try {
+      setLoadingProfile(true);
+      const token = localStorage.getItem('token');
+      
+      const response = await fetch(`http://localhost:5000/api/users/${user.id}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ HTTP error:', response.status, errorText);
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('✅ Student profile API response:', data);
+      
+      if (data.success && data.user) {
+        const studentData = data.user;
+        
+        // Set profile image URL if available
+        if (studentData.profileImage) {
+          setProfileImageUrl(`http://localhost:5000/uploads/profiles/${studentData.profileImage}`);
+        }
+        
+        setError(null);
+      }
+    } catch (err) {
+      console.error('❌ Error fetching student profile:', err);
+      // Set profile image from user object if available
+      if (user.profileImage) {
+        setProfileImageUrl(`http://localhost:5000/uploads/profiles/${user.profileImage}`);
+      }
+    } finally {
+      setLoadingProfile(false);
+    }
+  };
+
   // Initialize test
   useEffect(() => {
     if (!user) {
@@ -78,6 +138,7 @@ const TestTaking = () => {
       return;
     }
     initializeTest();
+    fetchStudentProfile(); // Fetch profile data
   }, [testId, user, navigate]);
 
   // Timer management
@@ -407,6 +468,60 @@ const TestTaking = () => {
       display: 'flex',
       gap: '12px',
       justifyContent: 'center',
+    },
+
+    // Student Profile Header
+    studentProfile: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '12px',
+      padding: '6px 12px',
+      borderRadius: '8px',
+      cursor: 'pointer',
+      transition: 'all 0.2s',
+      ':hover': {
+        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+      },
+    },
+    studentAvatarContainer: {
+      position: 'relative',
+      flexShrink: 0,
+    },
+    studentAvatarImage: {
+      width: '36px',
+      height: '36px',
+      borderRadius: '50%',
+      objectFit: 'cover',
+      border: `2px solid ${COLORS.white}`,
+    },
+    studentAvatarFallback: {
+      width: '36px',
+      height: '36px',
+      borderRadius: '50%',
+      backgroundColor: '#90EE90',
+      color: COLORS.primary,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontWeight: '600',
+      fontSize: '14px',
+      border: `2px solid ${COLORS.white}`,
+    },
+    studentInfo: {
+      display: 'flex',
+      flexDirection: 'column',
+      textAlign: 'left',
+    },
+    studentName: {
+      fontSize: '14px',
+      fontWeight: '600',
+      color: COLORS.white,
+      whiteSpace: 'nowrap',
+    },
+    studentRole: {
+      fontSize: '12px',
+      color: 'rgba(255, 255, 255, 0.8)',
+      fontWeight: '400',
     },
 
     // Instructions Modal - FIXED SCROLLING
@@ -1279,6 +1394,45 @@ const TestTaking = () => {
     </div>
   );
 
+  const StudentProfileHeader = () => {
+    const [showProfileInfo, setShowProfileInfo] = useState(false);
+
+    return (
+      <div 
+        style={styles.studentProfile}
+        onMouseEnter={() => setShowProfileInfo(true)}
+        onMouseLeave={() => setShowProfileInfo(false)}
+      >
+        <div style={styles.studentAvatarContainer}>
+          {profileImageUrl ? (
+            <img 
+              src={profileImageUrl} 
+              alt={getStudentName()} 
+              style={styles.studentAvatarImage}
+              onError={(e) => {
+                e.target.onerror = null;
+                e.target.style.display = 'none';
+                // Show fallback avatar if image fails to load
+                const fallback = document.createElement('div');
+                fallback.style.cssText = styles.studentAvatarFallback;
+                fallback.textContent = getStudentInitials();
+                e.target.parentElement.appendChild(fallback);
+              }}
+            />
+          ) : (
+            <div style={styles.studentAvatarFallback}>
+              {getStudentInitials()}
+            </div>
+          )}
+        </div>
+        <div style={styles.studentInfo}>
+          <span style={styles.studentName}>{getStudentName()}</span>
+          <span style={styles.studentRole}>Student</span>
+        </div>
+      </div>
+    );
+  };
+
   const InstructionsModal = () => {
     const instructionCards = [
       {
@@ -1803,6 +1957,65 @@ const TestTaking = () => {
             </div>
           </div>
         </div>
+        
+        {/* Student Profile in Header */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          padding: '6px 12px',
+          borderRadius: '8px',
+          cursor: 'pointer',
+          transition: 'all 0.2s',
+          ':hover': {
+            backgroundColor: 'rgba(75, 83, 32, 0.05)',
+          }
+        }}>
+          <div style={{
+            width: '36px',
+            height: '36px',
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: COLORS.primary,
+            fontWeight: '600',
+            fontSize: '14px',
+            backgroundColor: '#90EE90',
+            position: 'relative',
+            overflow: 'hidden'
+          }}>
+            {profileImageUrl ? (
+              <img 
+                src={profileImageUrl} 
+                alt={getStudentName()} 
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  borderRadius: '50%'
+                }}
+                onError={(e) => {
+                  e.target.onerror = null;
+                  e.target.style.display = 'none';
+                  // Show fallback avatar if image fails to load
+                  e.target.parentElement.style.backgroundColor = '#90EE90';
+                  e.target.parentElement.style.color = COLORS.primary;
+                  e.target.parentElement.textContent = getStudentInitials();
+                }}
+              />
+            ) : (
+              getStudentInitials()
+            )}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+            <span style={{ fontSize: '14px', fontWeight: '600', color: COLORS.primary }}>
+              {getStudentName()}
+            </span>
+            <span style={{ fontSize: '12px', color: COLORS.gray }}>Student</span>
+          </div>
+        </div>
+
         <div style={styles.timerSection}>
           <div style={styles.timerCard}>
             <FiClock size={14} />

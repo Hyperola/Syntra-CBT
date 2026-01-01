@@ -1,4 +1,4 @@
-// pages/EditUser.js
+// pages/EditUser.js - UPDATED WITH SINGLE REQUEST PROFILE IMAGE UPLOAD
 import React, { useState, useEffect, useContext } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
@@ -32,7 +32,7 @@ const EditUser = () => {
   const { userId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const { user: authUser } = useContext(AuthContext);
+  const { user: authUser, token } = useContext(AuthContext);
   
   const [formData, setFormData] = useState({
     username: '',
@@ -60,6 +60,7 @@ const EditUser = () => {
     adminPermissions: []
   });
   
+  // Image upload state - UPDATED WITH SINGLE REQUEST APPROACH
   const [profileImage, setProfileImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -106,9 +107,9 @@ const EditUser = () => {
   const fetchClasses = async () => {
     setLoadingClasses(true);
     try {
-      const token = localStorage.getItem('token');
+      const authToken = token || localStorage.getItem('token');
       const res = await axios.get('http://localhost:5000/api/classes', {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${authToken}` },
       });
       
       let classesData = [];
@@ -164,9 +165,9 @@ const EditUser = () => {
     setError(null);
     
     try {
-      const token = localStorage.getItem('token');
+      const authToken = token || localStorage.getItem('token');
       const response = await axios.get(`http://localhost:5000/api/users/${userId}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${authToken}` },
       });
       
       if (response.data && response.data.success && response.data.user) {
@@ -251,8 +252,8 @@ const EditUser = () => {
           };
         }).filter(assignment => assignment.classId && assignment.subjects.length > 0) || [];
         
-        const profileImageField = user.profileImage || user.profilePicture || 
-          (user.profileImageUrl ? user.profileImageUrl.split('/').pop() : null);
+        // Handle profile image - check for base64 string or URL
+        const profileImageData = user.profileImage || user.profilePicture || '';
         
         setFormData({
           username: user.username || '',
@@ -269,8 +270,8 @@ const EditUser = () => {
           parentPhoneNumber: user.parentPhoneNumber || '',
           selectedSubjects: enrolledSubjectIds,
           teacherAssignments: teacherAssignments,
-          picture: profileImageField,
-          profileImage: profileImageField,
+          picture: profileImageData ? 'Existing Image' : null,
+          profileImage: profileImageData,
           dateOfBirth: formattedDate,
           address: user.address || '',
           phoneNumber: user.phoneNumber || '',
@@ -280,12 +281,22 @@ const EditUser = () => {
           adminPermissions: user.adminPermissions || []
         });
         
-        // Set image preview
-        if (user.profileImageUrl) {
+        // Set image preview - UPDATED
+        if (user.profileImage) {
+          // Check if it's a base64 string or URL
+          if (user.profileImage.startsWith('data:image/')) {
+            // It's already a base64 image
+            setImagePreview(user.profileImage);
+          } else if (user.profileImage.startsWith('http')) {
+            // It's a URL
+            setImagePreview(user.profileImage);
+          } else {
+            // It might be a filename, construct URL
+            const imageUrl = `http://localhost:5000/uploads/profiles/${user.profileImage}`;
+            setImagePreview(imageUrl);
+          }
+        } else if (user.profileImageUrl) {
           setImagePreview(user.profileImageUrl);
-        } else if (profileImageField) {
-          const imageUrl = `http://localhost:5000/uploads/profiles/${profileImageField}`;
-          setImagePreview(imageUrl);
         }
         
         // Load class subjects if student
@@ -315,13 +326,13 @@ const EditUser = () => {
 
     setLoadingSubjects(true);
     try {
-      const token = localStorage.getItem('token');
+      const authToken = token || localStorage.getItem('token');
       
       let subjectsList = [];
       
       try {
         const res = await axios.get(`http://localhost:5000/api/classes/${classId}/subjects`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${authToken}` },
         });
         
         if (res.data && Array.isArray(res.data.subjects)) {
@@ -333,7 +344,7 @@ const EditUser = () => {
         }
       } catch (firstErr) {
         const res = await axios.get('http://localhost:5000/api/subjects', {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${authToken}` },
         });
         
         if (res.data && Array.isArray(res.data.subjects)) {
@@ -385,13 +396,13 @@ const EditUser = () => {
 
     setLoadingAssignmentSubjects(true);
     try {
-      const token = localStorage.getItem('token');
+      const authToken = token || localStorage.getItem('token');
       
       let subjectsList = [];
       
       try {
         const res = await axios.get(`http://localhost:5000/api/classes/${classId}/subjects`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${authToken}` },
         });
         
         if (res.data && Array.isArray(res.data.subjects)) {
@@ -403,7 +414,7 @@ const EditUser = () => {
         }
       } catch (firstErr) {
         const res = await axios.get('http://localhost:5000/api/subjects', {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${authToken}` },
         });
         
         if (res.data && Array.isArray(res.data.subjects)) {
@@ -441,6 +452,16 @@ const EditUser = () => {
     } finally {
       setLoadingAssignmentSubjects(false);
     }
+  };
+
+  // Helper function to convert image to base64 - FROM CREATEADMIN.JS
+  const convertImageToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = error => reject(error);
+    });
   };
 
   const calculateAge = (dateOfBirth) => {
@@ -502,6 +523,7 @@ const EditUser = () => {
     return null;
   };
 
+  // UPDATED: Handle image upload with base64 conversion
   const handleImageUpload = async (file) => {
     if (!file) {
       console.log('⚠️ No file selected');
@@ -515,20 +537,22 @@ const EditUser = () => {
       isFile: file instanceof File
     });
     
+    // Validate file
     const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    const maxSize = 2 * 1024 * 1024; // 2MB
+    const maxSize = 5 * 1024 * 1024; // 5MB (increased from 2MB to match createadmin.js)
     
     if (!validTypes.includes(file.type)) {
-      setError('Please upload JPG, PNG, GIF, or WebP only.');
+      setError('Please upload a valid image file (JPG, PNG, GIF, WebP).');
       return;
     }
     
     if (file.size > maxSize) {
-      setError('Image must be under 2MB.');
+      setError('Image size must be less than 5MB.');
       return;
     }
     
     setUploadingImage(true);
+    setError(null);
     try {
       // Create preview
       const reader = new FileReader();
@@ -679,6 +703,7 @@ const EditUser = () => {
     }));
   };
 
+  // UPDATED: Handle submit with single request including base64 image
   const handleSubmit = async (e) => {
     e.preventDefault();
     const validationError = validateForm();
@@ -692,12 +717,24 @@ const EditUser = () => {
     setSuccess(null);
     
     try {
-      const token = localStorage.getItem('token');
-      if (!token) {
+      const authToken = token || localStorage.getItem('token');
+      if (!authToken) {
         throw new Error('No authentication token found.');
       }
       
       const cleanedUsername = cleanUsername(formData.username);
+      
+      // Convert image to base64 if exists
+      let profileImageBase64 = null;
+      if (profileImage) {
+        try {
+          profileImageBase64 = await convertImageToBase64(profileImage);
+          console.log('✅ Image converted to base64, length:', profileImageBase64.length);
+        } catch (imageErr) {
+          console.warn('⚠️ Could not convert image to base64:', imageErr);
+          // Continue without image - don't fail the whole request
+        }
+      }
       
       // Build user data
       const userData = {
@@ -723,23 +760,14 @@ const EditUser = () => {
         userData.password = formData.password;
       }
       
-      // Handle image
-      if (profileImage && profileImage instanceof File) {
-        try {
-          const reader = new FileReader();
-          const base64Image = await new Promise((resolve, reject) => {
-            reader.onloadend = () => resolve(reader.result);
-            reader.onerror = reject;
-            reader.readAsDataURL(profileImage);
-          });
-          userData.profileImage = base64Image;
-          console.log('📸 Image converted to base64, size:', base64Image.length);
-        } catch (err) {
-          console.warn('⚠️ Could not convert image to base64:', err);
-        }
-      } else if (formData.profileImage) {
-        // Keep existing image if no new one
+      // Add profile image as base64 if available
+      if (profileImageBase64) {
+        userData.profileImage = profileImageBase64;
+        console.log('📸 New image included as base64, size:', profileImageBase64.length);
+      } else if (formData.profileImage && !profileImage) {
+        // Keep existing image if no new one uploaded
         userData.profileImage = formData.profileImage;
+        console.log('🖼️ Keeping existing profile image');
       }
       
       // Handle role-specific fields
@@ -785,48 +813,70 @@ const EditUser = () => {
         delete userData.studentId;
       }
       
-      console.log('🔄 Final user data to update:', {
+      console.log('🔄 Final user data to update (SINGLE REQUEST):', {
         ...userData,
-        profileImage: userData.profileImage ? `[Base64 image, length: ${userData.profileImage.length}]` : 'No image'
+        profileImage: userData.profileImage ? 'BASE64_IMAGE_INCLUDED' : 'NO_IMAGE',
+        password: formData.password ? '***' : 'NOT_CHANGED'
       });
       
-      // Update user data
+      // SINGLE REQUEST: Update user with profile image in one request
       const response = await axios.put(
         `http://localhost:5000/api/users/${userId}`, 
         userData, 
         {
           headers: { 
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${authToken}`,
             'Content-Type': 'application/json'
-          }
+          },
+          timeout: 30000
         }
       );
       
-      console.log('✅ User update response:', response.data);
+      console.log('✅ User update response:', {
+        success: response.data.success,
+        message: response.data.message
+      });
       
-      setSuccess('User updated successfully!');
-      
-      // Navigate back after success
-      setTimeout(() => {
-        navigate(`/admin/users/${userId}`);
-      }, 1500);
+      if (response.data.success) {
+        setSuccess('User updated successfully with profile image! Redirecting...');
+        
+        // Navigate back after success
+        setTimeout(() => {
+          navigate(`/admin/users/${userId}`);
+        }, 2000);
+      } else {
+        setError(response.data.message || 'Failed to update user');
+      }
       
     } catch (err) {
       console.error('❌ Error updating user:', err);
       
-      let errorMessage = 'Failed to update user.';
       if (err.response) {
-        console.error('Server response:', err.response.data);
-        if (err.response.data && err.response.data.message) {
-          errorMessage = err.response.data.message;
-        } else if (err.response.data && err.response.data.error) {
-          errorMessage = err.response.data.error;
+        console.error('📡 Response error details:', {
+          status: err.response.status,
+          data: err.response.data,
+          headers: err.response.headers
+        });
+        
+        if (err.response.status === 400) {
+          const errorMsg = err.response.data.message || 'Validation error. Please check the form.';
+          setError(errorMsg);
+        } else if (err.response.status === 401) {
+          setError('Authentication failed. Please log in again.');
+          setTimeout(() => navigate('/login'), 2000);
+        } else if (err.response.status === 403) {
+          setError('Permission denied. You do not have access to edit this user.');
+        } else if (err.response.status === 409) {
+          setError('User with this username or email already exists.');
+        } else {
+          setError(err.response.data?.message || `Server error: ${err.response.status}`);
         }
-      } else if (err.message) {
-        errorMessage = err.message;
+      } else if (err.request) {
+        console.error('🌐 Network error details:', err.request);
+        setError('Network error. Please check your connection and try again.');
+      } else {
+        setError('An unexpected error occurred. Please try again.');
       }
-      
-      setError(errorMessage);
     } finally {
       setSaving(false);
     }
@@ -880,9 +930,12 @@ const EditUser = () => {
         {/* Edit Form */}
         <div style={styles.formContainer}>
           <form onSubmit={handleSubmit}>
-            {/* Profile Image Upload Section */}
+            {/* Profile Image Upload Section - UPDATED */}
             <div style={styles.imageUploadSection}>
-              <h4 style={styles.sectionTitle}>Profile Image</h4>
+              <h4 style={styles.sectionTitle}>Profile Image (Optional)</h4>
+              <p style={styles.imageUploadHelp}>
+                Image will be sent as base64 in the same request with user data.
+              </p>
               <div style={styles.imageUploadContainer}>
                 <div style={styles.imagePreviewArea}>
                   {imagePreview ? (
@@ -901,7 +954,7 @@ const EditUser = () => {
                     accept="image/jpeg,image/png,image/gif,image/webp"
                     onChange={(e) => handleImageUpload(e.target.files[0])}
                     style={{ display: 'none' }}
-                    disabled={uploadingImage}
+                    disabled={uploadingImage || saving}
                   />
                   <label htmlFor="profileImage" style={styles.uploadButton}>
                     {uploadingImage ? (
@@ -924,17 +977,20 @@ const EditUser = () => {
                       type="button"
                       onClick={removeProfileImage}
                       style={styles.removeImageButton}
-                      disabled={uploadingImage}
+                      disabled={uploadingImage || saving}
                     >
                       <FiXCircle /> Remove
                     </button>
                   )}
                   <div style={styles.imageUploadInfo}>
-                    <small>JPG, PNG, GIF, WebP up to 2MB</small>
+                    <small>JPG, PNG, GIF, WebP up to 5MB</small>
                     <br />
-                    <small style={{ color: '#D69E2E' }}>
-                      Current image: {formData.profileImage || 'None'}
-                    </small>
+                    <small>Image will be saved with user update</small>
+                    {formData.profileImage && !imagePreview && (
+                      <small style={{ display: 'block', color: '#D69E2E', marginTop: '4px' }}>
+                        Existing image will be kept
+                      </small>
+                    )}
                   </div>
                 </div>
               </div>
@@ -959,6 +1015,7 @@ const EditUser = () => {
                       onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                       required
                       style={styles.formInput}
+                      disabled={saving}
                     />
                     <small style={styles.helpText}>
                       Username will be converted to lowercase with underscores instead of spaces
@@ -976,6 +1033,7 @@ const EditUser = () => {
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                       required
                       style={styles.formInput}
+                      disabled={saving}
                     />
                   </div>
                 </div>
@@ -990,6 +1048,7 @@ const EditUser = () => {
                       onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                       minLength={6}
                       style={styles.formInput}
+                      disabled={saving}
                     />
                   </div>
                   
@@ -1001,6 +1060,7 @@ const EditUser = () => {
                       value={formData.confirmPassword}
                       onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
                       style={styles.formInput}
+                      disabled={saving}
                     />
                   </div>
                 </div>
@@ -1017,6 +1077,7 @@ const EditUser = () => {
                       onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
                       required
                       style={styles.formInput}
+                      disabled={saving}
                     />
                   </div>
                   
@@ -1028,6 +1089,7 @@ const EditUser = () => {
                       value={formData.middleName}
                       onChange={(e) => setFormData({ ...formData, middleName: e.target.value })}
                       style={styles.formInput}
+                      disabled={saving}
                     />
                   </div>
                   
@@ -1042,6 +1104,7 @@ const EditUser = () => {
                       onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
                       required
                       style={styles.formInput}
+                      disabled={saving}
                     />
                   </div>
                 </div>
@@ -1069,7 +1132,7 @@ const EditUser = () => {
                       }}
                       required
                       style={styles.formInput}
-                      disabled={authUser.role !== 'super_admin' && formData.role === 'super_admin'}
+                      disabled={saving || (authUser.role !== 'super_admin' && formData.role === 'super_admin')}
                     >
                       <option value="student">Student</option>
                       <option value="teacher">Teacher</option>
@@ -1084,6 +1147,7 @@ const EditUser = () => {
                       value={formData.active}
                       onChange={(e) => setFormData({ ...formData, active: e.target.value === 'true' })}
                       style={styles.formInput}
+                      disabled={saving}
                     >
                       <option value="true">Active</option>
                       <option value="false">Inactive</option>
@@ -1107,6 +1171,7 @@ const EditUser = () => {
                       value={formData.phoneNumber}
                       onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
                       style={styles.formInput}
+                      disabled={saving}
                     />
                   </div>
                   
@@ -1122,6 +1187,7 @@ const EditUser = () => {
                       onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                       required={formData.role === 'student'}
                       style={styles.formInput}
+                      disabled={saving}
                     />
                     {formData.role === 'student' && (
                       <small style={styles.helpText}>Home address is required for students</small>
@@ -1148,6 +1214,7 @@ const EditUser = () => {
                           value={formData.parentEmail}
                           onChange={(e) => setFormData({ ...formData, parentEmail: e.target.value })}
                           style={styles.formInput}
+                          disabled={saving}
                         />
                         <small style={styles.helpText}>
                           Either student email or parent email is required
@@ -1162,6 +1229,7 @@ const EditUser = () => {
                           value={formData.parentPhoneNumber}
                           onChange={(e) => setFormData({ ...formData, parentPhoneNumber: e.target.value })}
                           style={styles.formInput}
+                          disabled={saving}
                         />
                       </div>
                     </div>
@@ -1180,7 +1248,7 @@ const EditUser = () => {
                       value={formData.class}
                       onChange={(e) => handleClassChange(e.target.value)}
                       required={formData.role === 'student'}
-                      disabled={loadingClasses}
+                      disabled={loadingClasses || saving}
                       style={{
                         ...styles.formInput,
                         backgroundColor: loadingClasses ? '#F5F7FA' : '#FFFFFF'
@@ -1212,6 +1280,7 @@ const EditUser = () => {
                           value={formData.studentId}
                           onChange={(e) => setFormData({ ...formData, studentId: e.target.value })}
                           style={styles.formInput}
+                          disabled={saving}
                         />
                       </div>
 
@@ -1233,6 +1302,7 @@ const EditUser = () => {
                                       type="checkbox"
                                       checked={formData.selectedSubjects.includes(subject.id)}
                                       onChange={() => handleStudentSubjectSelection(subject.id)}
+                                      disabled={saving}
                                     />
                                     <span>
                                       {subject.name} 
@@ -1273,6 +1343,7 @@ const EditUser = () => {
                                     type="button"
                                     onClick={() => removeTeacherAssignment(assignment.classId)}
                                     style={styles.removeAssignmentButton}
+                                    disabled={saving}
                                   >
                                     <FiXCircle />
                                   </button>
@@ -1292,6 +1363,7 @@ const EditUser = () => {
                           type="button"
                           onClick={openTeacherAssignmentModal}
                           style={styles.addAssignmentButton}
+                          disabled={saving}
                         >
                           <FiPlus /> Add Assignment
                         </button>
@@ -1320,6 +1392,7 @@ const EditUser = () => {
                                 : [...prev.adminPermissions, perm.value],
                             }));
                           }}
+                          disabled={saving}
                         />
                         <span>{perm.label}</span>
                       </label>
@@ -1341,6 +1414,7 @@ const EditUser = () => {
                       value={formData.dateOfBirth}
                       onChange={(e) => handleDateOfBirthChange(e.target.value)}
                       style={styles.formInput}
+                      disabled={saving}
                     />
                   </div>
                   
@@ -1351,6 +1425,7 @@ const EditUser = () => {
                       value={formData.age}
                       readOnly
                       style={{...styles.formInput, backgroundColor: '#F5F7FA'}}
+                      disabled={saving}
                     />
                   </div>
                   
@@ -1360,6 +1435,7 @@ const EditUser = () => {
                       value={formData.sex}
                       onChange={(e) => setFormData({ ...formData, sex: e.target.value })}
                       style={styles.formInput}
+                      disabled={saving}
                     >
                       <option value="">Select Sex</option>
                       <option value="male">Male</option>
@@ -1392,6 +1468,7 @@ const EditUser = () => {
                 type="button"
                 onClick={() => navigate(`/admin/users/${userId}`)}
                 style={styles.cancelButton}
+                disabled={saving}
               >
                 Cancel
               </button>
@@ -1418,6 +1495,7 @@ const EditUser = () => {
                   value={teacherAssignmentModal.selectedClass}
                   onChange={(e) => handleAssignmentClassChange(e.target.value)}
                   style={styles.formInput}
+                  disabled={loadingAssignmentSubjects || saving}
                 >
                   <option value="">Select a Class</option>
                   {classes.map(cls => (
@@ -1447,6 +1525,7 @@ const EditUser = () => {
                               type="checkbox"
                               checked={teacherAssignmentModal.selectedSubjects.includes(subject.id)}
                               onChange={() => handleAssignmentSubjectToggle(subject.id)}
+                              disabled={saving}
                             />
                             <span>
                               {subject.name} 
@@ -1472,7 +1551,7 @@ const EditUser = () => {
             <div style={styles.modalFooter}>
               <button
                 onClick={addTeacherAssignment}
-                disabled={!teacherAssignmentModal.selectedClass || teacherAssignmentModal.selectedSubjects.length === 0}
+                disabled={!teacherAssignmentModal.selectedClass || teacherAssignmentModal.selectedSubjects.length === 0 || saving}
                 style={styles.modalSubmitButton}
               >
                 <FiSave /> Add Assignment
@@ -1530,7 +1609,7 @@ const styles = {
     width: '16px',
     height: '16px',
     border: '2px solid #f3f3f3',
-    borderTop: '2px solid #4B5320',
+    borderTop: '2px solid white',
     borderRadius: '50%',
     animation: 'spin 1s linear infinite',
     marginRight: '8px',
@@ -1559,6 +1638,10 @@ const styles = {
     '&:hover': {
       backgroundColor: '#4A5568',
       transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.6,
+      cursor: 'not-allowed'
     }
   },
   title: {
@@ -1623,6 +1706,12 @@ const styles = {
     borderRadius: '8px',
     border: '1px solid #E2E8F0'
   },
+  imageUploadHelp: {
+    color: '#718096',
+    fontSize: '14px',
+    marginBottom: '16px',
+    fontStyle: 'italic'
+  },
   imageUploadContainer: {
     display: 'flex',
     alignItems: 'center',
@@ -1638,7 +1727,8 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    border: '2px dashed #CBD5E0'
+    border: '2px dashed #CBD5E0',
+    flexShrink: 0
   },
   imagePreview: {
     width: '100%',
@@ -1676,9 +1766,14 @@ const styles = {
     gap: '8px',
     justifyContent: 'center',
     transition: 'all 0.2s',
-    '&:hover': {
+    width: 'fit-content',
+    '&:hover:not(:disabled)': {
       backgroundColor: '#2C5282',
       transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.5,
+      cursor: 'not-allowed'
     }
   },
   removeImageButton: {
@@ -1695,15 +1790,20 @@ const styles = {
     gap: '8px',
     justifyContent: 'center',
     transition: 'all 0.2s',
-    '&:hover': {
+    width: 'fit-content',
+    '&:hover:not(:disabled)': {
       backgroundColor: '#FEB2B2',
       transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.5,
+      cursor: 'not-allowed'
     }
   },
   imageUploadInfo: {
     color: '#718096',
     fontSize: '12px',
-    textAlign: 'center'
+    lineHeight: '1.5'
   },
   formGrid: {
     display: 'grid',
@@ -1883,8 +1983,12 @@ const styles = {
     fontSize: '16px',
     padding: '4px',
     borderRadius: '4px',
-    '&:hover': {
+    '&:hover:not(:disabled)': {
       backgroundColor: '#FED7D7'
+    },
+    '&:disabled': {
+      opacity: 0.6,
+      cursor: 'not-allowed'
     }
   },
   assignmentSubjects: {
@@ -1913,9 +2017,13 @@ const styles = {
     width: '100%',
     justifyContent: 'center',
     transition: 'all 0.2s',
-    '&:hover': {
+    '&:hover:not(:disabled)': {
       backgroundColor: '#3A4218',
       transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.6,
+      cursor: 'not-allowed'
     }
   },
   formActions: {
@@ -1959,9 +2067,13 @@ const styles = {
     cursor: 'pointer',
     fontSize: '14px',
     transition: 'all 0.2s',
-    '&:hover': {
+    '&:hover:not(:disabled)': {
       backgroundColor: '#4A5568',
       transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.6,
+      cursor: 'not-allowed'
     }
   },
   // Modal Styles

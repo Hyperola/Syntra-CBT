@@ -1,5 +1,4 @@
-// REPLACE your AnalyticsPage.js with this version (no recharts):
-
+// AnalyticsPage.js - UPDATED WITHOUT TEST STATUS TAB AND PASS RATES
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import axios from 'axios';
@@ -7,33 +6,23 @@ import {
   FiUsers, 
   FiBook, 
   FiClipboard, 
-  FiAward, 
   FiUserCheck,
   FiBarChart2,
   FiTrendingUp,
-  FiActivity,
-  FiAlertCircle,
-  FiTarget,
-  FiTrendingDown,
-  FiClock,
-  FiPieChart,
-  FiBookOpen,
-  FiStar,
-  FiFilter,
   FiRefreshCw,
-  FiCheckCircle,
-  FiXCircle,
-  FiInfo,
-  FiDatabase,
-  FiGlobe,
-  FiEye,
-  FiDownload,
-  FiCalendar,
+  FiAlertCircle,
   FiHome,
-  FiDollarSign,
+  FiTarget,
+  FiActivity,
   FiPercent,
-  FiClock as FiTime,
-  FiBarChart
+  FiAward,
+  FiCheckSquare,
+  FiFileText,
+  FiChevronRight,
+  FiPlayCircle,
+  FiClock,
+  FiCheck,
+  FiX
 } from 'react-icons/fi';
 
 // Brand Colors
@@ -41,12 +30,6 @@ const BRAND_COLORS = {
   armyGreen: '#4B5320',
   brightGreen: '#00FF00',
   orange: '#FFA500',
-  darkArmy: '#3A4520',
-  lightArmy: '#6B8E23',
-  successGreen: '#28A745',
-  warningOrange: '#FFC107',
-  dangerRed: '#DC3545',
-  infoBlue: '#17A2B8',
   lightBg: '#F8F9FA',
   darkText: '#2C3E50',
   lightText: '#6C757D'
@@ -55,51 +38,199 @@ const BRAND_COLORS = {
 const AnalyticsPage = () => {
   const { user } = useContext(AuthContext);
   
-  // State for different data types
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [institutionalData, setInstitutionalData] = useState({
+  const [refreshing, setRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
+  const [statusSummary, setStatusSummary] = useState(null);
+  
+  // Data state
+  const [overviewData, setOverviewData] = useState({
     totalStudents: 0,
     totalTeachers: 0,
     totalClasses: 0,
     totalTests: 0,
-    totalExams: 0,
     totalResults: 0,
-    overallAverageScore: 0,
-    passRate: 0,
+    averageScore: 0,
+    averageScoreFormatted: '0/100',
     activeUsers: 0,
-    revenue: 0,
-    attendanceRate: 0,
     completionRate: 0
   });
   
-  const [testAnalytics, setTestAnalytics] = useState([]);
-  const [classPerformance, setClassPerformance] = useState([]);
-  const [subjectPerformance, setSubjectPerformance] = useState([]);
-  const [recentActivity, setRecentActivity] = useState([]);
-  
-  // Simple data states (no complex chart data)
+  const [recentTests, setRecentTests] = useState([]);
   const [performanceTrend, setPerformanceTrend] = useState([]);
-  const [subjectDistribution, setSubjectDistribution] = useState([]);
-  const [classDistribution, setClassDistribution] = useState([]);
-  const [revenueData, setRevenueData] = useState([]);
-  
-  const [filters, setFilters] = useState({
-    timeRange: 'all',
-    classFilter: 'all',
-    subjectFilter: 'all',
-    viewType: 'overview'
-  });
-  const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState('institutional');
+  const [testScoresSummary, setTestScoresSummary] = useState(null);
+  const [detailedTests, setDetailedTests] = useState([]);
 
-  // Fetch institutional analytics data for admin
-  useEffect(() => {
-    console.log('📊 Admin AnalyticsPage mounted, user:', user);
+  // Test API connection
+  const testAPIConnection = async () => {
+    try {
+      console.log('Testing API connection...');
+      const response = await axios.get('http://localhost:5000/api/analytics/health');
+      console.log('API Health:', response.data);
+      return response.data.success;
+    } catch (err) {
+      console.log('API test failed:', err.message);
+      return false;
+    }
+  };
+
+  // Fetch real data - UPDATED WITHOUT PASS RATES
+  const fetchRealData = async () => {
+    const token = localStorage.getItem('token');
     
-    const fetchAdminAnalytics = async () => {
-      if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) {
-        console.log('📊 User not authorized for admin analytics');
+    if (!token) {
+      console.log('No token found');
+      setError('Please login to view analytics');
+      return false;
+    }
+
+    try {
+      console.log('Fetching real analytics data...');
+      
+      // Fetch overview
+      const overviewResponse = await axios.get('http://localhost:5000/api/analytics/overview', {
+        headers: { 
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (overviewResponse.data.success) {
+        const overview = overviewResponse.data.overview;
+        console.log('Overview data received:', overview);
+        
+        setOverviewData({
+          totalStudents: overview.totalStudents || 0,
+          totalTeachers: overview.totalTeachers || 0,
+          totalClasses: overview.totalClasses || 0,
+          totalTests: overview.totalTests || 0,
+          totalResults: overview.totalResults || 0,
+          averageScore: overview.averageScore || 0,
+          averageScoreFormatted: overview.averageScoreFormatted || '0/100',
+          activeUsers: overview.activeUsers || 0,
+          completionRate: overview.completionRate || 0
+        });
+        
+        // Set recent tests if available
+        if (overviewResponse.data.recentTests) {
+          setRecentTests(overviewResponse.data.recentTests);
+        }
+        
+        setError(null);
+        return true;
+      } else {
+        setError('Failed to fetch data from server');
+        return false;
+      }
+    } catch (err) {
+      console.log('Failed to fetch real data:', err.message);
+      console.log('Error details:', err.response?.data);
+      
+      if (err.response?.status === 403) {
+        setError('Admin access required. Please login as admin.');
+      } else if (err.response?.status === 401) {
+        setError('Session expired. Please login again.');
+      } else {
+        setError('Failed to connect to server. Please check if server is running.');
+      }
+      return false;
+    }
+  };
+
+  // Fetch performance trend
+  const fetchPerformanceTrend = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    try {
+      const response = await axios.get('http://localhost:5000/api/analytics/performance-trend?months=6', {
+        headers: { 
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (response.data.success) {
+        setPerformanceTrend(response.data.trendData);
+      }
+    } catch (err) {
+      console.log('Failed to fetch performance trend:', err.message);
+    }
+  };
+
+  // Fetch detailed test scores
+  const fetchDetailedTests = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    try {
+      const response = await axios.get('http://localhost:5000/api/analytics/recent-tests-detailed?limit=10', {
+        headers: { 
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (response.data.success) {
+        setDetailedTests(response.data.tests);
+      }
+    } catch (err) {
+      console.log('Failed to fetch detailed tests:', err.message);
+    }
+  };
+
+  // Fetch test scores summary
+  const fetchTestScoresSummary = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    try {
+      const response = await axios.get('http://localhost:5000/api/analytics/test-scores-summary', {
+        headers: { 
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (response.data.success) {
+        setTestScoresSummary(response.data.summary);
+      }
+    } catch (err) {
+      console.log('Failed to fetch test scores summary:', err.message);
+    }
+  };
+
+  // NEW: Fetch test status summary
+  const fetchStatusSummary = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    try {
+      const response = await axios.get('http://localhost:5000/api/analytics/test-status-summary', {
+        headers: { 
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (response.data.success) {
+        setStatusSummary(response.data.statusSummary);
+      }
+    } catch (err) {
+      console.log('Failed to fetch status summary:', err.message);
+    }
+  };
+
+  // Load data - UPDATED
+  useEffect(() => {
+    console.log('📊 AnalyticsPage mounted, user role:', user?.role);
+    
+    const loadData = async () => {
+      if (!user) {
+        setError('Please login to view analytics');
+        setLoading(false);
+        return;
+      }
+
+      // Check if user is admin/teacher
+      if (!['admin', 'super_admin', 'teacher'].includes(user.role)) {
+        setError('Access denied. Admin or teacher role required.');
         setLoading(false);
         return;
       }
@@ -107,365 +238,218 @@ const AnalyticsPage = () => {
       setLoading(true);
       setError(null);
       
-      const token = localStorage.getItem('token');
+      // Test API connection
+      const apiAvailable = await testAPIConnection();
       
-      if (!token) {
-        console.error('📊 No token found');
-        setError('Authentication required');
-        setLoading(false);
-        return;
-      }
-
-      try {
-        console.log('📊 Fetching ADMIN analytics data...');
+      if (apiAvailable) {
+        // Try to fetch real data
+        const realDataSuccess = await fetchRealData();
         
-        // Fetch institutional overview
-        const overviewResponse = await axios.get('http://localhost:5000/api/analytics/overview', {
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Cache-Control': 'no-cache'
-          },
-        });
-        
-        console.log('📊 Overview Response:', overviewResponse.data);
-        
-        if (overviewResponse.data.success) {
-          const overview = overviewResponse.data.overview;
-          setInstitutionalData({
-            totalStudents: overview.totalStudents || 0,
-            totalTeachers: overview.totalTeachers || 0,
-            totalClasses: overview.totalClasses || 0,
-            totalTests: overview.totalTests || 0,
-            totalExams: overview.totalExams || 0,
-            totalResults: overview.totalResults || 0,
-            overallAverageScore: overview.averageScore || 0,
-            passRate: overview.passRate || 0,
-            activeUsers: overview.activeUsers || 0,
-            revenue: overview.revenue || 0,
-            attendanceRate: overview.attendanceRate || 0,
-            completionRate: overview.completionRate || 0
-          });
-          
-          if (overviewResponse.data.recentTests) {
-            setTestAnalytics(overviewResponse.data.recentTests);
-          }
-
-          // Fetch additional data from other endpoints
-          try {
-            // Performance trend
-            const trendResponse = await axios.get('http://localhost:5000/api/analytics/performance-trend', {
-              headers: { Authorization: `Bearer ${token}` }
-            });
-            if (trendResponse.data.success) {
-              setPerformanceTrend(trendResponse.data.trendData);
-            }
-          } catch (trendErr) {
-            console.log('Performance trend not available:', trendErr.message);
-          }
-
-          try {
-            // Subject distribution
-            const subjectResponse = await axios.get('http://localhost:5000/api/analytics/subject-distribution', {
-              headers: { Authorization: `Bearer ${token}` }
-            });
-            if (subjectResponse.data.success) {
-              setSubjectDistribution(subjectResponse.data.distributionData);
-            }
-          } catch (subjectErr) {
-            console.log('Subject distribution not available:', subjectErr.message);
-          }
-
-          try {
-            // Class distribution
-            const classResponse = await axios.get('http://localhost:5000/api/analytics/class-distribution', {
-              headers: { Authorization: `Bearer ${token}` }
-            });
-            if (classResponse.data.success) {
-              setClassDistribution(classResponse.data.distributionData);
-            }
-          } catch (classErr) {
-            console.log('Class distribution not available:', classErr.message);
-          }
-
-          try {
-            // Revenue data
-            const revenueResponse = await axios.get('http://localhost:5000/api/analytics/revenue-data', {
-              headers: { Authorization: `Bearer ${token}` }
-            });
-            if (revenueResponse.data.success) {
-              setRevenueData(revenueResponse.data.revenueData);
-            }
-          } catch (revenueErr) {
-            console.log('Revenue data not available:', revenueErr.message);
-          }
-
-          try {
-            // Class performance
-            const classesResponse = await axios.get('http://localhost:5000/api/analytics/classes', {
-              headers: { Authorization: `Bearer ${token}` }
-            });
-            if (classesResponse.data.success) {
-              setClassPerformance(classesResponse.data.classes);
-            }
-          } catch (classErr) {
-            console.log('Class performance not available:', classErr.message);
-          }
-
-          try {
-            // Subject performance
-            const subjectsResponse = await axios.get('http://localhost:5000/api/analytics/subjects', {
-              headers: { Authorization: `Bearer ${token}` }
-            });
-            if (subjectsResponse.data.success) {
-              setSubjectPerformance(subjectsResponse.data.subjects);
-            }
-          } catch (subjectErr) {
-            console.log('Subject performance not available:', subjectErr.message);
-          }
-
-          try {
-            // Recent activity
-            const activityResponse = await axios.get('http://localhost:5000/api/analytics/activity', {
-              headers: { Authorization: `Bearer ${token}` }
-            });
-            if (activityResponse.data.success) {
-              setRecentActivity(activityResponse.data.activity);
-            }
-          } catch (activityErr) {
-            console.log('Recent activity not available:', activityErr.message);
-          }
+        if (realDataSuccess) {
+          // Fetch additional data
+          await Promise.all([
+            fetchPerformanceTrend(),
+            fetchDetailedTests(),
+            fetchTestScoresSummary(),
+            fetchStatusSummary()
+          ]);
+        } else {
+          setError('Connected to API but could not fetch data');
         }
-
-        console.log('📊 Admin data loaded successfully');
-        
-      } catch (err) {
-        console.error('❌ Error fetching admin analytics:', {
-          message: err.message,
-          status: err.response?.status,
-          data: err.response?.data
-        });
-        
-        setError('Failed to load analytics data. Please try again.');
-      } finally {
-        setLoading(false);
+      } else {
+        setError('API unavailable. Please check if server is running on port 5000.');
       }
+      
+      setLoading(false);
     };
 
-    fetchAdminAnalytics();
+    loadData();
   }, [user]);
 
-  // Refresh data function
+  // Refresh data - UPDATED
   const refreshData = async () => {
     setRefreshing(true);
-    const token = localStorage.getItem('token');
-    
-    try {
-      console.log('🔄 Refreshing admin analytics data...');
-      const response = await axios.get('http://localhost:5000/api/analytics/overview', {
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        },
-      });
-      
-      if (response.data.success) {
-        const overview = response.data.overview;
-        setInstitutionalData(prev => ({
-          ...prev,
-          totalStudents: overview.totalStudents || prev.totalStudents,
-          totalTeachers: overview.totalTeachers || prev.totalTeachers,
-          totalClasses: overview.totalClasses || prev.totalClasses,
-          totalTests: overview.totalTests || prev.totalTests,
-          totalExams: overview.totalExams || prev.totalExams,
-          totalResults: overview.totalResults || prev.totalResults,
-          overallAverageScore: overview.averageScore || prev.overallAverageScore,
-          passRate: overview.passRate || prev.passRate,
-          activeUsers: overview.activeUsers || prev.activeUsers,
-        }));
-        console.log('✅ Admin data refreshed successfully');
-      }
-    } catch (err) {
-      console.error('❌ Error refreshing admin data:', err);
-    } finally {
-      setRefreshing(false);
-    }
+    await Promise.all([
+      fetchRealData(),
+      fetchPerformanceTrend(),
+      fetchDetailedTests(),
+      fetchTestScoresSummary(),
+      fetchStatusSummary()
+    ]);
+    setRefreshing(false);
   };
 
-  // Calculate institutional metrics
-  const calculateMetrics = () => {
-    const completionRate = institutionalData.totalTests > 0 
-      ? (institutionalData.totalResults / (institutionalData.totalTests * 10)) * 100 
-      : 0;
-    
-    const studentTeacherRatio = institutionalData.totalTeachers > 0 
-      ? (institutionalData.totalStudents / institutionalData.totalTeachers).toFixed(1)
-      : 0;
-    
-    const testPerStudent = institutionalData.totalStudents > 0 
-      ? (institutionalData.totalTests / institutionalData.totalStudents).toFixed(1)
-      : 0;
-    
-    return {
-      completionRate: Math.min(completionRate, 100),
-      studentTeacherRatio,
-      testPerStudent,
-      avgScore: institutionalData.overallAverageScore,
-      passRate: institutionalData.passRate,
-      attendance: institutionalData.attendanceRate,
-      revenueGrowth: 12.5
-    };
-  };
-
-  const metrics = calculateMetrics();
-
-  // Handle filter changes
-  const handleFilterChange = (filterName, value) => {
-    setFilters(prev => ({
-      ...prev,
-      [filterName]: value
-    }));
-  };
-
-  // Format number with commas
+  // Format number
   const formatNumber = (num) => {
+    if (num === undefined || num === null) return '0';
     return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   };
 
-  // Format currency
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-NG', {
-      style: 'currency',
-      currency: 'NGN',
-      minimumFractionDigits: 0
-    }).format(amount);
+  // Get score color based on value
+  const getScoreColor = (score, totalMarks = 100) => {
+    const percentage = (score / totalMarks) * 100;
+    if (percentage >= 70) return '#00FF00';
+    if (percentage >= 50) return '#FFA500';
+    return '#DC3545';
   };
 
-  // Get performance color
-  const getPerformanceColor = (score) => {
-    if (score >= 85) return BRAND_COLORS.brightGreen;
-    if (score >= 70) return BRAND_COLORS.orange;
-    return BRAND_COLORS.dangerRed;
+  // Get test type icon
+  const getTestTypeIcon = (type) => {
+    switch(type?.toLowerCase()) {
+      case 'exam':
+        return <FiFileText style={{ color: '#7B1FA2' }} />;
+      case 'ca':
+        return <FiCheckSquare style={{ color: '#1976D2' }} />;
+      case 'assignment':
+        return <FiFileText style={{ color: '#388E3C' }} />;
+      case 'quiz':
+        return <FiAward style={{ color: '#F57C00' }} />;
+      default:
+        return <FiClipboard style={{ color: '#4B5320' }} />;
+    }
   };
 
-  // Simple chart rendering functions
-  const renderSimpleBarChart = (data, labelKey, valueKey, color = BRAND_COLORS.armyGreen) => {
-    const maxValue = Math.max(...data.map(item => item[valueKey]));
-    
-    return (
-      <div style={styles.simpleChartContainer}>
-        {data.map((item, index) => (
-          <div key={index} style={styles.barChartItem}>
-            <div style={styles.barLabel}>{item[labelKey]}</div>
-            <div style={styles.barContainer}>
-              <div 
-                style={{
-                  ...styles.bar,
-                  width: `${(item[valueKey] / maxValue) * 100}%`,
-                  backgroundColor: color
-                }}
-              />
-              <div style={styles.barValue}>{item[valueKey]}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    );
+  // Get status badge style - UPDATED WITH MORE STATUSES
+  const getStatusStyle = (status) => {
+    switch(status?.toLowerCase()) {
+      case 'completed':
+        return { 
+          bg: 'rgba(46, 125, 50, 0.1)', 
+          color: '#2E7D32', 
+          icon: <FiCheck />,
+          label: 'Completed'
+        };
+      case 'active':
+        return { 
+          bg: 'rgba(25, 118, 210, 0.1)', 
+          color: '#1976D2', 
+          icon: <FiPlayCircle />,
+          label: 'Active'
+        };
+      case 'scheduled':
+        return { 
+          bg: 'rgba(245, 124, 0, 0.1)', 
+          color: '#F57C00', 
+          icon: <FiClock />,
+          label: 'Scheduled'
+        };
+      case 'draft':
+        return { 
+          bg: 'rgba(117, 117, 117, 0.1)', 
+          color: '#757575', 
+          icon: <FiFileText />,
+          label: 'Draft'
+        };
+      case 'approved':
+        return { 
+          bg: 'rgba(102, 187, 106, 0.1)', 
+          color: '#66BB6A', 
+          icon: <FiCheck />,
+          label: 'Approved'
+        };
+      case 'cancelled':
+        return { 
+          bg: 'rgba(211, 47, 47, 0.1)', 
+          color: '#D32F2F', 
+          icon: <FiX />,
+          label: 'Cancelled'
+        };
+      default:
+        return { 
+          bg: 'rgba(117, 117, 117, 0.1)', 
+          color: '#757575', 
+          icon: <FiFileText />,
+          label: status || 'Unknown'
+        };
+    }
   };
 
-  const renderSimplePieChart = (data) => {
-    return (
-      <div style={styles.pieChartContainer}>
-        {data.map((item, index) => (
-          <div key={index} style={styles.pieItem}>
-            <div style={{ ...styles.pieColor, backgroundColor: item.color }} />
-            <div style={styles.pieLabel}>{item.subject}</div>
-            <div style={styles.pieValue}>{item.value}%</div>
-          </div>
-        ))}
-      </div>
-    );
-  };
-
+  // Loading state
   if (loading) {
     return (
       <div style={styles.loadingContainer}>
         <div style={styles.loadingSpinner}></div>
-        <p style={styles.loadingText}>Loading Institutional Analytics...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div style={styles.errorContainer}>
-        <FiAlertCircle style={styles.errorIcon} />
-        <h3 style={styles.errorTitle}>Error Loading Analytics</h3>
-        <p style={styles.errorText}>{error}</p>
-        <button onClick={refreshData} style={styles.retryButton}>
-          <FiRefreshCw style={{ marginRight: 8 }} />
-          Retry
-        </button>
+        <p style={styles.loadingText}>Loading Analytics Data...</p>
+        <p style={styles.loadingSubtext}>Fetching scores and status...</p>
       </div>
     );
   }
 
   return (
     <div style={styles.container}>
-      {/* Admin Analytics Header */}
+      {/* Header */}
       <div style={styles.pageHeader}>
         <div>
           <h1 style={styles.pageTitle}>
-            <FiDatabase style={styles.titleIcon} />
-            Institutional Analytics Dashboard
-            {user?.role === 'super_admin' && (
-              <span style={styles.superAdminBadge}>Super Admin</span>
-            )}
+            <FiActivity style={styles.titleIcon} />
+            Analytics Dashboard
           </h1>
           <p style={styles.pageSubtitle}>
-            Welcome, {user?.name || user?.username} ({user?.role})
-            <span style={styles.timestamp}>
-              • Last updated: {new Date().toLocaleTimeString()}
-            </span>
+            Welcome, {user?.name || user?.username} • {new Date().toLocaleDateString('en-US', { 
+              weekday: 'long', 
+              year: 'numeric', 
+              month: 'long', 
+              day: 'numeric' 
+            })}
           </p>
         </div>
         <div style={styles.headerActions}>
-          <div style={styles.filterGroup}>
-            <select
-              value={filters.timeRange}
-              onChange={(e) => handleFilterChange('timeRange', e.target.value)}
-              style={styles.filterSelect}
-            >
-              <option value="all">All Time</option>
-              <option value="week">This Week</option>
-              <option value="month">This Month</option>
-              <option value="quarter">This Quarter</option>
-              <option value="year">This Year</option>
-            </select>
-            <FiFilter style={styles.filterIcon} />
-          </div>
           <button
             onClick={refreshData}
             disabled={refreshing}
             style={styles.refreshButton}
           >
-            <FiRefreshCw style={{...styles.buttonIcon, animation: refreshing ? 'spin 1s linear infinite' : 'none'}} />
+            <FiRefreshCw style={{ 
+              marginRight: 8,
+              animation: refreshing ? 'spin 1s linear infinite' : 'none'
+            }} />
             {refreshing ? 'Refreshing...' : 'Refresh Data'}
           </button>
         </div>
       </div>
 
-      {/* Tabs for different views */}
+      {/* Error Banner */}
+      {error && (
+        <div style={styles.errorBanner}>
+          <FiAlertCircle style={{ marginRight: 8, fontSize: 18 }} />
+          <div>
+            <strong>Error:</strong> {error}
+            <div style={styles.errorHelp}>
+              Check if: 1) Server is running on port 5000, 2) Database is connected, 3) You're logged in as admin
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Welcome message for non-admin */}
+      {user && user.role === 'teacher' && (
+        <div style={styles.infoBanner}>
+          <FiAlertCircle style={{ marginRight: 8 }} />
+          <span>Teacher Analytics View • Showing only your class data</span>
+        </div>
+      )}
+
+      {/* Tabs - REMOVED STATUS TAB */}
       <div style={styles.tabsContainer}>
         <button
           style={{
             ...styles.tabButton,
-            ...(activeTab === 'institutional' ? styles.activeTab : {})
+            ...(activeTab === 'overview' ? styles.activeTab : {})
           }}
-          onClick={() => setActiveTab('institutional')}
+          onClick={() => setActiveTab('overview')}
         >
           <FiHome style={styles.tabIcon} />
-          Institutional Overview
+          Overview
+        </button>
+        <button
+          style={{
+            ...styles.tabButton,
+            ...(activeTab === 'scores' ? styles.activeTab : {})
+          }}
+          onClick={() => setActiveTab('scores')}
+        >
+          <FiTarget style={styles.tabIcon} />
+          Test Scores
         </button>
         <button
           style={{
@@ -475,226 +459,189 @@ const AnalyticsPage = () => {
           onClick={() => setActiveTab('performance')}
         >
           <FiBarChart2 style={styles.tabIcon} />
-          Performance Analytics
+          Performance
         </button>
         <button
           style={{
             ...styles.tabButton,
-            ...(activeTab === 'classes' ? styles.activeTab : {})
+            ...(activeTab === 'tests' ? styles.activeTab : {})
           }}
-          onClick={() => setActiveTab('classes')}
+          onClick={() => setActiveTab('tests')}
         >
-          <FiBook style={styles.tabIcon} />
-          Class Analytics
-        </button>
-        <button
-          style={{
-            ...styles.tabButton,
-            ...(activeTab === 'activity' ? styles.activeTab : {})
-          }}
-          onClick={() => setActiveTab('activity')}
-        >
-          <FiActivity style={styles.tabIcon} />
-          Recent Activity
+          <FiClipboard style={styles.tabIcon} />
+          Recent Tests
         </button>
       </div>
 
-      {/* Institutional Overview Tab */}
-      {activeTab === 'institutional' && (
+      {/* Overview Tab */}
+      {activeTab === 'overview' && (
         <>
-          {/* Key Metrics Grid */}
+          {/* Key Metrics */}
           <div style={styles.metricsGrid}>
-            <div style={styles.metricCard}>
-              <div style={styles.cardHeader}>
-                <div style={{...styles.cardIcon, backgroundColor: '#E8F5E9'}}>
-                  <FiUsers style={{ color: BRAND_COLORS.armyGreen, fontSize: 24 }} />
-                </div>
-                <div style={styles.cardStats}>
-                  <h3 style={styles.cardTitle}>Total Students</h3>
-                  <div style={styles.cardValue}>{formatNumber(institutionalData.totalStudents)}</div>
-                  <div style={styles.cardSubtext}>
-                    <FiUserCheck style={{ marginRight: 4 }} />
-                    {institutionalData.activeUsers} Active
-                  </div>
-                </div>
-              </div>
-              <div style={styles.cardFooter}>
-                <span style={styles.cardTrend}>
-                  <FiTrendingUp style={{ marginRight: 4, color: BRAND_COLORS.brightGreen }} />
-                  Registered in system
-                </span>
-              </div>
-            </div>
-
-            <div style={styles.metricCard}>
-              <div style={styles.cardHeader}>
-                <div style={{...styles.cardIcon, backgroundColor: '#FFF3E0'}}>
-                  <FiUserCheck style={{ color: BRAND_COLORS.orange, fontSize: 24 }} />
-                </div>
-                <div style={styles.cardStats}>
-                  <h3 style={styles.cardTitle}>Teaching Staff</h3>
-                  <div style={styles.cardValue}>{formatNumber(institutionalData.totalTeachers)}</div>
-                  <div style={styles.cardSubtext}>Qualified Educators</div>
-                </div>
-              </div>
-              <div style={styles.cardFooter}>
-                <span style={styles.cardTrend}>
-                  Ratio: {metrics.studentTeacherRatio}:1
-                </span>
-              </div>
-            </div>
-
-            <div style={styles.metricCard}>
-              <div style={styles.cardHeader}>
-                <div style={{...styles.cardIcon, backgroundColor: '#E3F2FD'}}>
-                  <FiBook style={{ color: BRAND_COLORS.infoBlue, fontSize: 24 }} />
-                </div>
-                <div style={styles.cardStats}>
-                  <h3 style={styles.cardTitle}>Active Classes</h3>
-                  <div style={styles.cardValue}>{formatNumber(institutionalData.totalClasses)}</div>
-                  <div style={styles.cardSubtext}>Across all levels</div>
-                </div>
-              </div>
-              <div style={styles.cardFooter}>
-                <span style={styles.cardTrend}>
-                  Organized learning groups
-                </span>
-              </div>
-            </div>
-
-            <div style={styles.metricCard}>
-              <div style={styles.cardHeader}>
-                <div style={{...styles.cardIcon, backgroundColor: '#F3E5F5'}}>
-                  <FiClipboard style={{ color: '#7B1FA2', fontSize: 24 }} />
-                </div>
-                <div style={styles.cardStats}>
-                  <h3 style={styles.cardTitle}>Total Assessments</h3>
-                  <div style={styles.cardValue}>{formatNumber(institutionalData.totalTests + institutionalData.totalExams)}</div>
-                  <div style={styles.cardSubtext}>
-                    {institutionalData.totalTests} tests • {institutionalData.totalExams} exams
-                  </div>
-                </div>
-              </div>
-              <div style={styles.cardFooter}>
-                <span style={styles.cardTrend}>
-                  <FiTrendingUp style={{ marginRight: 4, color: BRAND_COLORS.brightGreen }} />
-                  {formatNumber(institutionalData.totalResults)} results
-                </span>
-              </div>
-            </div>
+            <MetricCard
+              title="Total Students"
+              value={formatNumber(overviewData.totalStudents)}
+              icon={<FiUsers />}
+              color="#4B5320"
+              subtext={`${formatNumber(overviewData.activeUsers)} active users`}
+            />
+            
+            <MetricCard
+              title="Teachers"
+              value={formatNumber(overviewData.totalTeachers)}
+              icon={<FiUserCheck />}
+              color="#00FF00"
+              subtext="Teaching staff"
+            />
+            
+            <MetricCard
+              title="Classes"
+              value={formatNumber(overviewData.totalClasses)}
+              icon={<FiBook />}
+              color="#FFA500"
+              subtext="Active classes"
+            />
+            
+            <MetricCard
+              title="Tests & Exams"
+              value={formatNumber(overviewData.totalTests)}
+              icon={<FiClipboard />}
+              color="#6B8E23"
+              subtext={`${formatNumber(overviewData.totalResults)} results submitted`}
+            />
           </div>
 
-          {/* Simple Charts Section */}
-          <div style={styles.chartsSection}>
-            <div style={styles.chartRow}>
-              <div style={styles.chartCard}>
-                <h3 style={styles.chartTitle}>
-                  <FiTrendingUp style={styles.chartIcon} />
-                  Performance Trend
-                </h3>
-                {performanceTrend.length > 0 ? (
-                  renderSimpleBarChart(performanceTrend.slice(-6), 'month', 'score', BRAND_COLORS.armyGreen)
-                ) : (
-                  <div style={styles.noDataMessage}>
-                    <FiBarChart style={styles.noDataIcon} />
-                    <p>Performance data will appear as tests are taken</p>
-                  </div>
-                )}
-              </div>
-
-              <div style={styles.chartCard}>
-                <h3 style={styles.chartTitle}>
-                  <FiPieChart style={styles.chartIcon} />
-                  Subject Distribution
-                </h3>
-                {subjectDistribution.length > 0 ? (
-                  renderSimplePieChart(subjectDistribution)
-                ) : (
-                  <div style={styles.noDataMessage}>
-                    <FiBook style={styles.noDataIcon} />
-                    <p>Subject data loading...</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Performance Metrics */}
+          {/* Performance Metrics - WITHOUT PASS RATE */}
           <div style={styles.performanceSection}>
             <h2 style={styles.sectionTitle}>
               <FiTarget style={styles.sectionIcon} />
-              Key Performance Indicators
+              Performance Metrics
             </h2>
+            
             <div style={styles.performanceGrid}>
-              <div style={styles.performanceCard}>
-                <div style={styles.performanceHeader}>
-                  <span style={styles.performanceLabel}>Overall Academic Score</span>
-                  <span style={{
-                    ...styles.performanceValue,
-                    color: getPerformanceColor(metrics.avgScore)
-                  }}>
-                    {metrics.avgScore.toFixed(1)}%
-                  </span>
+              <PerformanceCard
+                title="Average Score"
+                value={overviewData.averageScoreFormatted}
+                progress={overviewData.averageScore}
+                color={overviewData.averageScore >= 70 ? '#00FF00' : '#FFA500'}
+                icon={<FiPercent />}
+                subtext="Formatted as score/total"
+              />
+              
+              <PerformanceCard
+                title="Completion Rate"
+                value={`${overviewData.completionRate.toFixed(1)}%`}
+                progress={overviewData.completionRate}
+                color={overviewData.completionRate >= 80 ? '#00FF00' : '#FFA500'}
+                icon={<FiCheckSquare />}
+                subtext="Tests with results"
+              />
+            </div>
+          </div>
+
+          {/* Test Status Summary */}
+          {statusSummary && (
+            <div style={styles.summaryCard}>
+              <h3 style={styles.summaryTitle}>
+                <FiActivity style={styles.summaryIcon} />
+                Test Status Summary
+              </h3>
+              <div style={styles.statusGrid}>
+                {Object.entries(statusSummary.counts || {}).map(([status, count]) => {
+                  if (count === 0) return null;
+                  const statusStyle = getStatusStyle(status);
+                  const percentage = statusSummary.totalTests > 0 
+                    ? ((count / statusSummary.totalTests) * 100).toFixed(1) 
+                    : '0';
+                  
+                  return (
+                    <div key={status} style={styles.statusCard}>
+                      <div style={styles.statusHeader}>
+                        <div style={{
+                          ...styles.statusIcon,
+                          backgroundColor: statusStyle.bg,
+                          color: statusStyle.color
+                        }}>
+                          {statusStyle.icon}
+                        </div>
+                        <div style={styles.statusContent}>
+                          <div style={styles.statusName}>{statusStyle.label}</div>
+                          <div style={styles.statusCount}>{count} tests</div>
+                        </div>
+                      </div>
+                      <div style={styles.statusPercentage}>
+                        {percentage}%
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Quick Test Stats - WITHOUT PASS RATE */}
+          {testScoresSummary && testScoresSummary.overall && (
+            <div style={styles.summaryCard}>
+              <h3 style={styles.summaryTitle}>
+                <FiAward style={styles.summaryIcon} />
+                Test Score Summary
+              </h3>
+              <div style={styles.quickStats}>
+                <div style={styles.quickStat}>
+                  <div style={styles.quickStatLabel}>Total Tests with Results</div>
+                  <div style={styles.quickStatValue}>
+                    {testScoresSummary.overall.totalTests || 0}
+                  </div>
                 </div>
-                <div style={styles.progressBar}>
-                  <div 
-                    style={{
-                      ...styles.progressFill,
-                      width: `${Math.min(metrics.avgScore, 100)}%`,
-                      backgroundColor: getPerformanceColor(metrics.avgScore)
-                    }}
-                  />
+                <div style={styles.quickStat}>
+                  <div style={styles.quickStatLabel}>Average Score</div>
+                  <div style={styles.quickStatValue}>
+                    {testScoresSummary.overall.averageScoreFormatted || '0/100'}
+                  </div>
                 </div>
-                <div style={styles.performanceSubtext}>
-                  Average across all subjects
+                <div style={styles.quickStat}>
+                  <div style={styles.quickStatLabel}>Total Students</div>
+                  <div style={styles.quickStatValue}>
+                    {formatNumber(testScoresSummary.overall.totalStudents || 0)}
+                  </div>
                 </div>
               </div>
+            </div>
+          )}
 
-              <div style={styles.performanceCard}>
-                <div style={styles.performanceHeader}>
-                  <span style={styles.performanceLabel}>Pass Rate</span>
-                  <span style={{
-                    ...styles.performanceValue,
-                    color: getPerformanceColor(metrics.passRate)
-                  }}>
-                    {metrics.passRate.toFixed(1)}%
-                  </span>
-                </div>
-                <div style={styles.progressBar}>
-                  <div 
-                    style={{
-                      ...styles.progressFill,
-                      width: `${Math.min(metrics.passRate, 100)}%`,
-                      backgroundColor: getPerformanceColor(metrics.passRate)
-                    }}
-                  />
-                </div>
-                <div style={styles.performanceSubtext}>
-                  Students passing assessments
+          {/* Data Summary - WITHOUT PASS RATE */}
+          <div style={styles.summaryCard}>
+            <h3 style={styles.summaryTitle}>
+              <FiActivity style={styles.summaryIcon} />
+              Data Summary
+            </h3>
+            <div style={styles.summaryGrid}>
+              <div style={styles.summaryItem}>
+                <div style={styles.summaryLabel}>Student-Teacher Ratio</div>
+                <div style={styles.summaryValue}>
+                  {overviewData.totalTeachers > 0 
+                    ? (overviewData.totalStudents / overviewData.totalTeachers).toFixed(1) 
+                    : 'N/A'}:1
                 </div>
               </div>
-
-              <div style={styles.performanceCard}>
-                <div style={styles.performanceHeader}>
-                  <span style={styles.performanceLabel}>Attendance Rate</span>
-                  <span style={{
-                    ...styles.performanceValue,
-                    color: getPerformanceColor(metrics.attendance)
-                  }}>
-                    {metrics.attendance.toFixed(1)}%
-                  </span>
+              <div style={styles.summaryItem}>
+                <div style={styles.summaryLabel}>Results per Student</div>
+                <div style={styles.summaryValue}>
+                  {overviewData.totalStudents > 0 
+                    ? (overviewData.totalResults / overviewData.totalStudents).toFixed(1) 
+                    : 'N/A'}
                 </div>
-                <div style={styles.progressBar}>
-                  <div 
-                    style={{
-                      ...styles.progressFill,
-                      width: `${Math.min(metrics.attendance, 100)}%`,
-                      backgroundColor: getPerformanceColor(metrics.attendance)
-                    }}
-                  />
+              </div>
+              <div style={styles.summaryItem}>
+                <div style={styles.summaryLabel}>Active Users</div>
+                <div style={styles.summaryValue}>
+                  {formatNumber(overviewData.activeUsers)} / {formatNumber(overviewData.totalStudents + overviewData.totalTeachers)}
                 </div>
-                <div style={styles.performanceSubtext}>
-                  Current month average
+              </div>
+              <div style={styles.summaryItem}>
+                <div style={styles.summaryLabel}>Completion Rate</div>
+                <div style={styles.summaryValue}>
+                  {overviewData.completionRate.toFixed(1)}%
                 </div>
               </div>
             </div>
@@ -702,210 +649,403 @@ const AnalyticsPage = () => {
         </>
       )}
 
-      {/* Performance Analytics Tab */}
+      {/* Test Scores Tab - UPDATED WITHOUT PASS RATES */}
+      {activeTab === 'scores' && (
+        <div style={styles.scoresTab}>
+          <h2 style={styles.sectionTitle}>
+            <FiTarget style={styles.sectionIcon} />
+            Test Scores Analysis
+          </h2>
+          
+          {detailedTests.length > 0 ? (
+            <>
+              {/* Score Summary Cards WITHOUT PASS RATES */}
+              <div style={styles.scoreSummaryGrid}>
+                {detailedTests.slice(0, 4).map((test, index) => (
+                  <div key={test.id || index} style={styles.scoreCard}>
+                    <div style={styles.scoreCardHeader}>
+                      <div style={styles.testTypeBadge}>
+                        {getTestTypeIcon(test.type)}
+                        <span style={styles.testTypeText}>{test.type}</span>
+                      </div>
+                      <div style={{
+                        ...styles.statusBadge,
+                        backgroundColor: getStatusStyle(test.status).bg,
+                        color: getStatusStyle(test.status).color
+                      }}>
+                        {getStatusStyle(test.status).icon}
+                        <span style={{ marginLeft: 4 }}>{test.status}</span>
+                      </div>
+                    </div>
+                    
+                    <h3 style={styles.scoreCardTitle}>{test.title}</h3>
+                    <div style={styles.scoreCardSubtitle}>
+                      {test.subject} • {test.class}
+                    </div>
+                    
+                    <div style={styles.scoreCardStats}>
+                      <div style={styles.scoreStat}>
+                        <div style={styles.scoreStatLabel}>Average Score</div>
+                        <div style={{
+                          ...styles.scoreStatValue,
+                          color: getScoreColor(parseInt(test.stats?.averageScoreFormatted?.split('/')[0] || 0), test.totalMarks)
+                        }}>
+                          {test.stats?.averageScoreFormatted || '0/100'}
+                        </div>
+                      </div>
+                      
+                      <div style={styles.scoreStatRow}>
+                        <div style={styles.scoreStatItem}>
+                          <div style={styles.scoreStatItemLabel}>Highest</div>
+                          <div style={styles.scoreStatItemValue}>
+                            {test.stats?.highestScore || 0}/{test.totalMarks}
+                          </div>
+                        </div>
+                        <div style={styles.scoreStatItem}>
+                          <div style={styles.scoreStatItemLabel}>Lowest</div>
+                          <div style={styles.scoreStatItemValue}>
+                            {test.stats?.lowestScore || 0}/{test.totalMarks}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Student Count */}
+                      <div style={styles.studentCountSection}>
+                        <div style={styles.studentCountLabel}>
+                          <FiUsers style={{ marginRight: 6 }} />
+                          Students
+                        </div>
+                        <div style={styles.studentCountValue}>
+                          {test.stats?.totalStudents || 0}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              
+              {/* Detailed Table WITHOUT PASS RATE COLUMN */}
+              <div style={styles.detailedTableSection}>
+                <h3 style={styles.tableSectionTitle}>
+                  <FiClipboard style={{ marginRight: 8 }} />
+                  All Test Scores
+                </h3>
+                <div style={styles.tableContainer}>
+                  <table style={styles.detailedTable}>
+                    <thead>
+                      <tr>
+                        <th style={styles.detailedTableHeader}>Test</th>
+                        <th style={styles.detailedTableHeader}>Type</th>
+                        <th style={styles.detailedTableHeader}>Subject/Class</th>
+                        <th style={styles.detailedTableHeader}>Avg Score</th>
+                        <th style={styles.detailedTableHeader}>Students</th>
+                        <th style={styles.detailedTableHeader}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detailedTests.map((test, index) => {
+                        const avgScore = parseInt(test.stats?.averageScoreFormatted?.split('/')[0] || 0);
+                        
+                        return (
+                          <tr key={test.id || index} style={styles.detailedTableRow}>
+                            <td style={styles.detailedTableCell}>
+                              <div style={styles.testInfo}>
+                                <div style={styles.testTitle}>{test.title}</div>
+                                <div style={styles.testDate}>
+                                  {new Date(test.createdAt).toLocaleDateString()}
+                                </div>
+                              </div>
+                            </td>
+                            <td style={styles.detailedTableCell}>
+                              <div style={styles.typeCell}>
+                                {getTestTypeIcon(test.type)}
+                                <span style={{ marginLeft: 6 }}>{test.type}</span>
+                              </div>
+                            </td>
+                            <td style={styles.detailedTableCell}>
+                              <div style={styles.subjectClassCell}>
+                                <div style={styles.subjectBadge}>{test.subject}</div>
+                                <div style={styles.classText}>{test.class}</div>
+                              </div>
+                            </td>
+                            <td style={styles.detailedTableCell}>
+                              <div style={{
+                                ...styles.scoreCell,
+                                backgroundColor: getScoreColor(avgScore, test.totalMarks) + '20',
+                                color: getScoreColor(avgScore, test.totalMarks)
+                              }}>
+                                {test.stats?.averageScoreFormatted || '0/100'}
+                              </div>
+                            </td>
+                            <td style={styles.detailedTableCell}>
+                              <div style={styles.studentsCell}>
+                                <div style={styles.studentsCount}>
+                                  <FiUsers style={{ marginRight: 6, fontSize: 14 }} />
+                                  {test.stats?.totalStudents || 0}
+                                </div>
+                              </div>
+                            </td>
+                            <td style={styles.detailedTableCell}>
+                              <div style={{
+                                ...styles.statusCell,
+                                backgroundColor: getStatusStyle(test.status).bg,
+                                color: getStatusStyle(test.status).color
+                              }}>
+                                {getStatusStyle(test.status).icon}
+                                <span style={{ marginLeft: 4 }}>{test.status}</span>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div style={styles.emptyState}>
+              <FiTarget style={{ fontSize: 48, color: '#6C757D', marginBottom: 16 }} />
+              <p style={styles.emptyText}>No test score data available</p>
+              <p style={styles.emptySubtext}>Test scores will appear here as tests are completed</p>
+              <button onClick={refreshData} style={styles.retryButton}>
+                <FiRefreshCw style={{ marginRight: 8 }} />
+                Refresh Data
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Performance Tab */}
       {activeTab === 'performance' && (
         <div style={styles.performanceTab}>
           <h2 style={styles.sectionTitle}>
-            <FiBarChart2 style={styles.sectionIcon} />
-            Performance Analytics
+            <FiTrendingUp style={styles.sectionIcon} />
+            Performance Trend (Last 6 Months)
           </h2>
           
-          {testAnalytics.length === 0 ? (
-            <div style={styles.emptyState}>
-              <FiAlertCircle style={styles.emptyIcon} />
-              <h3 style={styles.emptyTitle}>No performance data available</h3>
-              <p style={styles.emptyText}>Assessment data will appear here once tests are created and taken.</p>
-            </div>
-          ) : (
-            <div style={styles.analyticsTableContainer}>
-              <div style={styles.tableHeaderRow}>
-                <h3 style={styles.tableTitle}>Recent Assessments</h3>
+          {performanceTrend.length > 0 ? (
+            <div style={styles.chartCard}>
+              <div style={styles.chartContainer}>
+                {performanceTrend.map((item, index) => (
+                  <div key={index} style={styles.barItem}>
+                    <div style={styles.barLabel}>{item.month}</div>
+                    <div style={styles.barWrapper}>
+                      <div 
+                        style={{
+                          ...styles.bar,
+                          width: `${Math.min(item.score, 100)}%`,
+                          backgroundColor: item.score >= 70 ? '#00FF00' : 
+                                         item.score >= 50 ? '#FFA500' : '#DC3545'
+                        }}
+                      />
+                      <div style={styles.barValue}>{item.score.toFixed(1)}%</div>
+                    </div>
+                    <div style={styles.barSubtext}>{item.testsTaken || 0} tests</div>
+                  </div>
+                ))}
               </div>
               
-              <div style={styles.tableContainer}>
-                <table style={styles.table}>
-                  <thead>
-                    <tr>
-                      <th style={styles.tableHeader}>Assessment</th>
-                      <th style={styles.tableHeader}>Type</th>
-                      <th style={styles.tableHeader}>Class</th>
-                      <th style={styles.tableHeader}>Avg Score</th>
-                      <th style={styles.tableHeader}>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {testAnalytics.slice(0, 10).map((test, idx) => (
-                      <tr key={idx} style={styles.tableRow}>
+              {performanceTrend.length > 0 && (
+                <div style={styles.trendSummary}>
+                  <div style={styles.trendItem}>
+                    <div style={styles.trendLabel}>Current Score</div>
+                    <div style={styles.trendValue}>
+                      {performanceTrend[performanceTrend.length - 1]?.score?.toFixed(1) || 0}%
+                    </div>
+                  </div>
+                  <div style={styles.trendItem}>
+                    <div style={styles.trendLabel}>Highest Score</div>
+                    <div style={styles.trendValue}>
+                      {Math.max(...performanceTrend.map(d => d.score || 0)).toFixed(1)}%
+                    </div>
+                  </div>
+                  <div style={styles.trendItem}>
+                    <div style={styles.trendLabel}>Average</div>
+                    <div style={styles.trendValue}>
+                      {(performanceTrend.reduce((sum, d) => sum + (d.score || 0), 0) / performanceTrend.length).toFixed(1)}%
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={styles.emptyState}>
+              <FiBarChart2 style={{ fontSize: 48, color: '#6C757D', marginBottom: 16 }} />
+              <p style={styles.emptyText}>No performance data available yet</p>
+              <p style={styles.emptySubtext}>Performance data will appear here as tests are completed</p>
+              <button onClick={refreshData} style={styles.retryButton}>
+                <FiRefreshCw style={{ marginRight: 8 }} />
+                Refresh Data
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tests Tab - UPDATED WITHOUT PASS RATE COLUMN */}
+      {activeTab === 'tests' && (
+        <div style={styles.testsTab}>
+          <h2 style={styles.sectionTitle}>
+            <FiClipboard style={styles.sectionIcon} />
+            Recent Tests & Exams
+          </h2>
+          
+          {recentTests.length > 0 ? (
+            <div style={styles.tableContainer}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={styles.tableHeader}>Test Title</th>
+                    <th style={styles.tableHeader}>Type</th>
+                    <th style={styles.tableHeader}>Subject/Class</th>
+                    <th style={styles.tableHeader}>Avg Score</th>
+                    <th style={styles.tableHeader}>Status</th>
+                    <th style={styles.tableHeader}>Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentTests.map((test, index) => {
+                    const scoreParts = test.averageScoreFormatted?.split('/') || ['0', '100'];
+                    const actualScore = parseInt(scoreParts[0]);
+                    const totalMarks = parseInt(scoreParts[1]) || test.totalMarks || 100;
+                    const percentage = totalMarks > 0 ? (actualScore / totalMarks) * 100 : 0;
+                    const statusStyle = getStatusStyle(test.status);
+                    
+                    return (
+                      <tr key={test.id || index} style={styles.tableRow}>
                         <td style={styles.tableCell}>
-                          <div style={styles.testName}>{test.title || 'Untitled Test'}</div>
-                          <div style={styles.testSubject}>{test.subject || 'General'}</div>
+                          <div style={styles.testTitle}>{test.title || 'Untitled Test'}</div>
+                          <div style={styles.testCreator}>
+                            By: {test.createdBy || 'Unknown'}
+                          </div>
                         </td>
                         <td style={styles.tableCell}>
-                          <span style={{
-                            ...styles.typeBadge,
-                            backgroundColor: test.type === 'exam' ? '#F3E5F5' : '#E3F2FD',
-                            color: test.type === 'exam' ? '#7B1FA2' : '#1976D2'
-                          }}>
-                            {test.type || 'test'}
-                          </span>
+                          <div style={styles.typeCell}>
+                            {getTestTypeIcon(test.type)}
+                            <span style={{ marginLeft: 6 }}>{test.type}</span>
+                          </div>
                         </td>
                         <td style={styles.tableCell}>
-                          {test.class?.name || test.class || 'N/A'}
+                          <div style={styles.subjectClass}>
+                            <div style={styles.subjectBadge}>{test.subject}</div>
+                            <div style={styles.classText}>{test.class}</div>
+                          </div>
                         </td>
                         <td style={styles.tableCell}>
                           <div style={{
                             ...styles.scoreDisplay,
-                            color: getPerformanceColor(test.averageScore || 0)
+                            backgroundColor: getScoreColor(actualScore, totalMarks) + '20',
+                            color: getScoreColor(actualScore, totalMarks)
                           }}>
-                            {(test.averageScore || 0).toFixed(1)}%
+                            <div style={styles.scoreValue}>
+                              {test.averageScoreFormatted || '0/100'}
+                            </div>
+                            <div style={styles.scorePercentage}>
+                              ({percentage.toFixed(1)}%)
+                            </div>
                           </div>
                         </td>
                         <td style={styles.tableCell}>
-                          <span style={{
-                            ...styles.statusBadge,
-                            backgroundColor: test.status === 'completed' ? '#D1FAE5' : 
-                                           test.status === 'active' ? '#DBEAFE' : '#FEF3C7',
-                            color: test.status === 'completed' ? '#065F46' : 
-                                   test.status === 'active' ? '#1E40AF' : '#92400E'
+                          <div style={{
+                            ...styles.statusDisplay,
+                            backgroundColor: statusStyle.bg,
+                            color: statusStyle.color
                           }}>
-                            {test.status || 'unknown'}
-                          </span>
+                            {statusStyle.icon}
+                            <span style={{ marginLeft: 4 }}>{test.status}</span>
+                          </div>
+                        </td>
+                        <td style={styles.tableCell}>
+                          <div style={styles.dateCell}>
+                            {test.createdAt ? new Date(test.createdAt).toLocaleDateString() : 'N/A'}
+                          </div>
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Class Analytics Tab */}
-      {activeTab === 'classes' && (
-        <div style={styles.classesTab}>
-          <h2 style={styles.sectionTitle}>
-            <FiBook style={styles.sectionIcon} />
-            Class Performance
-          </h2>
-          
-          {classPerformance.length === 0 ? (
-            <div style={styles.emptyState}>
-              <FiAlertCircle style={styles.emptyIcon} />
-              <h3 style={styles.emptyTitle}>No class data available</h3>
-              <p style={styles.emptyText}>Class performance data will appear here once assessments are completed.</p>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           ) : (
-            <div style={styles.classesGrid}>
-              {classPerformance.map((classItem, idx) => (
-                <div key={idx} style={styles.classCard}>
-                  <div style={styles.classHeader}>
-                    <div style={styles.classIcon}>
-                      <FiBook style={{ color: BRAND_COLORS.armyGreen }} />
-                    </div>
-                    <div>
-                      <h3 style={styles.className}>{classItem.name || `Class ${idx + 1}`}</h3>
-                      <p style={styles.classInfo}>
-                        {classItem.studentCount || 0} students • {classItem.testCount || 0} assessments
-                      </p>
-                    </div>
-                  </div>
-                  <div style={styles.classStats}>
-                    <div style={styles.classStat}>
-                      <span style={styles.statLabel}>Avg Score</span>
-                      <span style={{
-                        ...styles.statValue,
-                        color: getPerformanceColor(classItem.averageScore || 0)
-                      }}>
-                        {(classItem.averageScore || 0).toFixed(1)}%
-                      </span>
-                    </div>
-                    <div style={styles.classStat}>
-                      <span style={styles.statLabel}>Pass Rate</span>
-                      <span style={{
-                        ...styles.statValue,
-                        color: getPerformanceColor(classItem.passRate || 0)
-                      }}>
-                        {(classItem.passRate || 0).toFixed(1)}%
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Recent Activity Tab */}
-      {activeTab === 'activity' && (
-        <div style={styles.activityTab}>
-          <h2 style={styles.sectionTitle}>
-            <FiActivity style={styles.sectionIcon} />
-            System Activity Log
-          </h2>
-          
-          {recentActivity.length === 0 ? (
             <div style={styles.emptyState}>
-              <FiAlertCircle style={styles.emptyIcon} />
-              <h3 style={styles.emptyTitle}>No recent activity</h3>
-              <p style={styles.emptyText}>System activity will appear here as users interact with the platform.</p>
-            </div>
-          ) : (
-            <div style={styles.activityList}>
-              {recentActivity.slice(0, 10).map((activity, idx) => (
-                <div key={idx} style={styles.activityItem}>
-                  <div style={{
-                    ...styles.activityIcon,
-                    backgroundColor: activity.type === 'test' ? '#E8F5E9' :
-                                    activity.type === 'result' ? '#E3F2FD' :
-                                    activity.type === 'user' ? '#FFF3E0' : '#F3E5F5'
-                  }}>
-                    {activity.type === 'test' && <FiClipboard style={{ color: BRAND_COLORS.armyGreen }} />}
-                    {activity.type === 'result' && <FiAward style={{ color: BRAND_COLORS.orange }} />}
-                    {activity.type === 'user' && <FiUserCheck style={{ color: BRAND_COLORS.infoBlue }} />}
-                    {activity.type === 'class' && <FiBook style={{ color: '#7B1FA2' }} />}
-                  </div>
-                  <div style={styles.activityContent}>
-                    <div style={styles.activityTitle}>{activity.title}</div>
-                    <div style={styles.activityDetails}>
-                      <span style={styles.activityUser}>{activity.user}</span>
-                      <span style={styles.activityTime}>{activity.time}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+              <FiClipboard style={{ fontSize: 48, color: '#6C757D', marginBottom: 16 }} />
+              <p style={styles.emptyText}>No recent tests found</p>
+              <p style={styles.emptySubtext}>Tests will appear here as they are created and completed</p>
             </div>
           )}
         </div>
       )}
 
-      {/* Data Summary Footer */}
-      <div style={styles.summaryFooter}>
-        <div style={styles.summaryInfo}>
-          <FiInfo style={{ marginRight: 8, color: BRAND_COLORS.lightText }} />
-          <span style={styles.summaryText}>
-            Data updated: {new Date().toLocaleString()} • Institutional View
+      {/* Footer */}
+      <div style={styles.footer}>
+        <div style={styles.footerInfo}>
+          <span style={styles.footerText}>
+            Data Source: School Database • 
+            Last Updated: {new Date().toLocaleTimeString()} • 
+            Average Score: {overviewData.averageScoreFormatted}
           </span>
         </div>
       </div>
-
-      <style jsx="true">{`
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-      `}</style>
     </div>
   );
 };
 
+// Metric Card Component
+const MetricCard = ({ title, value, icon, color, subtext }) => (
+  <div style={styles.metricCard}>
+    <div style={styles.metricHeader}>
+      <div style={{...styles.metricIcon, backgroundColor: `${color}20`}}>
+        {React.cloneElement(icon, { style: { color, fontSize: 24 } })}
+      </div>
+      <div style={styles.metricContent}>
+        <h3 style={styles.metricTitle}>{title}</h3>
+        <div style={styles.metricValue}>{value}</div>
+        {subtext && <div style={styles.metricSubtext}>{subtext}</div>}
+      </div>
+    </div>
+  </div>
+);
+
+// Performance Card Component
+const PerformanceCard = ({ title, value, progress, color, icon, subtext }) => (
+  <div style={styles.perfCard}>
+    <div style={styles.perfHeader}>
+      <div style={styles.perfTitleWrapper}>
+        {icon && React.cloneElement(icon, { 
+          style: { color, marginRight: 8, fontSize: 16 } 
+        })}
+        <span style={styles.perfTitle}>{title}</span>
+      </div>
+      <span style={styles.perfValue}>{value}</span>
+    </div>
+    {progress !== undefined && (
+      <div style={styles.progressContainer}>
+        <div style={styles.progressBar}>
+          <div 
+            style={{
+              ...styles.progressFill,
+              width: `${Math.min(progress, 100)}%`,
+              backgroundColor: color
+            }}
+          />
+        </div>
+        <div style={styles.progressLabel}>{progress.toFixed(1)}%</div>
+      </div>
+    )}
+    {subtext && <div style={styles.perfSubtext}>{subtext}</div>}
+  </div>
+);
+
 const styles = {
   container: {
     fontFamily: '"Fredoka", sans-serif',
-    backgroundColor: BRAND_COLORS.lightBg,
+    backgroundColor: '#F8F9FA',
     minHeight: '100vh',
     padding: '20px',
+    maxWidth: '1400px',
+    margin: '0 auto',
   },
   loadingContainer: {
     display: 'flex',
@@ -913,635 +1053,812 @@ const styles = {
     justifyContent: 'center',
     alignItems: 'center',
     minHeight: '400px',
+    textAlign: 'center',
   },
   loadingSpinner: {
     width: '50px',
     height: '50px',
-    border: `5px solid ${BRAND_COLORS.lightBg}`,
-    borderTop: `5px solid ${BRAND_COLORS.armyGreen}`,
+    border: '5px solid #F8F9FA',
+    borderTop: '5px solid #4B5320',
     borderRadius: '50%',
     animation: 'spin 1s linear infinite',
     marginBottom: '20px',
   },
   loadingText: {
-    color: BRAND_COLORS.darkText,
-    fontSize: '16px',
-  },
-  errorContainer: {
-    textAlign: 'center',
-    padding: '40px',
-    backgroundColor: 'white',
-    borderRadius: '12px',
-    boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-    maxWidth: '500px',
-    margin: '100px auto',
-  },
-  errorIcon: {
-    fontSize: '48px',
-    color: BRAND_COLORS.dangerRed,
-    marginBottom: '16px',
-  },
-  errorTitle: {
-    fontSize: '20px',
+    color: '#2C3E50',
+    fontSize: '18px',
     fontWeight: '600',
-    color: BRAND_COLORS.darkText,
     marginBottom: '8px',
   },
-  errorText: {
+  loadingSubtext: {
+    color: '#6C757D',
     fontSize: '14px',
-    color: BRAND_COLORS.lightText,
-    marginBottom: '24px',
-  },
-  retryButton: {
-    padding: '12px 24px',
-    backgroundColor: BRAND_COLORS.armyGreen,
-    color: 'white',
-    border: 'none',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '600',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    transition: 'all 0.3s ease',
-    width: '150px',
-    margin: '0 auto',
   },
   pageHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: '20px',
+    marginBottom: '24px',
     flexWrap: 'wrap',
     gap: '16px',
   },
   pageTitle: {
-    fontSize: '32px',
+    fontSize: '28px',
     fontWeight: '700',
-    color: BRAND_COLORS.armyGreen,
+    color: '#4B5320',
     margin: 0,
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
   },
-  superAdminBadge: {
-    fontSize: '12px',
-    backgroundColor: BRAND_COLORS.orange,
-    color: 'white',
-    padding: '4px 8px',
-    borderRadius: '20px',
-    fontWeight: '600',
-    marginLeft: '8px',
-  },
   titleIcon: {
-    fontSize: '32px',
-    color: BRAND_COLORS.armyGreen,
+    fontSize: '28px',
+    color: '#4B5320',
   },
   pageSubtitle: {
     fontSize: '14px',
-    color: BRAND_COLORS.lightText,
+    color: '#6C757D',
     marginTop: '8px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  timestamp: {
-    fontSize: '12px',
-    color: BRAND_COLORS.lightText,
-    opacity: 0.8,
   },
   headerActions: {
     display: 'flex',
     gap: '12px',
     alignItems: 'center',
-    flexWrap: 'wrap',
-  },
-  filterGroup: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    backgroundColor: 'white',
-    padding: '8px 12px',
-    borderRadius: '6px',
-    border: `1px solid ${BRAND_COLORS.armyGreen}20`,
-  },
-  filterSelect: {
-    padding: '8px 12px',
-    border: 'none',
-    backgroundColor: 'transparent',
-    fontSize: '14px',
-    color: BRAND_COLORS.darkText,
-    minWidth: '120px',
-    outline: 'none',
-  },
-  filterIcon: {
-    color: BRAND_COLORS.armyGreen,
   },
   refreshButton: {
-    padding: '12px 24px',
-    backgroundColor: BRAND_COLORS.armyGreen,
+    padding: '10px 20px',
+    backgroundColor: '#4B5320',
     color: 'white',
     border: 'none',
-    borderRadius: '8px',
+    borderRadius: '6px',
     cursor: 'pointer',
     fontSize: '14px',
     fontWeight: '600',
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
-    transition: 'all 0.3s ease',
-    boxShadow: `0 4px 6px ${BRAND_COLORS.armyGreen}30`,
+    transition: 'all 0.2s ease',
+    '&:hover': {
+      backgroundColor: '#3a4420',
+    },
+    '&:disabled': {
+      opacity: 0.6,
+      cursor: 'not-allowed',
+    }
   },
-  buttonIcon: {
-    fontSize: '16px',
+  errorBanner: {
+    backgroundColor: '#F8D7DA',
+    border: '1px solid #F5C6CB',
+    color: '#721C24',
+    padding: '16px',
+    borderRadius: '8px',
+    marginBottom: '24px',
+    display: 'flex',
+    alignItems: 'flex-start',
+    fontSize: '14px',
+  },
+  errorHelp: {
+    fontSize: '12px',
+    color: '#856404',
+    marginTop: '8px',
+    fontStyle: 'italic',
+  },
+  infoBanner: {
+    backgroundColor: '#D1ECF1',
+    border: '1px solid #BEE5EB',
+    color: '#0C5460',
+    padding: '12px 16px',
+    borderRadius: '6px',
+    marginBottom: '20px',
+    display: 'flex',
+    alignItems: 'center',
+    fontSize: '14px',
   },
   tabsContainer: {
     display: 'flex',
     gap: '8px',
     marginBottom: '30px',
-    borderBottom: `2px solid ${BRAND_COLORS.armyGreen}20`,
+    borderBottom: '2px solid rgba(75, 83, 32, 0.1)',
     paddingBottom: '4px',
     flexWrap: 'wrap',
+    overflowX: 'auto',
   },
   tabButton: {
-    padding: '14px 28px',
+    padding: '12px 24px',
     backgroundColor: 'transparent',
     border: 'none',
-    borderRadius: '8px 8px 0 0',
+    borderRadius: '6px 6px 0 0',
     fontSize: '14px',
     fontWeight: '600',
-    color: BRAND_COLORS.lightText,
+    color: '#6C757D',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    transition: 'all 0.3s ease',
+    transition: 'all 0.2s ease',
+    whiteSpace: 'nowrap',
+    '&:hover': {
+      backgroundColor: 'rgba(75, 83, 32, 0.05)',
+    }
   },
   activeTab: {
-    backgroundColor: BRAND_COLORS.armyGreen,
+    backgroundColor: '#4B5320',
     color: 'white',
-    boxShadow: `0 4px 12px ${BRAND_COLORS.armyGreen}40`,
+    '&:hover': {
+      backgroundColor: '#4B5320',
+    }
   },
   tabIcon: {
-    fontSize: '18px',
+    fontSize: '16px',
   },
   metricsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
     gap: '24px',
-    marginBottom: '40px',
+    marginBottom: '30px',
   },
   metricCard: {
     backgroundColor: 'white',
     borderRadius: '12px',
     padding: '24px',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
-    border: `1px solid ${BRAND_COLORS.armyGreen}20`,
-    transition: 'transform 0.3s ease, box-shadow 0.3s ease',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+    border: '1px solid rgba(75, 83, 32, 0.1)',
+    transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+    '&:hover': {
+      transform: 'translateY(-4px)',
+      boxShadow: '0 8px 24px rgba(0,0,0,0.1)',
+    }
   },
-  cardHeader: {
+  metricHeader: {
     display: 'flex',
     alignItems: 'center',
     gap: '20px',
-    marginBottom: '16px',
   },
-  cardIcon: {
-    width: '64px',
-    height: '64px',
+  metricIcon: {
+    width: '60px',
+    height: '60px',
     borderRadius: '12px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
-  cardStats: {
+  metricContent: {
     flex: 1,
+    minWidth: 0,
   },
-  cardTitle: {
-    fontSize: '14px',
-    color: BRAND_COLORS.lightText,
+  metricTitle: {
+    fontSize: '13px',
+    color: '#6C757D',
     margin: 0,
-    marginBottom: '4px',
+    marginBottom: '6px',
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
+    fontWeight: '600',
   },
-  cardValue: {
-    fontSize: '32px',
+  metricValue: {
+    fontSize: '28px',
     fontWeight: '700',
-    color: BRAND_COLORS.armyGreen,
+    color: '#4B5320',
     margin: '4px 0',
+    lineHeight: 1.2,
   },
-  cardSubtext: {
+  metricSubtext: {
     fontSize: '13px',
-    color: BRAND_COLORS.lightText,
+    color: '#6C757D',
     marginTop: '4px',
-    display: 'flex',
-    alignItems: 'center',
-  },
-  cardFooter: {
-    marginTop: '16px',
-    paddingTop: '16px',
-    borderTop: `1px solid ${BRAND_COLORS.armyGreen}20`,
-  },
-  cardTrend: {
-    fontSize: '13px',
-    color: BRAND_COLORS.lightText,
-    display: 'flex',
-    alignItems: 'center',
-    fontWeight: '500',
-  },
-  chartsSection: {
-    marginBottom: '40px',
-  },
-  chartRow: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(500px, 1fr))',
-    gap: '24px',
-    marginBottom: '24px',
-  },
-  chartCard: {
-    backgroundColor: 'white',
-    borderRadius: '12px',
-    padding: '24px',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
-    border: `1px solid ${BRAND_COLORS.armyGreen}20`,
-  },
-  chartTitle: {
-    fontSize: '18px',
-    fontWeight: '600',
-    color: BRAND_COLORS.armyGreen,
-    margin: 0,
-    marginBottom: '20px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-  },
-  chartIcon: {
-    fontSize: '20px',
-    color: BRAND_COLORS.armyGreen,
-  },
-  simpleChartContainer: {
-    padding: '10px 0',
-  },
-  barChartItem: {
-    display: 'flex',
-    alignItems: 'center',
-    marginBottom: '12px',
-    gap: '10px',
-  },
-  barLabel: {
-    width: '80px',
-    fontSize: '12px',
-    color: BRAND_COLORS.lightText,
-  },
-  barContainer: {
-    flex: 1,
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-  },
-  bar: {
-    height: '20px',
-    borderRadius: '4px',
-    transition: 'width 0.5s ease',
-  },
-  barValue: {
-    width: '40px',
-    fontSize: '12px',
-    fontWeight: '600',
-    color: BRAND_COLORS.armyGreen,
-    textAlign: 'right',
-  },
-  pieChartContainer: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px',
-  },
-  pieItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    padding: '8px 0',
-    borderBottom: `1px solid ${BRAND_COLORS.armyGreen}10`,
-  },
-  pieColor: {
-    width: '20px',
-    height: '20px',
-    borderRadius: '4px',
-  },
-  pieLabel: {
-    flex: 1,
-    fontSize: '14px',
-    color: BRAND_COLORS.darkText,
-  },
-  pieValue: {
-    fontSize: '14px',
-    fontWeight: '600',
-    color: BRAND_COLORS.armyGreen,
-  },
-  noDataMessage: {
-    height: '200px',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    textAlign: 'center',
-    color: BRAND_COLORS.lightText,
-  },
-  noDataIcon: {
-    fontSize: '48px',
-    color: `${BRAND_COLORS.armyGreen}30`,
-    marginBottom: '16px',
   },
   performanceSection: {
     backgroundColor: 'white',
     borderRadius: '12px',
-    padding: '30px',
+    padding: '28px',
     marginBottom: '30px',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
-    border: `1px solid ${BRAND_COLORS.armyGreen}20`,
+    boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
   },
   sectionTitle: {
-    fontSize: '24px',
+    fontSize: '22px',
     fontWeight: '700',
-    color: BRAND_COLORS.armyGreen,
+    color: '#4B5320',
     margin: 0,
-    marginBottom: '30px',
+    marginBottom: '24px',
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
   },
   sectionIcon: {
-    fontSize: '24px',
-    color: BRAND_COLORS.armyGreen,
+    fontSize: '22px',
+    color: '#4B5320',
   },
   performanceGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
     gap: '24px',
   },
-  performanceCard: {
+  perfCard: {
     padding: '24px',
-    border: `1px solid ${BRAND_COLORS.armyGreen}20`,
-    borderRadius: '12px',
-    backgroundColor: BRAND_COLORS.lightBg,
+    border: '1px solid rgba(75, 83, 32, 0.15)',
+    borderRadius: '10px',
+    backgroundColor: '#F8F9FA',
   },
-  performanceHeader: {
+  perfHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: '16px',
   },
-  performanceLabel: {
-    fontSize: '14px',
-    color: BRAND_COLORS.lightText,
+  perfTitleWrapper: {
+    display: 'flex',
+    alignItems: 'center',
+  },
+  perfTitle: {
+    fontSize: '15px',
+    color: '#6C757D',
     fontWeight: '600',
   },
-  performanceValue: {
+  perfValue: {
     fontSize: '28px',
     fontWeight: '700',
+    color: '#4B5320',
+  },
+  progressContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '16px',
+    marginTop: '12px',
   },
   progressBar: {
+    flex: 1,
     height: '10px',
-    backgroundColor: `${BRAND_COLORS.armyGreen}20`,
+    backgroundColor: 'rgba(75, 83, 32, 0.1)',
     borderRadius: '5px',
     overflow: 'hidden',
-    marginBottom: '12px',
   },
   progressFill: {
     height: '100%',
     borderRadius: '5px',
-    transition: 'width 0.5s ease',
+    transition: 'width 0.3s ease',
   },
-  performanceSubtext: {
-    fontSize: '13px',
-    color: BRAND_COLORS.lightText,
-  },
-  emptyState: {
-    textAlign: 'center',
-    padding: '60px 30px',
-    backgroundColor: 'white',
-    borderRadius: '12px',
-    border: `2px dashed ${BRAND_COLORS.armyGreen}30`,
-    margin: '40px 0',
-  },
-  emptyIcon: {
-    fontSize: '64px',
-    color: `${BRAND_COLORS.armyGreen}50`,
-    marginBottom: '20px',
-  },
-  emptyTitle: {
-    fontSize: '22px',
-    fontWeight: '600',
-    color: BRAND_COLORS.darkText,
-    margin: 0,
-    marginBottom: '12px',
-  },
-  emptyText: {
-    fontSize: '15px',
-    color: BRAND_COLORS.lightText,
-    margin: 0,
-    maxWidth: '400px',
-    margin: '0 auto',
-  },
-  analyticsTableContainer: {
-    backgroundColor: 'white',
-    borderRadius: '12px',
-    padding: '30px',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
-    marginBottom: '30px',
-  },
-  tableHeaderRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '24px',
-  },
-  tableTitle: {
-    fontSize: '20px',
-    fontWeight: '600',
-    color: BRAND_COLORS.armyGreen,
-    margin: 0,
-  },
-  tableContainer: {
-    overflowX: 'auto',
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'separate',
-    borderSpacing: '0',
+  progressLabel: {
+    width: '60px',
     fontSize: '14px',
-  },
-  tableHeader: {
-    padding: '18px 16px',
-    textAlign: 'left',
-    backgroundColor: BRAND_COLORS.lightBg,
-    color: BRAND_COLORS.armyGreen,
     fontWeight: '600',
-    borderBottom: `2px solid ${BRAND_COLORS.armyGreen}`,
-    whiteSpace: 'nowrap',
+    color: '#4B5320',
+    textAlign: 'right',
   },
-  tableRow: {
-    borderBottom: `1px solid ${BRAND_COLORS.armyGreen}20`,
-    transition: 'background-color 0.2s',
-  },
-  tableCell: {
-    padding: '18px 16px',
-    verticalAlign: 'middle',
-  },
-  testName: {
-    fontWeight: '600',
-    color: BRAND_COLORS.darkText,
-    marginBottom: '4px',
-  },
-  testSubject: {
+  perfSubtext: {
     fontSize: '13px',
-    color: BRAND_COLORS.lightText,
+    color: '#6C757D',
+    marginTop: '12px',
   },
-  typeBadge: {
-    padding: '6px 12px',
-    borderRadius: '20px',
-    fontSize: '12px',
-    fontWeight: '600',
-    display: 'inline-block',
+  // Status Grid
+  statusGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+    gap: '16px',
+    marginTop: '20px',
   },
-  scoreDisplay: {
+  statusCard: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '16px',
+    backgroundColor: '#F8F9FA',
+    borderRadius: '10px',
+    border: '1px solid rgba(75, 83, 32, 0.1)',
+  },
+  statusHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  statusIcon: {
+    width: '40px',
+    height: '40px',
+    borderRadius: '8px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     fontSize: '18px',
+  },
+  statusContent: {
+    flex: 1,
+  },
+  statusName: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#4B5320',
+    marginBottom: '2px',
+  },
+  statusCount: {
+    fontSize: '12px',
+    color: '#6C757D',
+  },
+  statusPercentage: {
+    fontSize: '16px',
     fontWeight: '700',
+    color: '#4B5320',
+  },
+  // Quick Stats
+  quickStats: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    gap: '20px',
+    marginTop: '20px',
+  },
+  quickStat: {
+    padding: '16px',
+    backgroundColor: '#F8F9FA',
+    borderRadius: '8px',
+    border: '1px solid rgba(75, 83, 32, 0.1)',
     textAlign: 'center',
   },
-  statusBadge: {
-    padding: '6px 12px',
-    borderRadius: '20px',
-    fontSize: '12px',
+  quickStatLabel: {
+    fontSize: '13px',
+    color: '#6C757D',
+    marginBottom: '8px',
     fontWeight: '600',
-    display: 'inline-block',
   },
-  classesGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-    gap: '24px',
+  quickStatValue: {
+    fontSize: '20px',
+    fontWeight: '700',
+    color: '#4B5320',
   },
-  classCard: {
+  summaryCard: {
     backgroundColor: 'white',
     borderRadius: '12px',
     padding: '24px',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
-    border: `1px solid ${BRAND_COLORS.armyGreen}20`,
+    marginBottom: '30px',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+    border: '1px solid rgba(75, 83, 32, 0.1)',
   },
-  classHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '20px',
-    marginBottom: '20px',
-  },
-  classIcon: {
-    width: '56px',
-    height: '56px',
-    borderRadius: '12px',
-    backgroundColor: `${BRAND_COLORS.armyGreen}15`,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '28px',
-  },
-  className: {
-    fontSize: '20px',
+  summaryTitle: {
+    fontSize: '18px',
     fontWeight: '600',
-    color: BRAND_COLORS.armyGreen,
+    color: '#4B5320',
     margin: 0,
-    marginBottom: '4px',
-  },
-  classInfo: {
-    fontSize: '14px',
-    color: BRAND_COLORS.lightText,
-    margin: 0,
-  },
-  classStats: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(2, 1fr)',
-    gap: '20px',
     marginBottom: '20px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
   },
-  classStat: {
-    textAlign: 'center',
+  summaryIcon: {
+    fontSize: '18px',
+    color: '#4B5320',
   },
-  statLabel: {
-    display: 'block',
+  summaryGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    gap: '20px',
+  },
+  summaryItem: {
+    padding: '16px',
+    backgroundColor: '#F8F9FA',
+    borderRadius: '8px',
+    border: '1px solid rgba(75, 83, 32, 0.1)',
+  },
+  summaryLabel: {
     fontSize: '13px',
-    color: BRAND_COLORS.lightText,
+    color: '#6C757D',
     marginBottom: '8px',
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
+    fontWeight: '600',
   },
-  statValue: {
-    display: 'block',
+  summaryValue: {
     fontSize: '20px',
     fontWeight: '700',
+    color: '#4B5320',
   },
-  activityList: {
+  // Scores Tab Styles
+  scoresTab: {
+    marginBottom: '30px',
+  },
+  scoreSummaryGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+    gap: '24px',
+    marginBottom: '30px',
+  },
+  scoreCard: {
     backgroundColor: 'white',
     borderRadius: '12px',
-    padding: '20px',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+    padding: '24px',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+    border: '1px solid rgba(75, 83, 32, 0.1)',
   },
-  activityItem: {
-    display: 'flex',
-    alignItems: 'center',
-    padding: '20px',
-    borderBottom: `1px solid ${BRAND_COLORS.armyGreen}20`,
-    transition: 'background-color 0.3s ease',
-  },
-  activityIcon: {
-    width: '48px',
-    height: '48px',
-    borderRadius: '12px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: '20px',
-    fontSize: '24px',
-  },
-  activityContent: {
-    flex: 1,
-  },
-  activityTitle: {
-    fontSize: '16px',
-    fontWeight: '600',
-    color: BRAND_COLORS.darkText,
-    marginBottom: '8px',
-  },
-  activityDetails: {
-    display: 'flex',
-    gap: '20px',
-    fontSize: '14px',
-    color: BRAND_COLORS.lightText,
-  },
-  activityUser: {
-    fontWeight: '500',
-    color: BRAND_COLORS.armyGreen,
-  },
-  activityTime: {
-    color: BRAND_COLORS.lightText,
-  },
-  summaryFooter: {
+  scoreCardHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: '40px',
-    paddingTop: '24px',
-    borderTop: `2px solid ${BRAND_COLORS.armyGreen}20`,
-    fontSize: '14px',
-    color: BRAND_COLORS.lightText,
+    marginBottom: '16px',
   },
-  summaryInfo: {
+  testTypeBadge: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '6px 12px',
+    backgroundColor: 'rgba(75, 83, 32, 0.1)',
+    borderRadius: '20px',
+    fontSize: '14px',
+    fontWeight: '500',
+    color: '#4B5320',
+  },
+  statusBadge: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    padding: '6px 12px',
+    borderRadius: '20px',
+    fontSize: '13px',
+    fontWeight: '500',
+  },
+  testTypeText: {
+    marginLeft: '4px',
+  },
+  scoreCardTitle: {
+    fontSize: '18px',
+    fontWeight: '600',
+    color: '#2C3E50',
+    margin: '0 0 8px 0',
+  },
+  scoreCardSubtitle: {
+    fontSize: '14px',
+    color: '#6C757D',
+    marginBottom: '20px',
+  },
+  scoreCardStats: {
+    marginTop: '20px',
+  },
+  scoreStat: {
+    marginBottom: '16px',
+  },
+  scoreStatLabel: {
+    fontSize: '13px',
+    color: '#6C757D',
+    marginBottom: '4px',
+    fontWeight: '500',
+  },
+  scoreStatValue: {
+    fontSize: '32px',
+    fontWeight: '700',
+  },
+  scoreStatRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    gap: '16px',
+    marginBottom: '16px',
+  },
+  scoreStatItem: {
+    flex: 1,
+  },
+  scoreStatItemLabel: {
+    fontSize: '12px',
+    color: '#6C757D',
+    marginBottom: '4px',
+  },
+  scoreStatItemValue: {
+    fontSize: '16px',
+    fontWeight: '600',
+    color: '#4B5320',
+  },
+  studentCountSection: {
+    marginTop: '20px',
+    paddingTop: '20px',
+    borderTop: '1px solid rgba(75, 83, 32, 0.1)',
+  },
+  studentCountLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#4B5320',
+    marginBottom: '8px',
+  },
+  studentCountValue: {
+    fontSize: '24px',
+    fontWeight: '700',
+    color: '#4B5320',
+  },
+  detailedTableSection: {
+    marginTop: '30px',
+  },
+  tableSectionTitle: {
+    fontSize: '18px',
+    fontWeight: '600',
+    color: '#4B5320',
+    margin: '0 0 16px 0',
     display: 'flex',
     alignItems: 'center',
   },
-  summaryText: {
+  tableContainer: {
+    backgroundColor: 'white',
+    borderRadius: '12px',
+    padding: '24px',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+    overflowX: 'auto',
+  },
+  detailedTable: {
+    width: '100%',
+    borderCollapse: 'collapse',
     fontSize: '14px',
-    color: BRAND_COLORS.lightText,
+  },
+  detailedTableHeader: {
+    padding: '16px',
+    textAlign: 'left',
+    backgroundColor: '#F8F9FA',
+    color: '#4B5320',
+    fontWeight: '600',
+    borderBottom: '2px solid #4B5320',
+    whiteSpace: 'nowrap',
+  },
+  detailedTableRow: {
+    borderBottom: '1px solid rgba(75, 83, 32, 0.1)',
+    transition: 'background-color 0.2s ease',
+    '&:hover': {
+      backgroundColor: 'rgba(75, 83, 32, 0.02)',
+    }
+  },
+  detailedTableCell: {
+    padding: '16px',
+    verticalAlign: 'middle',
+  },
+  testInfo: {
+    minWidth: '200px',
+  },
+  testTitle: {
+    fontWeight: '600',
+    color: '#2C3E50',
+    marginBottom: '4px',
+  },
+  testDate: {
+    fontSize: '12px',
+    color: '#6C757D',
+  },
+  typeCell: {
+    display: 'flex',
+    alignItems: 'center',
+  },
+  subjectClassCell: {
+    minWidth: '150px',
+  },
+  subjectBadge: {
+    display: 'inline-block',
+    padding: '4px 8px',
+    backgroundColor: 'rgba(75, 83, 32, 0.1)',
+    color: '#4B5320',
+    borderRadius: '4px',
+    fontSize: '12px',
+    fontWeight: '500',
+    marginBottom: '4px',
+  },
+  classText: {
+    fontSize: '13px',
+    color: '#6C757D',
+  },
+  scoreCell: {
+    padding: '8px 12px',
+    borderRadius: '6px',
+    fontSize: '14px',
+    fontWeight: '600',
+    display: 'inline-block',
+  },
+  studentsCell: {
+    display: 'flex',
+    alignItems: 'center',
+  },
+  studentsCount: {
+    display: 'flex',
+    alignItems: 'center',
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#4B5320',
+  },
+  statusCell: {
+    padding: '6px 12px',
+    borderRadius: '20px',
+    fontSize: '13px',
+    fontWeight: '500',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+  },
+  // Performance Tab Styles
+  performanceTab: {
+    marginBottom: '30px',
+  },
+  chartCard: {
+    backgroundColor: 'white',
+    borderRadius: '12px',
+    padding: '28px',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+    marginBottom: '24px',
+  },
+  chartContainer: {
+    padding: '10px 0 30px 0',
+  },
+  barItem: {
+    display: 'flex',
+    alignItems: 'center',
+    marginBottom: '20px',
+    gap: '20px',
+  },
+  barLabel: {
+    width: '100px',
+    fontSize: '14px',
+    color: '#6C757D',
+    fontWeight: '500',
+    flexShrink: 0,
+  },
+  barWrapper: {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '20px',
+  },
+  bar: {
+    height: '24px',
+    borderRadius: '6px',
+    transition: 'width 0.3s ease',
+  },
+  barValue: {
+    width: '60px',
+    fontSize: '15px',
+    fontWeight: '600',
+    color: '#4B5320',
+    textAlign: 'right',
+    flexShrink: 0,
+  },
+  barSubtext: {
+    width: '100px',
+    fontSize: '13px',
+    color: '#6C757D',
+    textAlign: 'right',
+    flexShrink: 0,
+  },
+  trendSummary: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    gap: '20px',
+    marginTop: '30px',
+    paddingTop: '30px',
+    borderTop: '1px solid rgba(75, 83, 32, 0.1)',
+  },
+  trendItem: {
+    textAlign: 'center',
+    padding: '20px',
+    backgroundColor: '#F8F9FA',
+    borderRadius: '8px',
+  },
+  trendLabel: {
+    fontSize: '14px',
+    color: '#6C757D',
+    marginBottom: '8px',
+    fontWeight: '500',
+  },
+  trendValue: {
+    fontSize: '24px',
+    fontWeight: '700',
+    color: '#4B5320',
+  },
+  // Tests Tab Styles
+  testsTab: {
+    marginBottom: '30px',
+  },
+  table: {
+    width: '100%',
+    borderCollapse: 'collapse',
+    fontSize: '14px',
+  },
+  tableHeader: {
+    padding: '16px',
+    textAlign: 'left',
+    backgroundColor: '#F8F9FA',
+    color: '#4B5320',
+    fontWeight: '600',
+    borderBottom: '2px solid #4B5320',
+    whiteSpace: 'nowrap',
+  },
+  tableRow: {
+    borderBottom: '1px solid rgba(75, 83, 32, 0.1)',
+    transition: 'background-color 0.2s ease',
+    '&:hover': {
+      backgroundColor: 'rgba(75, 83, 32, 0.02)',
+    }
+  },
+  tableCell: {
+    padding: '16px',
+    verticalAlign: 'middle',
+  },
+  subjectClass: {
+    minWidth: '150px',
+  },
+  scoreDisplay: {
+    padding: '10px 16px',
+    borderRadius: '8px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontWeight: '600',
+  },
+  scoreValue: {
+    fontSize: '16px',
+    fontWeight: '700',
+  },
+  scorePercentage: {
+    fontSize: '12px',
+    opacity: 0.8,
+  },
+  statusDisplay: {
+    padding: '6px 12px',
+    borderRadius: '20px',
+    fontSize: '13px',
+    fontWeight: '500',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+  },
+  dateCell: {
+    fontSize: '13px',
+    color: '#6C757D',
+  },
+  emptyState: {
+    textAlign: 'center',
+    padding: '60px 40px',
+    color: '#6C757D',
+    backgroundColor: 'white',
+    borderRadius: '12px',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+  },
+  emptyText: {
+    fontSize: '18px',
+    fontWeight: '600',
+    marginBottom: '8px',
+  },
+  emptySubtext: {
+    fontSize: '14px',
+    marginBottom: '24px',
+    maxWidth: '500px',
+    margin: '0 auto 24px',
+  },
+  retryButton: {
+    padding: '12px 24px',
+    backgroundColor: '#4B5320',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '600',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    margin: '0 auto',
+    transition: 'all 0.2s ease',
+    '&:hover': {
+      backgroundColor: '#3a4420',
+    }
+  },
+  footer: {
+    marginTop: '40px',
+    paddingTop: '20px',
+    borderTop: '1px solid rgba(75, 83, 32, 0.2)',
+  },
+  footerInfo: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footerText: {
+    fontSize: '13px',
+    color: '#6C757D',
+    textAlign: 'center',
   },
 };
+
+// Add CSS animation for spinner
+const styleSheet = document.styleSheets[0];
+styleSheet.insertRule(`
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+`, styleSheet.cssRules.length);
 
 export default AnalyticsPage;

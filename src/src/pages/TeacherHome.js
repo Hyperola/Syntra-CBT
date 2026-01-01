@@ -1,4 +1,4 @@
-// pages/TeacherHome.js - UPDATED WITH BETTER ERROR HANDLING
+// pages/TeacherHome.js - UPDATED WITH PROFILE PICTURE
 import React, { useContext, useState, useEffect } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
@@ -60,6 +60,7 @@ const TeacherHome = () => {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [profileImageUrl, setProfileImageUrl] = useState('');
 
   // Brand colors
   const brandColors = {
@@ -157,6 +158,12 @@ const TeacherHome = () => {
           
           console.log('✅ Processed teacher data:', processedData);
           setTeacherData(processedData);
+          
+          // Set profile image URL if available
+          if (processedData.profileImage) {
+            setProfileImageUrl(`http://localhost:5000/uploads/profiles/${processedData.profileImage}`);
+          }
+          
           setError(null);
         } else {
           // If no assignments, still create basic teacher data
@@ -173,6 +180,11 @@ const TeacherHome = () => {
           
           setTeacherData(processedData);
           console.log('ℹ️ Teacher has no assignments');
+          
+          // Set profile image URL if available in user object
+          if (user.profileImage) {
+            setProfileImageUrl(`http://localhost:5000/uploads/profiles/${user.profileImage}`);
+          }
         }
       } catch (err) {
         console.error('❌ Error fetching teacher data:', err);
@@ -186,6 +198,11 @@ const TeacherHome = () => {
           assignments: []
         };
         setTeacherData(minimalTeacherData);
+        
+        // Try to set profile image from user object
+        if (user.profileImage) {
+          setProfileImageUrl(`http://localhost:5000/uploads/profiles/${user.profileImage}`);
+        }
       } finally {
         setIsLoading(false);
       }
@@ -231,6 +248,22 @@ const TeacherHome = () => {
     
     return () => clearTimeout(timer);
   }, [error, success]);
+
+  // Get teacher name
+  const getTeacherName = () => {
+    if (teacherData) {
+      return teacherData.name || `${teacherData.firstName || ''} ${teacherData.lastName || ''}`.trim() || teacherData.username || 'Teacher';
+    }
+    return user?.name || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'Teacher';
+  };
+
+  // Get teacher email
+  const getTeacherEmail = () => {
+    if (teacherData) {
+      return teacherData.email || user?.email || '';
+    }
+    return user?.email || '';
+  };
 
   if (!user || user.role !== 'teacher') {
     return (
@@ -370,7 +403,7 @@ const TeacherHome = () => {
               <h1 style={styles.headerTitle}>Teacher Portal</h1>
               <div style={styles.headerSubtitle}>
                 <span style={styles.welcomeText}>Welcome, </span>
-                <span style={styles.teacherName}>{user.name || 'Teacher'}</span>
+                <span style={styles.teacherName}>{getTeacherName()}</span>
               </div>
             </div>
           </div>
@@ -396,14 +429,34 @@ const TeacherHome = () => {
             )}
           </div>
           
-          {/* User Profile */}
+          {/* User Profile with Image */}
           <div style={styles.userProfile(brandColors)}>
-            <div style={styles.userAvatar}>
-              {user.name?.charAt(0) || <FiUser size={20} />}
+            <div style={styles.userAvatarContainer}>
+              {profileImageUrl ? (
+                <img 
+                  src={profileImageUrl} 
+                  alt={getTeacherName()} 
+                  style={styles.userAvatarImage}
+                  onError={(e) => {
+                    e.target.onerror = null;
+                    e.target.style.display = 'none';
+                    // Show fallback avatar if image fails to load
+                    e.target.parentElement.innerHTML = `
+                      <div style="width: 36px; height: 36px; border-radius: 50%; background-color: #4B5320; color: #ffffff; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px;">
+                        ${getTeacherName().charAt(0) || 'T'}
+                      </div>
+                    `;
+                  }}
+                />
+              ) : (
+                <div style={styles.userAvatarFallback}>
+                  {getTeacherName().charAt(0) || <FiUser size={20} />}
+                </div>
+              )}
             </div>
             {!isMobile && (
               <div style={styles.userInfo}>
-                <span style={styles.userName}>{user.name || 'Teacher'}</span>
+                <span style={styles.userName}>{getTeacherName()}</span>
                 <span style={styles.userRole}>Teacher</span>
               </div>
             )}
@@ -467,15 +520,35 @@ const TeacherHome = () => {
             </div>
           </div>
 
-          {/* Teacher Profile Summary */}
+          {/* Teacher Profile Summary with Image */}
           {(!isSidebarCollapsed || isMobile) && (
             <div style={styles.teacherProfile(brandColors)}>
-              <div style={styles.teacherAvatar}>
-                {user.name?.charAt(0) || <FiUser size={24} />}
+              <div style={styles.teacherAvatarContainer}>
+                {profileImageUrl ? (
+                  <img 
+                    src={profileImageUrl} 
+                    alt={getTeacherName()} 
+                    style={styles.teacherAvatarImage}
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.style.display = 'none';
+                      // Show fallback avatar if image fails to load
+                      e.target.parentElement.innerHTML = `
+                        <div style="width: 48px; height: 48px; border-radius: 50%; background-color: #4B5320; color: #ffffff; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 18px;">
+                          ${getTeacherName().charAt(0) || 'T'}
+                        </div>
+                      `;
+                    }}
+                  />
+                ) : (
+                  <div style={styles.teacherAvatarFallback}>
+                    {getTeacherName().charAt(0) || <FiUser size={24} />}
+                  </div>
+                )}
               </div>
               <div style={styles.teacherInfo}>
-                <h4 style={styles.teacherName}>{user.name || 'Teacher'}</h4>
-                <p style={styles.teacherEmail}>{user.email}</p>
+                <h4 style={styles.teacherName}>{getTeacherName()}</h4>
+                <p style={styles.teacherEmail}>{getTeacherEmail()}</p>
               </div>
             </div>
           )}
@@ -651,7 +724,7 @@ const TeacherHome = () => {
   );
 };
 
-// Styles - KEEP ALL YOUR EXISTING STYLES EXACTLY AS THEY ARE
+// Styles - UPDATED WITH PROFILE IMAGE STYLES
 const styles = {
   container: (colors) => ({
     minHeight: '100vh',
@@ -804,7 +877,17 @@ const styles = {
       backgroundColor: colors.light,
     },
   }),
-  userAvatar: {
+  userAvatarContainer: {
+    position: 'relative',
+  },
+  userAvatarImage: {
+    width: '36px',
+    height: '36px',
+    borderRadius: '50%',
+    objectFit: 'cover',
+    border: '2px solid #e2e8f0',
+  },
+  userAvatarFallback: {
     width: '36px',
     height: '36px',
     borderRadius: '50%',
@@ -845,6 +928,59 @@ const styles = {
       backgroundColor: '#fef2f2',
     },
   }),
+
+  // Teacher Profile in Sidebar
+  teacherProfile: (colors) => ({
+    padding: '20px 16px',
+    borderBottom: '1px solid #e2e8f0',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  }),
+  teacherAvatarContainer: {
+    position: 'relative',
+    flexShrink: 0,
+  },
+  teacherAvatarImage: {
+    width: '48px',
+    height: '48px',
+    borderRadius: '50%',
+    objectFit: 'cover',
+    border: '2px solid #4B5320',
+  },
+  teacherAvatarFallback: {
+    width: '48px',
+    height: '48px',
+    borderRadius: '50%',
+    backgroundColor: '#4B5320',
+    color: '#ffffff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontWeight: '600',
+    fontSize: '18px',
+  },
+  teacherInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  teacherName: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#1e293b',
+    margin: '0 0 4px 0',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  teacherEmail: {
+    fontSize: '12px',
+    color: '#64748b',
+    margin: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
 
   // Alerts
   alertsWrapper: {
@@ -943,46 +1079,6 @@ const styles = {
     fontSize: '16px',
     fontWeight: '700',
     color: '#1e293b',
-  },
-  teacherProfile: (colors) => ({
-    padding: '20px 16px',
-    borderBottom: '1px solid #e2e8f0',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-  }),
-  teacherAvatar: {
-    width: '48px',
-    height: '48px',
-    borderRadius: '50%',
-    backgroundColor: '#4B5320',
-    color: '#ffffff',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontWeight: '600',
-    fontSize: '18px',
-  },
-  teacherInfo: {
-    flex: 1,
-    minWidth: 0,
-  },
-  teacherName: {
-    fontSize: '14px',
-    fontWeight: '600',
-    color: '#1e293b',
-    margin: '0 0 4px 0',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  teacherEmail: {
-    fontSize: '12px',
-    color: '#64748b',
-    margin: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
   },
   navSections: {
     flex: 1,

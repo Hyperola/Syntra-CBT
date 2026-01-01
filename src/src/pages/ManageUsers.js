@@ -1,4 +1,4 @@
-// pages/ManageUsers.js - COMPLETE UPDATED VERSION WITH FIXED TEACHER ASSIGNMENTS
+// pages/ManageUsers.js - UPDATED WITH PROFILE IMAGE UPLOAD AND TEACHER ASSIGNMENTS
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -32,7 +32,9 @@ import {
   FiPlus,
   FiUpload,
   FiImage,
-  FiCamera
+  FiCamera,
+  FiAlertCircle,
+  FiCheck
 } from 'react-icons/fi';
 
 const ManageUsers = () => {
@@ -60,12 +62,14 @@ const ManageUsers = () => {
     sex: '',
     age: '',
     active: true,
-    adminPermissions: [],
-    profileImage: ''
+    adminPermissions: []
   });
+  
+  // Profile Image State (from createadmin.js)
   const [profileImage, setProfileImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [uploadingImage, setUploadingImage] = useState(false);
+  
   const [editUserId, setEditUserId] = useState(null);
   const [users, setUsers] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -306,65 +310,96 @@ const ManageUsers = () => {
     }
   };
 
+  // UPDATED: Profile image handling from createadmin.js
   const getProfileImageUrl = (user) => {
     if (!user) return null;
     
-    if (user.profileImageUrl && user.profileImageUrl !== 'null' && user.profileImageUrl !== 'undefined') {
-      if (user.profileImageUrl.startsWith('http')) {
-        return user.profileImageUrl;
-      }
-      return `http://localhost:5000${user.profileImageUrl.startsWith('/') ? '' : '/'}${user.profileImageUrl}`;
-    }
-    
+    // Check if user has profileImage field
     if (user.profileImage && user.profileImage !== 'null' && user.profileImage !== 'undefined') {
+      // If it's a full URL, return it
       if (user.profileImage.startsWith('http')) {
         return user.profileImage;
       }
-      let imagePath = user.profileImage;
-      if (imagePath.startsWith('/uploads/')) {
-        imagePath = imagePath.substring(1);
+      // If it's just a filename, prepend the path
+      if (!user.profileImage.includes('/')) {
+        return `http://localhost:5000/uploads/profiles/${user.profileImage}`;
       }
-      if (imagePath.startsWith('uploads/')) {
-        imagePath = imagePath;
-      } else if (!imagePath.includes('/')) {
-        imagePath = `uploads/profiles/${imagePath}`;
-      }
-      return `http://localhost:5000/${imagePath}`;
     }
     
-    if (user.profilePicture && user.profilePicture !== 'null' && user.profilePicture !== 'undefined') {
-      if (user.profilePicture.startsWith('http')) {
-        return user.profilePicture;
+    // Check other possible fields
+    const imageFields = ['profilePicture', 'picture', 'photo'];
+    for (const field of imageFields) {
+      if (user[field] && user[field] !== 'null' && user[field] !== 'undefined') {
+        const imageValue = user[field];
+        if (!imageValue.includes('/')) {
+          return `http://localhost:5000/uploads/profiles/${imageValue}`;
+        }
       }
-      let imagePath = user.profilePicture;
-      if (imagePath.startsWith('/uploads/')) {
-        imagePath = imagePath.substring(1);
-      }
-      if (imagePath.startsWith('uploads/')) {
-        imagePath = imagePath;
-      } else if (!imagePath.includes('/')) {
-        imagePath = `uploads/profiles/${imagePath}`;
-      }
-      return `http://localhost:5000/${imagePath}`;
     }
     
-    if (user.picture && user.picture !== 'null' && user.picture !== 'undefined') {
-      if (user.picture.startsWith('http')) {
-        return user.picture;
-      }
-      let imagePath = user.picture;
-      if (imagePath.startsWith('/uploads/')) {
-        imagePath = imagePath.substring(1);
-      }
-      if (imagePath.startsWith('uploads/')) {
-        imagePath = imagePath;
-      } else if (!imagePath.includes('/')) {
-        imagePath = `uploads/profiles/${imagePath}`;
-      }
-      return `http://localhost:5000/${imagePath}`;
+    return null; // No image found
+  };
+
+  // Helper function to convert image to base64 (from createadmin.js)
+  const convertImageToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = error => reject(error);
+    });
+  };
+
+  // Image upload handler (from createadmin.js)
+  const handleImageUpload = async (file) => {
+    if (!file) {
+      console.log('⚠️ No file selected');
+      return;
     }
     
-    return null;
+    console.log('📁 File selected:', {
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      isFile: file instanceof File
+    });
+    
+    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    const maxSize = 2 * 1024 * 1024; // 2MB
+    
+    if (!validTypes.includes(file.type)) {
+      setError('Please upload JPG, PNG, GIF, or WebP only.');
+      return;
+    }
+    
+    if (file.size > maxSize) {
+      setError('Image must be under 2MB.');
+      return;
+    }
+    
+    setUploadingImage(true);
+    try {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result);
+      };
+      reader.readAsDataURL(file);
+      
+      setProfileImage(file);
+      setSuccess('Image ready for upload.');
+      
+    } catch (err) {
+      console.error('Error processing image:', err);
+      setError('Failed to process image.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const removeProfileImage = () => {
+    setProfileImage(null);
+    setImagePreview(null);
+    setFormData(prev => ({ ...prev, picture: null }));
   };
 
   const fetchUsers = async () => {
@@ -536,6 +571,7 @@ const ManageUsers = () => {
     });
   };
 
+  // UPDATED: Add teacher assignment (from createteacherwithassignment.js)
   const addTeacherAssignment = () => {
     if (!teacherAssignmentModal.selectedClass || teacherAssignmentModal.selectedSubjects.length === 0) {
       setError('Please select a class and at least one subject');
@@ -545,14 +581,15 @@ const ManageUsers = () => {
     const selectedClass = classes.find(c => c._id === teacherAssignmentModal.selectedClass);
     if (!selectedClass) return;
 
+    // Format assignment according to backend expectations (from createteacherwithassignment.js)
     const newAssignment = {
       classId: teacherAssignmentModal.selectedClass,
       className: selectedClass.name,
       subjects: teacherAssignmentModal.selectedSubjects.map(subjectId => {
         const subject = availableSubjectsForAssignment.find(s => s.id === subjectId);
         return {
-          subjectId: subjectId,
-          subjectName: subject?.name || 'Unknown Subject'
+          subject: subjectId,  // Backend expects 'subject' (ObjectId)
+          subjectName: subject?.name || 'Unknown Subject'  // Backend expects 'subjectName' (String)
         };
       })
     };
@@ -563,11 +600,27 @@ const ManageUsers = () => {
 
     if (existingIndex >= 0) {
       const updatedAssignments = [...formData.teacherAssignments];
-      updatedAssignments[existingIndex] = newAssignment;
-      setFormData(prev => ({
-        ...prev,
-        teacherAssignments: updatedAssignments
-      }));
+      const existingAssignment = updatedAssignments[existingIndex];
+      
+      // Combine subjects, avoiding duplicates
+      const existingSubjectIds = existingAssignment.subjects.map(s => s.subject);
+      const newSubjects = newAssignment.subjects.filter(
+        subject => !existingSubjectIds.includes(subject.subject)
+      );
+      
+      if (newSubjects.length > 0) {
+        updatedAssignments[existingIndex] = {
+          ...existingAssignment,
+          subjects: [...existingAssignment.subjects, ...newSubjects]
+        };
+        setFormData(prev => ({
+          ...prev,
+          teacherAssignments: updatedAssignments
+        }));
+      } else {
+        setError('All selected subjects are already assigned to this class.');
+        return;
+      }
     } else {
       setFormData(prev => ({
         ...prev,
@@ -576,6 +629,8 @@ const ManageUsers = () => {
     }
 
     closeTeacherAssignmentModal();
+    setSuccess(`Added ${newAssignment.subjects.length} subject(s) to ${selectedClass.name}`);
+    setTimeout(() => setSuccess(null), 3000);
   };
 
   const removeTeacherAssignment = (classId) => {
@@ -654,58 +709,7 @@ const ManageUsers = () => {
     return null;
   };
 
-  const handleImageUpload = async (file) => {
-    if (!file) {
-      console.log('⚠️ No file selected');
-      return;
-    }
-    
-    console.log('📁 File selected:', {
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      isFile: file instanceof File
-    });
-    
-    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    const maxSize = 2 * 1024 * 1024; // 2MB
-    
-    if (!validTypes.includes(file.type)) {
-      setError('Please upload JPG, PNG, GIF, or WebP only.');
-      return;
-    }
-    
-    if (file.size > maxSize) {
-      setError('Image must be under 2MB.');
-      return;
-    }
-    
-    setUploadingImage(true);
-    try {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagePreview(reader.result);
-      };
-      reader.readAsDataURL(file);
-      
-      setProfileImage(file);
-      setSuccess('Image ready for upload.');
-      
-    } catch (err) {
-      console.error('Error processing image:', err);
-      setError('Failed to process image.');
-    } finally {
-      setUploadingImage(false);
-    }
-  };
-
-  const removeProfileImage = () => {
-    setProfileImage(null);
-    setImagePreview(null);
-    setFormData(prev => ({ ...prev, picture: null, profileImage: '' }));
-  };
-
-  // FIXED: Updated handleUpdateUser function with proper teacher assignments format
+  // UPDATED: Main update user function with profile image and teacher assignments
   const handleUpdateUser = async (e) => {
     e.preventDefault();
     const validationError = validateForm();
@@ -726,39 +730,47 @@ const ManageUsers = () => {
       
       const cleanedUsername = cleanUsername(formData.username);
       
-      // Build user data with FormData for file upload
-      const formDataToSend = new FormData();
-      formDataToSend.append('username', cleanedUsername);
-      formDataToSend.append('email', formData.email.trim());
-      formDataToSend.append('firstName', formData.firstName.trim());
-      formDataToSend.append('middleName', formData.middleName?.trim() || '');
-      formDataToSend.append('lastName', formData.lastName.trim());
-      formDataToSend.append('role', formData.role);
-      formDataToSend.append('active', formData.active.toString());
-      
-      if (formData.dateOfBirth) formDataToSend.append('dateOfBirth', formData.dateOfBirth);
-      if (formData.address) formDataToSend.append('address', formData.address.trim());
-      if (formData.phoneNumber) formDataToSend.append('phoneNumber', formData.phoneNumber.trim());
-      if (formData.sex) formDataToSend.append('sex', formData.sex);
-      if (formData.age) formDataToSend.append('age', formData.age);
-      if (formData.parentEmail) formDataToSend.append('parentEmail', formData.parentEmail.trim());
-      if (formData.parentPhoneNumber) formDataToSend.append('parentPhoneNumber', formData.parentPhoneNumber.trim());
-      
-      // Add password only if provided
-      if (formData.password && formData.password.trim()) {
-        formDataToSend.append('password', formData.password);
+      // UPDATED: Convert image to base64 if exists (from createadmin.js)
+      let profileImageBase64 = null;
+      if (profileImage && profileImage instanceof File) {
+        try {
+          profileImageBase64 = await convertImageToBase64(profileImage);
+          console.log('✅ Image converted to base64, length:', profileImageBase64.length);
+        } catch (imageErr) {
+          console.warn('⚠️ Could not convert image to base64:', imageErr);
+          // Continue without image
+        }
       }
       
-      // Append image file if exists
-      if (profileImage && profileImage instanceof File) {
-        formDataToSend.append('profileImage', profileImage);
-        console.log('📸 Image file appended to FormData:', profileImage.name);
+      // Build user data matching User model structure (from createadmin.js)
+      const userDataToSend = {
+        username: cleanedUsername,
+        email: formData.email.trim().toLowerCase(),
+        firstName: formData.firstName.trim(),
+        middleName: formData.middleName?.trim() || '',
+        lastName: formData.lastName.trim(),
+        role: formData.role,
+        active: formData.active,
+        dateOfBirth: formData.dateOfBirth || undefined,
+        address: formData.address?.trim() || undefined,
+        phoneNumber: formData.phoneNumber?.trim() || undefined,
+        sex: formData.sex || undefined,
+        age: formData.age ? parseInt(formData.age) : undefined,
+        parentEmail: formData.parentEmail?.trim() || undefined,
+        parentPhoneNumber: formData.parentPhoneNumber?.trim() || undefined,
+        studentId: formData.studentId?.trim() || undefined,
+        // Add profile image as base64 if available
+        ...(profileImageBase64 && { profileImage: profileImageBase64 })
+      };
+      
+      // Add password only if provided (for updates)
+      if (formData.password && formData.password.trim()) {
+        userDataToSend.password = formData.password;
       }
       
       // Handle role-specific fields
       if (formData.role === 'student') {
-        if (formData.class) formDataToSend.append('class', formData.class);
-        if (formData.studentId) formDataToSend.append('studentId', formData.studentId.trim());
+        if (formData.class) userDataToSend.class = formData.class;
         
         // Handle student enrolled subjects
         if (formData.selectedSubjects.length > 0) {
@@ -770,52 +782,56 @@ const ManageUsers = () => {
               isCore: subject?.isCore || false
             };
           });
-          formDataToSend.append('enrolledSubjects', JSON.stringify(enrolledSubjects));
+          userDataToSend.enrolledSubjects = enrolledSubjects;
         }
       }
       
       if (formData.role === 'teacher') {
-        if (formData.class) formDataToSend.append('class', formData.class);
+        if (formData.class) userDataToSend.class = formData.class;
         
-        // FIXED: Send teacher assignments in correct format
+        // UPDATED: Format teacher assignments (from createteacherwithassignment.js)
         if (formData.teacherAssignments.length > 0) {
           // Format assignments as backend expects: class and subjects array with subject and subjectName
           const formattedAssignments = formData.teacherAssignments.map(assignment => ({
             class: assignment.classId,  // Must be 'class' not 'classId'
             subjects: assignment.subjects.map(subject => ({
-              subject: subject.subjectId,  // Must be 'subject' not 'subjectId'
+              subject: subject.subject,  // Must be 'subject' not 'subjectId'
               subjectName: subject.subjectName
             }))
           }));
           
-          console.log('📤 Formatted teacher assignments:', JSON.stringify(formattedAssignments, null, 2));
-          formDataToSend.append('teacherAssignments', JSON.stringify(formattedAssignments));
+          console.log('📤 Formatted teacher assignments for update:', JSON.stringify(formattedAssignments, null, 2));
+          userDataToSend.teacherAssignments = formattedAssignments;
         }
       }
       
       if (formData.role === 'admin' || formData.role === 'super_admin') {
         if (formData.adminPermissions.length > 0) {
-          formDataToSend.append('adminPermissions', JSON.stringify(formData.adminPermissions));
+          userDataToSend.adminPermissions = formData.adminPermissions;
         }
       }
       
-      console.log('🔄 Updating user with FormData...');
+      console.log('🔄 Updating user with data:', {
+        ...userDataToSend,
+        password: userDataToSend.password ? '***' : 'NOT_CHANGED',
+        profileImage: profileImageBase64 ? 'BASE64_IMAGE_INCLUDED' : 'NO_IMAGE'
+      });
       
-      // Update user data with FormData for file upload
+      // Update user data
       const response = await axios.put(
         `http://localhost:5000/api/users/${editUserId}`, 
-        formDataToSend, 
+        userDataToSend, 
         {
           headers: { 
             Authorization: `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data'
+            'Content-Type': 'application/json'
           }
         }
       );
       
       console.log('✅ User update response:', response.data);
       
-      setSuccess('User updated successfully!');
+      setSuccess('User updated successfully with profile image!');
       
       // Reset form and fetch updated users
       setTimeout(() => {
@@ -864,7 +880,6 @@ const ManageUsers = () => {
       selectedSubjects: [],
       teacherAssignments: [],
       picture: null,
-      profileImage: '',
       dateOfBirth: '',
       address: '',
       phoneNumber: '',
@@ -906,7 +921,7 @@ const ManageUsers = () => {
       }
     }
     
-    // Properly extract teacher assignments
+    // UPDATED: Properly extract teacher assignments (from createteacherwithassignment.js)
     const teacherAssignments = user.teacherAssignments?.map(assignment => {
       let assignmentClassId = '';
       if (assignment.class) {
@@ -941,10 +956,10 @@ const ManageUsers = () => {
         }
         
         return {
-          subjectId: subjectId,
+          subject: subjectId,
           subjectName: subjectName
         };
-      }).filter(sub => sub.subjectId) || [];
+      }).filter(sub => sub.subject) || [];
       
       return {
         classId: assignmentClassId,
@@ -952,8 +967,6 @@ const ManageUsers = () => {
         subjects: subjects
       };
     }).filter(assignment => assignment.classId && assignment.subjects.length > 0) || [];
-    
-    const profileImageField = user.profileImage || user.profilePicture || user.picture || '';
     
     setFormData({
       username: user.username || '',
@@ -970,8 +983,7 @@ const ManageUsers = () => {
       parentPhoneNumber: user.parentPhoneNumber || '',
       selectedSubjects: enrolledSubjectIds,
       teacherAssignments: teacherAssignments,
-      picture: profileImageField,
-      profileImage: profileImageField,
+      picture: user.profileImage || user.profilePicture || user.picture || null,
       dateOfBirth: formattedDate,
       address: user.address || '',
       phoneNumber: user.phoneNumber || '',
@@ -986,10 +998,11 @@ const ManageUsers = () => {
       parsedAssignments: teacherAssignments
     });
     
+    // UPDATED: Set image preview from user's profile image
     if (user.profileImageUrl) {
       console.log('✅ Setting image preview from profileImageUrl:', user.profileImageUrl);
       setImagePreview(user.profileImageUrl);
-    } else if (profileImageField) {
+    } else if (user.profileImage) {
       const imageUrl = getProfileImageUrl(user);
       if (imageUrl) {
         console.log('✅ Setting image preview from getProfileImageUrl:', imageUrl);
@@ -1593,9 +1606,12 @@ const ManageUsers = () => {
               
               <div style={styles.modalBody}>
                 <form onSubmit={handleUpdateUser}>
-                  {/* Profile Image Upload Section */}
+                  {/* UPDATED: Profile Image Upload Section (from createadmin.js) */}
                   <div style={styles.imageUploadSection}>
-                    <h4 style={styles.sectionTitle}>Profile Image</h4>
+                    <h4 style={styles.sectionTitle}>Profile Image (Optional)</h4>
+                    <p style={styles.imageUploadHelp}>
+                      Image will be sent as base64 in the same request with user data.
+                    </p>
                     <div style={styles.imageUploadContainer}>
                       <div style={styles.imagePreviewArea}>
                         {imagePreview ? (
@@ -1614,7 +1630,7 @@ const ManageUsers = () => {
                           accept="image/jpeg,image/png,image/gif,image/webp"
                           onChange={(e) => handleImageUpload(e.target.files[0])}
                           style={{ display: 'none' }}
-                          disabled={uploadingImage}
+                          disabled={uploadingImage || loading}
                         />
                         <label htmlFor="profileImage" style={styles.uploadButton}>
                           {uploadingImage ? (
@@ -1637,7 +1653,7 @@ const ManageUsers = () => {
                             type="button"
                             onClick={removeProfileImage}
                             style={styles.removeImageButton}
-                            disabled={uploadingImage}
+                            disabled={uploadingImage || loading}
                           >
                             <FiXCircle /> Remove
                           </button>
@@ -1646,7 +1662,7 @@ const ManageUsers = () => {
                           <small>JPG, PNG, GIF, WebP up to 2MB</small>
                           <br />
                           <small style={{ color: '#D69E2E' }}>
-                            Current image: {formData.profileImage || 'None'}
+                            Current image: {formData.picture || 'None'}
                           </small>
                         </div>
                       </div>
@@ -2177,7 +2193,7 @@ const ManageUsers = () => {
   );
 };
 
-// Styles (same as before, included for completeness)
+// Styles (with added styles for image upload)
 const styles = {
   container: {
     minHeight: '100vh',
@@ -2843,13 +2859,19 @@ const styles = {
       transform: 'translateY(-2px)'
     }
   },
-  // Image Upload Styles
+  // UPDATED: Image Upload Styles (from createadmin.js)
   imageUploadSection: {
     marginBottom: '24px',
     padding: '20px',
     backgroundColor: '#F5F7FA',
     borderRadius: '8px',
     border: '1px solid #E2E8F0'
+  },
+  imageUploadHelp: {
+    color: '#718096',
+    fontSize: '14px',
+    marginBottom: '16px',
+    fontStyle: 'italic'
   },
   imageUploadContainer: {
     display: 'flex',
@@ -2865,7 +2887,8 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    border: '2px dashed #CBD5E0'
+    border: '2px dashed #CBD5E0',
+    flexShrink: 0
   },
   imagePreview: {
     width: '100%',
@@ -2902,9 +2925,13 @@ const styles = {
     gap: '8px',
     justifyContent: 'center',
     transition: 'all 0.2s',
-    '&:hover': {
+    '&:hover:not(:disabled)': {
       backgroundColor: '#2C5282',
       transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.5,
+      cursor: 'not-allowed'
     }
   },
   removeImageButton: {
@@ -2921,9 +2948,13 @@ const styles = {
     gap: '8px',
     justifyContent: 'center',
     transition: 'all 0.2s',
-    '&:hover': {
+    '&:hover:not(:disabled)': {
       backgroundColor: '#FEB2B2',
       transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.5,
+      cursor: 'not-allowed'
     }
   },
   imageUploadInfo: {

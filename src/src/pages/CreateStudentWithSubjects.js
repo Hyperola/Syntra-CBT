@@ -1,4 +1,4 @@
-// pages/CreateStudentWithSubjects.js - UPDATED WITH NEW FIELD STRUCTURE
+// pages/CreateStudentWithSubjects.js - UPDATED WITH SINGLE REQUEST PROFILE IMAGE UPLOAD
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -10,14 +10,14 @@ import {
 } from 'react-icons/fi';
 
 const CreateStudentWithSubjects = () => {
-  const { user } = useContext(AuthContext);
+  const { user, token } = useContext(AuthContext);
   const navigate = useNavigate();
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   
-  // Student basic info - UPDATED TO NEW FIELD STRUCTURE
+  // Student basic info
   const [studentData, setStudentData] = useState({
     username: '',
     password: '',
@@ -36,10 +36,9 @@ const CreateStudentWithSubjects = () => {
     age: '',
     class: '',
     active: true,
-    picture: null
   });
   
-  // Image upload state
+  // Image upload state - UPDATED WITH SINGLE REQUEST APPROACH
   const [profileImage, setProfileImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -47,7 +46,7 @@ const CreateStudentWithSubjects = () => {
   // Class and subject data
   const [classes, setClasses] = useState([]);
   const [classSubjects, setClassSubjects] = useState([]);
-  const [selectedSubjects, setSelectedSubjects] = useState([]); // Both core and elective subjects
+  const [selectedSubjects, setSelectedSubjects] = useState([]);
   
   // Form validation
   const [errors, setErrors] = useState({});
@@ -67,9 +66,9 @@ const CreateStudentWithSubjects = () => {
 
   const fetchClasses = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const authToken = token || localStorage.getItem('token');
       const res = await axios.get('http://localhost:5000/api/classes', {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${authToken}` }
       });
       
       let classesData = [];
@@ -115,13 +114,13 @@ const CreateStudentWithSubjects = () => {
 
   const fetchClassSubjects = async (classId) => {
     try {
-      const token = localStorage.getItem('token');
+      const authToken = token || localStorage.getItem('token');
       
       let subjectsList = [];
       
       try {
         const res = await axios.get(`http://localhost:5000/api/classes/${classId}/subjects`, {
-          headers: { Authorization: `Bearer ${token}` }
+          headers: { Authorization: `Bearer ${authToken}` }
         });
         
         if (res.data && Array.isArray(res.data.subjects)) {
@@ -133,7 +132,7 @@ const CreateStudentWithSubjects = () => {
         }
       } catch (firstErr) {
         const res = await axios.get('http://localhost:5000/api/subjects', {
-          headers: { Authorization: `Bearer ${token}` }
+          headers: { Authorization: `Bearer ${authToken}` }
         });
         
         if (res.data && Array.isArray(res.data.subjects)) {
@@ -178,6 +177,17 @@ const CreateStudentWithSubjects = () => {
     }
   };
 
+  // Helper function to convert image to base64 - FROM CREATEADMIN.JS
+  const convertImageToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = error => reject(error);
+    });
+  };
+
+  // UPDATED: Handle image upload with base64 conversion
   const handleImageUpload = async (file) => {
     if (!file) return;
     
@@ -205,7 +215,6 @@ const CreateStudentWithSubjects = () => {
       reader.readAsDataURL(file);
       
       setProfileImage(file);
-      setStudentData(prev => ({ ...prev, picture: file.name }));
     } catch (err) {
       setError('Failed to process image.');
     } finally {
@@ -216,7 +225,6 @@ const CreateStudentWithSubjects = () => {
   const removeProfileImage = () => {
     setProfileImage(null);
     setImagePreview(null);
-    setStudentData(prev => ({ ...prev, picture: null }));
   };
 
   const toggleSubjectSelection = (subjectId) => {
@@ -306,6 +314,7 @@ const CreateStudentWithSubjects = () => {
     return Object.keys(newErrors).length === 0;
   };
 
+  // UPDATED: Handle submit with single request including base64 image
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -316,14 +325,27 @@ const CreateStudentWithSubjects = () => {
     
     setLoading(true);
     setError(null);
+    setSuccess(null);
     
     try {
-      const token = localStorage.getItem('token');
-      if (!token) {
+      const authToken = token || localStorage.getItem('token');
+      if (!authToken) {
         throw new Error('No authentication token found.');
       }
       
       const cleanedUsername = cleanUsername(studentData.username);
+      
+      // Convert image to base64 if exists
+      let profileImageBase64 = null;
+      if (profileImage) {
+        try {
+          profileImageBase64 = await convertImageToBase64(profileImage);
+          console.log('✅ Image converted to base64, length:', profileImageBase64.length);
+        } catch (imageErr) {
+          console.warn('⚠️ Could not convert image to base64:', imageErr);
+          // Continue without image - don't fail the whole request
+        }
+      }
       
       // Get core and elective subjects
       const coreSubjects = classSubjects.filter(subject => subject.isCore);
@@ -334,7 +356,7 @@ const CreateStudentWithSubjects = () => {
         .filter(subject => selectedSubjects.includes(subject.id))
         .map(subject => subject.id);
       
-      // Build student data with new field structure
+      // Build student data with profile image as base64
       const studentDataToSend = {
         username: cleanedUsername,
         password: studentData.password,
@@ -354,118 +376,135 @@ const CreateStudentWithSubjects = () => {
         parentEmail: studentData.parentEmail?.trim() || undefined,
         parentPhoneNumber: studentData.parentPhoneNumber?.trim() || undefined,
         // Send only elective subjects - backend will add core subjects automatically
-        enrolledSubjects: electiveSubjectIds
+        enrolledSubjects: electiveSubjectIds,
+        // Add profile image as base64 if available
+        ...(profileImageBase64 && { profileImage: profileImageBase64 })
       };
       
-      console.log('📤 Creating student with data:', studentDataToSend);
+      console.log('📤 Creating student with data (SINGLE REQUEST):', {
+        ...studentDataToSend,
+        password: '***',
+        profileImage: profileImageBase64 ? 'BASE64_IMAGE_INCLUDED' : 'NO_IMAGE',
+        enrolledSubjects: studentDataToSend.enrolledSubjects
+      });
       
-      // Step 1: Create the student
+      // SINGLE REQUEST: Create student with profile image in one request
       const response = await axios.post('http://localhost:5000/api/users', 
         studentDataToSend, 
         {
           headers: { 
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${authToken}`,
             'Content-Type': 'application/json'
-          }
+          },
+          timeout: 30000
         }
       );
       
-      const studentId = response.data.data?._id || response.data._id;
-      
-      // Step 2: Upload profile image if selected
-      if (profileImage && studentId) {
-        const formDataImage = new FormData();
-        formDataImage.append('profileImage', profileImage);
-        
-        try {
-          await axios.post(
-            `http://localhost:5000/api/users/${studentId}/upload-profile-image`,
-            formDataImage,
-            {
-              headers: { 
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'multipart/form-data'
-              }
-            }
-          );
-          console.log('✅ Profile image uploaded successfully');
-        } catch (imageErr) {
-          console.warn('⚠️ Could not upload profile image:', imageErr);
-          // Continue even if image upload fails
-        }
-      }
-      
-      console.log('✅ Student created:', response.data);
-      
-      // Show success message with details
-      const coreCount = coreSubjects.length;
-      const electiveCount = electiveSubjectIds.length;
-      setSuccess(`Student created successfully! Enrolled in ${coreCount} core subjects and ${electiveCount} elective subjects.`);
-      
-      // Reset form
-      setStudentData({
-        username: '',
-        password: '',
-        confirmPassword: '',
-        email: '',
-        firstName: '',
-        middleName: '',
-        lastName: '',
-        studentId: '',
-        parentEmail: '',
-        parentPhoneNumber: '',
-        dateOfBirth: '',
-        address: '',
-        phoneNumber: '',
-        sex: '',
-        age: '',
-        class: '',
-        active: true,
-        picture: null
+      console.log('✅ Student creation response:', {
+        success: response.data.success,
+        userId: response.data.user?._id || response.data.data?._id
       });
-      setSelectedSubjects([]);
-      setClassSubjects([]);
-      setProfileImage(null);
-      setImagePreview(null);
       
-      // Navigate back after 3 seconds
-      setTimeout(() => {
-        navigate('/admin/users');
-      }, 3000);
+      if (response.data.success) {
+        const coreCount = coreSubjects.length;
+        const electiveCount = electiveSubjectIds.length;
+        setSuccess(`Student created successfully with profile image! Enrolled in ${coreCount} core subjects and ${electiveCount} elective subjects. Redirecting...`);
+        
+        // Reset form
+        setStudentData({
+          username: '',
+          password: '',
+          confirmPassword: '',
+          email: '',
+          firstName: '',
+          middleName: '',
+          lastName: '',
+          studentId: '',
+          parentEmail: '',
+          parentPhoneNumber: '',
+          dateOfBirth: '',
+          address: '',
+          phoneNumber: '',
+          sex: '',
+          age: '',
+          class: '',
+          active: true,
+        });
+        setSelectedSubjects([]);
+        setClassSubjects([]);
+        setProfileImage(null);
+        setImagePreview(null);
+        
+        // Navigate back after 2 seconds
+        setTimeout(() => {
+          navigate('/admin/users');
+        }, 2000);
+      } else {
+        setError(response.data.message || 'Failed to create student');
+      }
       
     } catch (err) {
       console.error('❌ Error creating student:', err);
       
       if (err.response) {
-        console.error('Response error details:', {
+        console.error('📡 Response error details:', {
           status: err.response.status,
-          statusText: err.response.statusText,
           data: err.response.data,
           headers: err.response.headers
         });
         
-        let errorMessage = 'Server error occurred';
-        if (err.response.data) {
-          if (err.response.data.message) {
-            errorMessage = err.response.data.message;
-          } else if (err.response.data.error) {
-            errorMessage = err.response.data.error;
-          } else if (err.response.data.errors && Array.isArray(err.response.data.errors)) {
-            errorMessage = err.response.data.errors.join(', ');
-          } else if (typeof err.response.data === 'object') {
-            errorMessage = JSON.stringify(err.response.data);
+        if (err.response.status === 400) {
+          const errorMsg = err.response.data.message || 'Validation error. Please check the form.';
+          setError(errorMsg);
+          
+          // Handle validation errors
+          if (err.response.data.errors) {
+            const validationErrors = {};
+            err.response.data.errors.forEach(errorMsg => {
+              if (errorMsg.includes('Username')) validationErrors.username = errorMsg;
+              if (errorMsg.includes('Email')) validationErrors.email = errorMsg;
+              if (errorMsg.includes('Password')) validationErrors.password = errorMsg;
+              if (errorMsg.includes('First name')) validationErrors.firstName = errorMsg;
+              if (errorMsg.includes('Last name')) validationErrors.lastName = errorMsg;
+              if (errorMsg.includes('address')) validationErrors.address = errorMsg;
+              if (errorMsg.includes('profile image')) validationErrors.profileImage = errorMsg;
+            });
+            setErrors(validationErrors);
           }
+        } else if (err.response.status === 401) {
+          setError('Authentication failed. Please log in again.');
+          setTimeout(() => navigate('/login'), 2000);
+        } else if (err.response.status === 403) {
+          setError('Permission denied. You do not have access to create students.');
+        } else if (err.response.status === 409) {
+          setError('User with this username or email already exists.');
+        } else {
+          setError(err.response.data?.message || `Server error: ${err.response.status}`);
         }
-        setError(`Server Error (${err.response.status}): ${errorMessage}`);
       } else if (err.request) {
-        console.error('Request error details:', err.request);
-        setError('No response from server. Please check your network connection.');
+        console.error('🌐 Network error details:', err.request);
+        setError('Network error. Please check your connection and try again.');
       } else {
-        console.error('Error details:', err.message);
-        setError(`Request Error: ${err.message}`);
+        setError('An unexpected error occurred. Please try again.');
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setStudentData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    
+    // Clear error for this field when user starts typing
+    if (errors[name]) {
+      setErrors(prev => ({
+        ...prev,
+        [name]: null
+      }));
     }
   };
 
@@ -519,9 +558,12 @@ const CreateStudentWithSubjects = () => {
       )}
 
       <form onSubmit={handleSubmit} style={styles.form}>
-        {/* Profile Image Upload Section */}
+        {/* Profile Image Upload Section - UPDATED */}
         <div style={styles.imageUploadSection}>
-          <h3 style={styles.sectionTitle}>Profile Image</h3>
+          <h3 style={styles.sectionTitle}>Profile Image (Optional)</h3>
+          <p style={styles.imageUploadHelp}>
+            Image will be sent as base64 in the same request with student data.
+          </p>
           <div style={styles.imageUploadContainer}>
             <div style={styles.imagePreviewArea}>
               {imagePreview ? (
@@ -540,7 +582,7 @@ const CreateStudentWithSubjects = () => {
                 accept="image/jpeg,image/png,image/gif,image/webp"
                 onChange={(e) => handleImageUpload(e.target.files[0])}
                 style={{ display: 'none' }}
-                disabled={uploadingImage}
+                disabled={uploadingImage || loading}
               />
               <label htmlFor="profileImage" style={styles.uploadButton}>
                 {uploadingImage ? (
@@ -563,13 +605,15 @@ const CreateStudentWithSubjects = () => {
                   type="button"
                   onClick={removeProfileImage}
                   style={styles.removeImageButton}
-                  disabled={uploadingImage}
+                  disabled={uploadingImage || loading}
                 >
                   <FiXCircle /> Remove
                 </button>
               )}
               <div style={styles.imageUploadInfo}>
                 <small>JPG, PNG, GIF, WebP up to 5MB</small>
+                <br />
+                <small>Image will be saved with student creation</small>
               </div>
             </div>
           </div>
@@ -588,10 +632,13 @@ const CreateStudentWithSubjects = () => {
               </label>
               <input
                 type="text"
+                name="username"
                 value={studentData.username}
-                onChange={(e) => setStudentData({...studentData, username: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="john_doe"
                 style={{...styles.input, ...(errors.username && styles.inputError)}}
+                disabled={loading}
+                autoComplete="new-username"
               />
               {errors.username && <span style={styles.errorText}>{errors.username}</span>}
               <small style={styles.helpText}>No spaces allowed. Use underscores if needed.</small>
@@ -603,10 +650,13 @@ const CreateStudentWithSubjects = () => {
               </label>
               <input
                 type="email"
+                name="email"
                 value={studentData.email}
-                onChange={(e) => setStudentData({...studentData, email: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="john@school.com"
                 style={{...styles.input, ...(errors.email && styles.inputError)}}
+                disabled={loading}
+                autoComplete="email"
               />
               {errors.email && <span style={styles.errorText}>{errors.email}</span>}
               <small style={styles.helpText}>Either student email or parent email is required</small>
@@ -618,10 +668,13 @@ const CreateStudentWithSubjects = () => {
               </label>
               <input
                 type="text"
+                name="firstName"
                 value={studentData.firstName}
-                onChange={(e) => setStudentData({...studentData, firstName: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="John"
                 style={{...styles.input, ...(errors.firstName && styles.inputError)}}
+                disabled={loading}
+                autoComplete="given-name"
               />
               {errors.firstName && <span style={styles.errorText}>{errors.firstName}</span>}
             </div>
@@ -630,10 +683,13 @@ const CreateStudentWithSubjects = () => {
               <label style={styles.formLabel}>Middle Name</label>
               <input
                 type="text"
+                name="middleName"
                 value={studentData.middleName}
-                onChange={(e) => setStudentData({...studentData, middleName: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="Michael (optional)"
                 style={styles.input}
+                disabled={loading}
+                autoComplete="additional-name"
               />
             </div>
             
@@ -643,10 +699,13 @@ const CreateStudentWithSubjects = () => {
               </label>
               <input
                 type="text"
+                name="lastName"
                 value={studentData.lastName}
-                onChange={(e) => setStudentData({...studentData, lastName: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="Doe"
                 style={{...styles.input, ...(errors.lastName && styles.inputError)}}
+                disabled={loading}
+                autoComplete="family-name"
               />
               {errors.lastName && <span style={styles.errorText}>{errors.lastName}</span>}
             </div>
@@ -657,10 +716,14 @@ const CreateStudentWithSubjects = () => {
               </label>
               <input
                 type="password"
+                name="password"
                 value={studentData.password}
-                onChange={(e) => setStudentData({...studentData, password: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="••••••••"
                 style={{...styles.input, ...(errors.password && styles.inputError)}}
+                disabled={loading}
+                autoComplete="new-password"
+                minLength="6"
               />
               {errors.password && <span style={styles.errorText}>{errors.password}</span>}
               <small style={styles.helpText}>Minimum 6 characters</small>
@@ -672,10 +735,13 @@ const CreateStudentWithSubjects = () => {
               </label>
               <input
                 type="password"
+                name="confirmPassword"
                 value={studentData.confirmPassword}
-                onChange={(e) => setStudentData({...studentData, confirmPassword: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="••••••••"
                 style={{...styles.input, ...(errors.confirmPassword && styles.inputError)}}
+                disabled={loading}
+                autoComplete="new-password"
               />
               {errors.confirmPassword && <span style={styles.errorText}>{errors.confirmPassword}</span>}
             </div>
@@ -684,10 +750,12 @@ const CreateStudentWithSubjects = () => {
               <label style={styles.formLabel}>Student ID</label>
               <input
                 type="text"
+                name="studentId"
                 value={studentData.studentId}
-                onChange={(e) => setStudentData({...studentData, studentId: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="STU001"
                 style={styles.input}
+                disabled={loading}
               />
               <small style={styles.helpText}>Optional - must be unique if provided</small>
             </div>
@@ -697,9 +765,11 @@ const CreateStudentWithSubjects = () => {
                 Class <span style={styles.required}>*</span>
               </label>
               <select
+                name="class"
                 value={studentData.class}
-                onChange={(e) => setStudentData({...studentData, class: e.target.value})}
+                onChange={handleInputChange}
                 style={{...styles.select, ...(errors.class && styles.inputError)}}
+                disabled={loading}
               >
                 <option value="">Select a class</option>
                 {classes.map(cls => (
@@ -724,10 +794,12 @@ const CreateStudentWithSubjects = () => {
               <label style={styles.formLabel}>Parent Email</label>
               <input
                 type="email"
+                name="parentEmail"
                 value={studentData.parentEmail}
-                onChange={(e) => setStudentData({...studentData, parentEmail: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="parent@email.com"
                 style={{...styles.input, ...(errors.parentEmail && styles.inputError)}}
+                disabled={loading}
               />
               {errors.parentEmail && <span style={styles.errorText}>{errors.parentEmail}</span>}
               <small style={styles.helpText}>Either student email or parent email is required</small>
@@ -737,10 +809,12 @@ const CreateStudentWithSubjects = () => {
               <label style={styles.formLabel}>Parent Phone Number</label>
               <input
                 type="tel"
+                name="parentPhoneNumber"
                 value={studentData.parentPhoneNumber}
-                onChange={(e) => setStudentData({...studentData, parentPhoneNumber: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="+1234567890"
                 style={styles.input}
+                disabled={loading}
               />
             </div>
           </div>
@@ -757,9 +831,11 @@ const CreateStudentWithSubjects = () => {
               <label style={styles.formLabel}>Date of Birth</label>
               <input
                 type="date"
+                name="dateOfBirth"
                 value={studentData.dateOfBirth}
                 onChange={(e) => handleDateOfBirthChange(e.target.value)}
                 style={styles.input}
+                disabled={loading}
               />
             </div>
             
@@ -770,15 +846,18 @@ const CreateStudentWithSubjects = () => {
                 value={studentData.age}
                 readOnly
                 style={{...styles.input, backgroundColor: '#F5F7FA'}}
+                disabled={loading}
               />
             </div>
             
             <div style={styles.formGroup}>
               <label style={styles.formLabel}>Sex</label>
               <select
+                name="sex"
                 value={studentData.sex}
-                onChange={(e) => setStudentData({...studentData, sex: e.target.value})}
+                onChange={handleInputChange}
                 style={styles.select}
+                disabled={loading}
               >
                 <option value="">Select sex</option>
                 <option value="male">Male</option>
@@ -793,10 +872,13 @@ const CreateStudentWithSubjects = () => {
               </label>
               <input
                 type="text"
+                name="address"
                 value={studentData.address}
-                onChange={(e) => setStudentData({...studentData, address: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="123 Main Street"
                 style={{...styles.input, ...(errors.address && styles.inputError)}}
+                disabled={loading}
+                autoComplete="street-address"
               />
               {errors.address && <span style={styles.errorText}>{errors.address}</span>}
               <small style={styles.helpText}>Home address is required for students</small>
@@ -806,22 +888,27 @@ const CreateStudentWithSubjects = () => {
               <label style={styles.formLabel}>Phone Number</label>
               <input
                 type="tel"
+                name="phoneNumber"
                 value={studentData.phoneNumber}
-                onChange={(e) => setStudentData({...studentData, phoneNumber: e.target.value})}
+                onChange={handleInputChange}
                 placeholder="+1234567890"
                 style={styles.input}
+                disabled={loading}
+                autoComplete="tel"
               />
             </div>
             
             <div style={styles.formGroup}>
               <label style={styles.formLabel}>Status</label>
               <select
+                name="active"
                 value={studentData.active}
-                onChange={(e) => setStudentData({...studentData, active: e.target.value === 'true'})}
+                onChange={handleInputChange}
                 style={styles.select}
+                disabled={loading}
               >
-                <option value="true">Active</option>
-                <option value="false">Inactive</option>
+                <option value={true}>Active</option>
+                <option value={false}>Inactive</option>
               </select>
             </div>
           </div>
@@ -871,7 +958,7 @@ const CreateStudentWithSubjects = () => {
                         checked={selectedSubjects.includes(subject.id)}
                         onChange={() => toggleSubjectSelection(subject.id)}
                         style={styles.checkbox}
-                        disabled={subject.isCore}
+                        disabled={subject.isCore || loading}
                       />
                       <div style={styles.subjectCheckboxContent}>
                         <span style={styles.subjectName}>{subject.name}</span>
@@ -1060,13 +1147,19 @@ const styles = {
     borderBottom: '2px solid #D69E2E',
     paddingBottom: '8px'
   },
-  // Image Upload Styles
+  // Image Upload Styles - UPDATED
   imageUploadSection: {
     marginBottom: '32px',
     padding: '20px',
     backgroundColor: '#F5F7FA',
     borderRadius: '8px',
     border: '1px solid #E2E8F0'
+  },
+  imageUploadHelp: {
+    color: '#718096',
+    fontSize: '14px',
+    marginBottom: '16px',
+    fontStyle: 'italic'
   },
   imageUploadContainer: {
     display: 'flex',
@@ -1082,7 +1175,8 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    border: '2px dashed #CBD5E0'
+    border: '2px dashed #CBD5E0',
+    flexShrink: 0
   },
   imagePreview: {
     width: '100%',
@@ -1119,9 +1213,14 @@ const styles = {
     gap: '8px',
     justifyContent: 'center',
     transition: 'all 0.2s',
-    '&:hover': {
+    width: 'fit-content',
+    '&:hover:not(:disabled)': {
       backgroundColor: '#2C5282',
       transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.5,
+      cursor: 'not-allowed'
     }
   },
   removeImageButton: {
@@ -1138,15 +1237,20 @@ const styles = {
     gap: '8px',
     justifyContent: 'center',
     transition: 'all 0.2s',
-    '&:hover': {
+    width: 'fit-content',
+    '&:hover:not(:disabled)': {
       backgroundColor: '#FEB2B2',
       transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.5,
+      cursor: 'not-allowed'
     }
   },
   imageUploadInfo: {
     color: '#718096',
     fontSize: '12px',
-    textAlign: 'center'
+    lineHeight: '1.5'
   },
   formGrid: {
     display: 'grid',
@@ -1180,6 +1284,10 @@ const styles = {
       outline: 'none',
       borderColor: '#3182CE',
       boxShadow: '0 0 0 3px rgba(49, 130, 206, 0.1)'
+    },
+    '&:disabled': {
+      backgroundColor: '#F5F7FA',
+      cursor: 'not-allowed'
     }
   },
   inputError: {
@@ -1201,6 +1309,10 @@ const styles = {
       outline: 'none',
       borderColor: '#3182CE',
       boxShadow: '0 0 0 3px rgba(49, 130, 206, 0.1)'
+    },
+    '&:disabled': {
+      backgroundColor: '#F5F7FA',
+      cursor: 'not-allowed'
     }
   },
   errorText: {

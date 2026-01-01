@@ -1,4 +1,5 @@
-// routes/analytics.js - REAL DATA ENDPOINTS
+
+// routes/analytics.js - UPDATED VERSION WITHOUT TEST STATUS AND PASS RATES
 const express = require('express');
 const mongoose = require('mongoose');
 const router = express.Router();
@@ -8,234 +9,15 @@ const User = require('../models/User');
 const Class = require('../models/Class');
 const Subject = require('../models/Subject');
 const { auth } = require('../middleware/auth');
-const { teacherOnly } = require('../middleware/permissions');
 
-// Helper function to get class name from ID or name
-const getClassName = async (classValue) => {
-  if (!classValue) return 'Unknown Class';
-  
-  try {
-    if (mongoose.Types.ObjectId.isValid(classValue)) {
-      const classDoc = await Class.findById(classValue).select('name shortName level').lean();
-      if (classDoc) {
-        return classDoc.name || classDoc.shortName || classDoc.level || 'Unknown Class';
-      }
-    } else if (typeof classValue === 'object' && classValue !== null) {
-      // If classValue is a populated object
-      return classValue.name || classValue.shortName || classValue.level || 'Unknown Class';
-    }
-    return String(classValue);
-  } catch (error) {
-    console.error('Error getting class name:', error);
-    return String(classValue);
-  }
-};
+// ==================== SIMPLE ANALYTICS ENDPOINTS ====================
 
-// ==================== ADMIN ANALYTICS ENDPOINTS ====================
-
-// GET INSTITUTIONAL OVERVIEW - MAIN DASHBOARD ENDPOINT
+// GET SIMPLE OVERVIEW - MAIN DASHBOARD ENDPOINT (UPDATED)
 router.get('/overview', auth, async (req, res) => {
   try {
-    console.log('📊 GET /api/analytics/overview - Admin overview requested by:', req.user.username);
+    console.log('📊 GET /api/analytics/overview - Requested by:', req.user.username);
 
-    // Only admins and super_admins can access institutional overview
-    if (!['admin', 'super_admin'].includes(req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        error: 'Admin access required for institutional overview'
-      });
-    }
-
-    // Get counts from database
-    const [
-      totalStudents,
-      totalTeachers,
-      totalClasses,
-      totalTests,
-      totalExams,
-      totalResults,
-      activeUsers,
-      totalRevenue,
-      recentTests
-    ] = await Promise.all([
-      // Total Students
-      User.countDocuments({ role: 'student', isActive: true }),
-      
-      // Total Teachers
-      User.countDocuments({ role: 'teacher', isActive: true }),
-      
-      // Total Classes
-      Class.countDocuments({ isActive: true }),
-      
-      // Total Tests (non-exam)
-      Test.countDocuments({ 
-        type: { $ne: 'exam' },
-        isActive: true 
-      }),
-      
-      // Total Exams
-      Test.countDocuments({ 
-        type: 'exam',
-        isActive: true 
-      }),
-      
-      // Total Results
-      Result.countDocuments({ isActive: true }),
-      
-      // Active Users (users who have logged in within last 30 days)
-      User.countDocuments({ 
-        lastLogin: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
-      }),
-      
-      // Total Revenue (you'll need to implement your revenue model)
-      // For now, calculate from student fees
-      (async () => {
-        const students = await User.find({ role: 'student', isActive: true }).select('class').lean();
-        const classFees = {
-          'JSS 1': 50000, 'JSS 2': 55000, 'JSS 3': 60000,
-          'SSS 1': 65000, 'SSS 2': 70000, 'SSS 3': 75000
-        };
-        
-        let total = 0;
-        for (const student of students) {
-          if (student.class) {
-            const classDoc = await Class.findById(student.class).select('name').lean();
-            const className = classDoc?.name;
-            if (className && classFees[className]) {
-              total += classFees[className] * 3; // 3 terms per year
-            } else {
-              total += 60000 * 3; // Default fee
-            }
-          }
-        }
-        return total;
-      })(),
-      
-      // Recent Tests (for the table)
-      Test.find({ isActive: true })
-        .populate('class', 'name')
-        .populate('createdBy', 'username name')
-        .sort({ createdAt: -1 })
-        .limit(10)
-        .lean()
-    ]);
-
-    // Calculate average score from all results
-    const allResults = await Result.find({ isActive: true }).select('score totalMarks').lean();
-    const averageScore = allResults.length > 0 
-      ? (allResults.reduce((sum, r) => sum + (r.score || 0), 0) / allResults.length) 
-      : 0;
-
-    // Calculate pass rate
-    const passingResults = allResults.filter(r => {
-      const score = r.score || 0;
-      const totalMarks = r.totalMarks || 100;
-      return (score / totalMarks) * 100 >= 50;
-    });
-    const passRate = allResults.length > 0 
-      ? (passingResults.length / allResults.length) * 100 
-      : 0;
-
-    // Calculate attendance rate (you'll need attendance data)
-    // For now, use a calculated value based on results
-    const attendanceRate = allResults.length > 0 
-      ? Math.min(95, Math.max(75, 100 - (allResults.length / totalStudents) * 5))
-      : 85;
-
-    // Calculate completion rate (tests with results vs total tests)
-    const completedTests = await Test.countDocuments({
-      isActive: true,
-      _id: { $in: [...new Set(allResults.map(r => r.testId?.toString()).filter(Boolean))] }
-    });
-    const completionRate = (totalTests + totalExams) > 0 
-      ? (completedTests / (totalTests + totalExams)) * 100 
-      : 0;
-
-    // Format recent tests for frontend
-    const formattedRecentTests = await Promise.all(recentTests.map(async (test) => {
-      // Get test results for this test
-      const testResults = await Result.find({ testId: test._id, isActive: true }).lean();
-      
-      // Calculate average score for this test
-      const testScores = testResults.map(r => r.score || 0);
-      const testAverageScore = testScores.length > 0 
-        ? testScores.reduce((sum, score) => sum + score, 0) / testScores.length 
-        : 0;
-
-      // Calculate completion rate for this test
-      const totalStudentsInClass = await User.countDocuments({ 
-        class: test.class?._id || test.class,
-        role: 'student',
-        isActive: true 
-      });
-      const completionRate = totalStudentsInClass > 0 
-        ? (testResults.length / totalStudentsInClass) * 100 
-        : 0;
-
-      return {
-        id: test._id,
-        title: test.title,
-        subject: test.subject,
-        class: test.class?.name || test.class,
-        type: test.type || 'test',
-        averageScore: parseFloat(testAverageScore.toFixed(1)),
-        completionRate: parseFloat(completionRate.toFixed(1)),
-        status: test.status || 'completed',
-        createdAt: test.createdAt,
-        totalMarks: test.totalMarks || 100,
-        passingMarks: test.passingMarks || 50
-      };
-    }));
-
-    const response = {
-      success: true,
-      overview: {
-        totalStudents,
-        totalTeachers,
-        totalClasses,
-        totalTests,
-        totalExams,
-        totalResults,
-        activeUsers,
-        averageScore: parseFloat(averageScore.toFixed(2)),
-        passRate: parseFloat(passRate.toFixed(2)),
-        attendanceRate: parseFloat(attendanceRate.toFixed(2)),
-        completionRate: parseFloat(completionRate.toFixed(2)),
-        revenue: totalRevenue
-      },
-      recentTests: formattedRecentTests,
-      summary: {
-        studentTeacherRatio: totalTeachers > 0 ? parseFloat((totalStudents / totalTeachers).toFixed(1)) : 0,
-        testsPerStudent: totalStudents > 0 ? parseFloat(((totalTests + totalExams) / totalStudents).toFixed(1)) : 0,
-        revenuePerStudent: totalStudents > 0 ? parseFloat((totalRevenue / totalStudents).toFixed(0)) : 0,
-        resultsPerTest: (totalTests + totalExams) > 0 ? parseFloat((totalResults / (totalTests + totalExams)).toFixed(1)) : 0
-      }
-    };
-
-    console.log('✅ Institutional overview generated:', {
-      students: totalStudents,
-      teachers: totalTeachers,
-      tests: totalTests + totalExams,
-      results: totalResults
-    });
-
-    res.json(response);
-
-  } catch (error) {
-    console.error('❌ Error in institutional overview:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Server error generating institutional overview',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-});
-
-// GET PERFORMANCE TREND DATA
-router.get('/performance-trend', auth, async (req, res) => {
-  try {
-    const { months = 12 } = req.query;
-
+    // Only admins can access institutional overview
     if (!['admin', 'super_admin'].includes(req.user.role)) {
       return res.status(403).json({
         success: false,
@@ -243,8 +25,764 @@ router.get('/performance-trend', auth, async (req, res) => {
       });
     }
 
-    const trendData = [];
+    // Get REAL counts from database
+    const [
+      totalStudents,
+      totalTeachers,
+      totalClasses,
+      totalTests,
+      totalResults
+    ] = await Promise.all([
+      User.countDocuments({ 
+        role: 'student',
+        $or: [
+          { isActive: true },
+          { active: true },
+          { isActive: { $exists: false } },
+          { active: { $exists: false } }
+        ]
+      }),
+      
+      User.countDocuments({ 
+        role: 'teacher',
+        $or: [
+          { isActive: true },
+          { active: true },
+          { isActive: { $exists: false } },
+          { active: { $exists: false } }
+        ]
+      }),
+      
+      Class.countDocuments({
+        $or: [
+          { isActive: true },
+          { active: true },
+          { isActive: { $exists: false } },
+          { active: { $exists: false } }
+        ]
+      }),
+      
+      Test.countDocuments({
+        $or: [
+          { isActive: true },
+          { active: true },
+          { isActive: { $exists: false } },
+          { active: { $exists: false } }
+        ]
+      }),
+      
+      Result.countDocuments({
+        $or: [
+          { isActive: true },
+          { active: true },
+          { isActive: { $exists: false } },
+          { active: { $exists: false } }
+        ]
+      })
+    ]);
+
+    // Calculate ACTIVE users
+    const activeUsers = await User.countDocuments({
+      lastLogin: { 
+        $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+        $ne: null 
+      },
+      $or: [
+        { isActive: true },
+        { active: true },
+        { isActive: { $exists: false } },
+        { active: { $exists: false } }
+      ]
+    });
+
+    // Get all results with marks data for calculations
+    const allResults = await Result.find({
+      $or: [
+        { isActive: true },
+        { active: true },
+        { isActive: { $exists: false } },
+        { active: { $exists: false } }
+      ]
+    })
+    .select('score totalMarks')
+    .lean();
+
+    // Calculate average score
+    let averageScore = 0;
+    let totalScoreSum = 0;
+    let totalMarksSum = 0;
+    
+    if (allResults.length > 0) {
+      // Calculate sums
+      allResults.forEach(result => {
+        const score = result.score || 0;
+        const totalMarks = result.totalMarks || 100;
+        
+        totalScoreSum += score;
+        totalMarksSum += totalMarks;
+      });
+      
+      averageScore = totalMarksSum > 0 ? (totalScoreSum / totalMarksSum) * 100 : 0;
+    }
+
+    // Get average score in format like "18/20" or "45/60"
+    const averageScoreFormatted = await getAverageScoreFormatted();
+
+    // Calculate COMPLETION RATE
+    const completedTests = await Test.aggregate([
+      {
+        $match: {
+          $or: [
+            { isActive: true },
+            { active: true },
+            { isActive: { $exists: false } },
+            { active: { $exists: false } }
+          ]
+        }
+      },
+      {
+        $lookup: {
+          from: 'results',
+          let: { testId: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ['$testId', '$$testId'] },
+                $or: [
+                  { isActive: true },
+                  { active: true },
+                  { isActive: { $exists: false } },
+                  { active: { $exists: false } }
+                ]
+              }
+            },
+            { $count: 'count' }
+          ],
+          as: 'resultCount'
+        }
+      },
+      {
+        $match: {
+          $or: [
+            { 'resultCount.0.count': { $exists: true, $gt: 0 } },
+            { results: { $exists: true, $not: { $size: 0 } } }
+          ]
+        }
+      },
+      { $count: 'completedCount' }
+    ]);
+
+    const completionRate = totalTests > 0 
+      ? ((completedTests[0]?.completedCount || 0) / totalTests) * 100 
+      : 0;
+
+    // Get recent tests (for the table) - UPDATED WITHOUT PASS RATE
+    const recentTests = await Test.find({
+      $or: [
+        { isActive: true },
+        { active: true },
+        { isActive: { $exists: false } },
+        { active: { $exists: false } }
+      ]
+    })
+      .populate({
+        path: 'class',
+        select: 'name shortName level',
+        model: 'Class'
+      })
+      .populate('createdBy', 'username name')
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
+
+    // Format recent tests WITHOUT PASS RATE
+    const formattedRecentTests = [];
+    for (const test of recentTests) {
+      // Get results for this test
+      const testResults = await Result.find({ 
+        testId: test._id,
+        $or: [
+          { isActive: true },
+          { active: true },
+          { isActive: { $exists: false } },
+          { active: { $exists: false } }
+        ]
+      }).lean();
+      
+      // Calculate average score in format "X/Y"
+      let testAverageScore = 0;
+      let testTotalMarks = test.totalMarks || 100;
+      let testAverageScoreFormatted = '0/100';
+      
+      if (testResults.length > 0) {
+        const totalTestScore = testResults.reduce((sum, r) => sum + (r.score || 0), 0);
+        const avgScore = totalTestScore / testResults.length;
+        testAverageScore = (avgScore / testTotalMarks) * 100;
+        
+        // Format as "average/total" (e.g., "45/60")
+        const averageActualScore = Math.round(avgScore);
+        testAverageScoreFormatted = `${averageActualScore}/${testTotalMarks}`;
+      }
+
+      // Get proper class name
+      let className = 'N/A';
+      if (test.class) {
+        if (typeof test.class === 'object' && test.class !== null) {
+          className = test.class.name || test.class.shortName || test.class.level || 'N/A';
+        } else if (typeof test.class === 'string') {
+          try {
+            const classDoc = await Class.findById(test.class).select('name shortName level').lean();
+            if (classDoc) {
+              className = classDoc.name || classDoc.shortName || classDoc.level || test.class;
+            } else {
+              className = test.class;
+            }
+          } catch (err) {
+            className = test.class;
+          }
+        }
+      }
+
+      // Determine test type from title
+      let testType = 'Test';
+      if (test.title) {
+        const titleLower = test.title.toLowerCase();
+        if (titleLower.includes('exam') || titleLower === 'examination') {
+          testType = 'Exam';
+        } else if (titleLower.includes('ca') || titleLower.includes('continuous')) {
+          testType = 'CA';
+        } else if (titleLower.includes('assignment')) {
+          testType = 'Assignment';
+        } else if (titleLower.includes('quiz')) {
+          testType = 'Quiz';
+        }
+      }
+
+      // Get REAL status from test
+      let testStatus = test.status || 'draft';
+      const validStatuses = ['draft', 'approved', 'scheduled', 'active', 'completed', 'cancelled'];
+      if (!validStatuses.includes(testStatus)) {
+        testStatus = 'draft';
+      }
+
+      formattedRecentTests.push({
+        id: test._id,
+        title: test.title || 'Untitled Test',
+        subject: test.subject || 'General',
+        class: className,
+        type: testType,
+        averageScore: parseFloat(testAverageScore.toFixed(1)),
+        averageScoreFormatted: testAverageScoreFormatted,
+        totalMarks: testTotalMarks,
+        status: testStatus, // REAL status from test
+        createdAt: test.createdAt,
+        createdBy: test.createdBy?.name || test.createdBy?.username || 'Unknown'
+      });
+    }
+
+    // Prepare response WITHOUT PASS RATE
+    const response = {
+      success: true,
+      overview: {
+        totalStudents,
+        totalTeachers,
+        totalClasses,
+        totalTests,
+        totalResults,
+        activeUsers,
+        averageScore: parseFloat(averageScore.toFixed(1)),
+        averageScoreFormatted: averageScoreFormatted,
+        completionRate: parseFloat(completionRate.toFixed(1))
+      },
+      recentTests: formattedRecentTests,
+      summary: {
+        studentTeacherRatio: totalTeachers > 0 ? parseFloat((totalStudents / totalTeachers).toFixed(1)) : 0,
+        averageTestScore: averageScoreFormatted,
+        resultsPerStudent: totalStudents > 0 ? parseFloat((totalResults / totalStudents).toFixed(1)) : 0,
+        totalScoreSum: totalScoreSum,
+        totalMarksSum: totalMarksSum
+      },
+      timestamp: new Date().toISOString(),
+      dataStatus: 'Real data from database'
+    };
+
+    console.log('✅ Overview generated successfully:', {
+      students: totalStudents,
+      teachers: totalTeachers,
+      classes: totalClasses,
+      tests: totalTests,
+      results: totalResults,
+      averageScoreFormatted: averageScoreFormatted
+    });
+
+    res.json(response);
+
+  } catch (error) {
+    console.error('❌ Error in overview:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error generating overview',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// NEW HELPER FUNCTION: Get average score in formatted string
+async function getAverageScoreFormatted() {
+  try {
+    // Get all tests that have results
+    const testsWithResults = await Test.aggregate([
+      {
+        $match: {
+          $or: [
+            { isActive: true },
+            { active: true },
+            { isActive: { $exists: false } },
+            { active: { $exists: false } }
+          ]
+        }
+      },
+      {
+        $lookup: {
+          from: 'results',
+          let: { testId: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ['$testId', '$$testId'] },
+                $or: [
+                  { isActive: true },
+                  { active: true },
+                  { isActive: { $exists: false } },
+                  { active: { $exists: false } }
+                ]
+              }
+            }
+          ],
+          as: 'testResults'
+        }
+      },
+      {
+        $match: {
+          testResults: { $ne: [] }
+        }
+      },
+      {
+        $project: {
+          title: 1,
+          totalMarks: 1,
+          testResults: 1
+        }
+      }
+    ]);
+
+    if (testsWithResults.length === 0) {
+      return '0/100';
+    }
+
+    // Calculate weighted average
+    let totalWeightedScore = 0;
+    let totalWeightedMarks = 0;
+
+    for (const test of testsWithResults) {
+      const testTotalMarks = test.totalMarks || 100;
+      const testResults = test.testResults || [];
+      
+      if (testResults.length > 0) {
+        const testTotalScore = testResults.reduce((sum, r) => sum + (r.score || 0), 0);
+        const testAverageScore = testTotalScore / testResults.length;
+        
+        // Weight by number of results
+        const weight = testResults.length;
+        totalWeightedScore += testAverageScore * weight;
+        totalWeightedMarks += testTotalMarks * weight;
+      }
+    }
+
+    if (totalWeightedMarks === 0) {
+      return '0/100';
+    }
+
+    // Calculate overall average
+    const overallAverageScore = totalWeightedScore / totalWeightedMarks;
+    
+    // Find most common total marks (20 for CA, 60 for Exam, etc.)
+    const marksFrequency = {};
+    testsWithResults.forEach(test => {
+      const marks = test.totalMarks || 100;
+      marksFrequency[marks] = (marksFrequency[marks] || 0) + 1;
+    });
+    
+    // Find the most frequent total marks
+    let mostCommonMarks = 100;
+    let maxFrequency = 0;
+    for (const [marks, freq] of Object.entries(marksFrequency)) {
+      if (freq > maxFrequency) {
+        maxFrequency = freq;
+        mostCommonMarks = parseInt(marks);
+      }
+    }
+
+    // Calculate average score based on most common marks
+    const averageActualScore = Math.round(overallAverageScore * mostCommonMarks);
+    
+    return `${averageActualScore}/${mostCommonMarks}`;
+  } catch (error) {
+    console.error('Error calculating formatted average score:', error);
+    return '0/100';
+  }
+}
+
+// GET RECENT TESTS WITH DETAILED SCORES - UPDATED WITHOUT PASS RATES
+router.get('/recent-tests-detailed', auth, async (req, res) => {
+  try {
+    if (!['admin', 'super_admin'].includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Admin access required'
+      });
+    }
+
+    const { limit = 10 } = req.query;
+
+    // Get recent tests with detailed information
+    const recentTests = await Test.find({
+      $or: [
+        { isActive: true },
+        { active: true },
+        { isActive: { $exists: false } },
+        { active: { $exists: false } }
+      ]
+    })
+      .populate({
+        path: 'class',
+        select: 'name shortName level',
+        model: 'Class'
+      })
+      .populate('createdBy', 'username name')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .lean();
+
+    // Format tests WITHOUT pass rates
+    const detailedTests = await Promise.all(recentTests.map(async (test) => {
+      // Get results for this test
+      const testResults = await Result.find({ 
+        testId: test._id,
+        $or: [
+          { isActive: true },
+          { active: true },
+          { isActive: { $exists: false } },
+          { active: { $exists: false } }
+        ]
+      }).lean();
+      
+      // Calculate score metrics WITHOUT pass rate
+      let stats = {
+        totalStudents: testResults.length,
+        averageScore: 0,
+        highestScore: 0,
+        lowestScore: 0,
+        averageScoreFormatted: '0/' + (test.totalMarks || 100)
+      };
+      
+      if (testResults.length > 0) {
+        const scores = testResults.map(r => r.score || 0);
+        const totalMarks = test.totalMarks || 100;
+        const totalScore = scores.reduce((sum, score) => sum + score, 0);
+        
+        stats.averageScore = (totalScore / scores.length / totalMarks) * 100;
+        stats.highestScore = Math.max(...scores);
+        stats.lowestScore = Math.min(...scores);
+        
+        // Format average score as "X/Y"
+        const averageActualScore = Math.round(totalScore / scores.length);
+        stats.averageScoreFormatted = `${averageActualScore}/${totalMarks}`;
+      }
+
+      // Determine test type
+      let testType = 'Test';
+      if (test.title) {
+        const titleLower = test.title.toLowerCase();
+        if (titleLower.includes('exam') || titleLower === 'examination') {
+          testType = 'Exam';
+        } else if (titleLower.includes('ca') || titleLower.includes('continuous')) {
+          testType = 'CA';
+        } else if (titleLower.includes('assignment')) {
+          testType = 'Assignment';
+        } else if (titleLower.includes('quiz')) {
+          testType = 'Quiz';
+        }
+      }
+
+      // Get class name
+      let className = 'N/A';
+      if (test.class) {
+        if (typeof test.class === 'object' && test.class !== null) {
+          className = test.class.name || test.class.shortName || test.class.level || 'N/A';
+        } else if (typeof test.class === 'string') {
+          try {
+            const classDoc = await Class.findById(test.class).select('name shortName level').lean();
+            if (classDoc) {
+              className = classDoc.name || classDoc.shortName || classDoc.level || test.class;
+            } else {
+              className = test.class;
+            }
+          } catch (err) {
+            className = test.class;
+          }
+        }
+      }
+
+      // Get REAL status from test
+      let testStatus = test.status || 'draft';
+      const validStatuses = ['draft', 'approved', 'scheduled', 'active', 'completed', 'cancelled'];
+      if (!validStatuses.includes(testStatus)) {
+        testStatus = 'draft';
+      }
+
+      return {
+        id: test._id,
+        title: test.title || 'Untitled Test',
+        subject: test.subject || 'General',
+        class: className,
+        type: testType,
+        totalMarks: test.totalMarks || 100,
+        status: testStatus, // REAL status
+        createdAt: test.createdAt,
+        createdBy: test.createdBy?.name || test.createdBy?.username || 'Unknown',
+        stats: stats
+      };
+    }));
+
+    res.json({
+      success: true,
+      count: detailedTests.length,
+      tests: detailedTests
+    });
+
+  } catch (error) {
+    console.error('Recent tests detailed error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error fetching recent tests'
+    });
+  }
+});
+
+// GET TEST SCORES SUMMARY - UPDATED WITHOUT PASS RATES
+router.get('/test-scores-summary', auth, async (req, res) => {
+  try {
+    if (!['admin', 'super_admin'].includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Admin access required'
+      });
+    }
+
+    // Get all tests with results
+    const testsWithResults = await Test.aggregate([
+      {
+        $match: {
+          $or: [
+            { isActive: true },
+            { active: true },
+            { isActive: { $exists: false } },
+            { active: { $exists: false } }
+          ]
+        }
+      },
+      {
+        $lookup: {
+          from: 'results',
+          let: { testId: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ['$testId', '$$testId'] },
+                $or: [
+                  { isActive: true },
+                  { active: true },
+                  { isActive: { $exists: false } },
+                  { active: { $exists: false } }
+                ]
+              }
+            }
+          ],
+          as: 'results'
+        }
+      },
+      {
+        $match: {
+          results: { $ne: [] }
+        }
+      },
+      {
+        $project: {
+          title: 1,
+          subject: 1,
+          class: 1,
+          type: { $literal: '' },
+          totalMarks: 1,
+          status: 1,
+          createdAt: 1,
+          results: 1,
+          resultCount: { $size: '$results' }
+        }
+      },
+      { $sort: { createdAt: -1 } }
+    ]);
+
+    // Process each test WITHOUT pass rates
+    const testSummaries = await Promise.all(testsWithResults.map(async (test) => {
+      // Determine test type from title
+      let testType = 'Test';
+      if (test.title) {
+        const titleLower = test.title.toLowerCase();
+        if (titleLower.includes('exam') || titleLower === 'examination') {
+          testType = 'Exam';
+        } else if (titleLower.includes('ca') || titleLower.includes('continuous')) {
+          testType = 'CA';
+        } else if (titleLower.includes('assignment')) {
+          testType = 'Assignment';
+        } else if (titleLower.includes('quiz')) {
+          testType = 'Quiz';
+        }
+      }
+
+      // Get class name
+      let className = 'N/A';
+      if (test.class) {
+        if (mongoose.isValidObjectId(test.class)) {
+          const classDoc = await Class.findById(test.class).select('name shortName level').lean();
+          if (classDoc) {
+            className = classDoc.name || classDoc.shortName || classDoc.level || 'N/A';
+          }
+        } else if (typeof test.class === 'string') {
+          className = test.class;
+        }
+      }
+
+      // Calculate score statistics WITHOUT pass rates
+      const results = test.results || [];
+      const totalMarks = test.totalMarks || 100;
+      
+      let stats = {
+        totalStudents: results.length,
+        averageScore: 0,
+        highestScore: 0,
+        lowestScore: 0,
+        averageScoreFormatted: '0/' + totalMarks
+      };
+
+      if (results.length > 0) {
+        const scores = results.map(r => r.score || 0);
+        const totalScore = scores.reduce((sum, score) => sum + score, 0);
+        
+        stats.averageScore = (totalScore / scores.length / totalMarks) * 100;
+        stats.highestScore = Math.max(...scores);
+        stats.lowestScore = Math.min(...scores);
+        
+        // Format average score as "X/Y"
+        const averageActualScore = Math.round(totalScore / scores.length);
+        stats.averageScoreFormatted = `${averageActualScore}/${totalMarks}`;
+      }
+
+      // Get REAL status
+      let testStatus = test.status || 'draft';
+      const validStatuses = ['draft', 'approved', 'scheduled', 'active', 'completed', 'cancelled'];
+      if (!validStatuses.includes(testStatus)) {
+        testStatus = 'draft';
+      }
+
+      return {
+        id: test._id,
+        title: test.title || 'Untitled Test',
+        subject: test.subject || 'General',
+        class: className,
+        type: testType,
+        totalMarks: totalMarks,
+        status: testStatus, // REAL status
+        createdAt: test.createdAt,
+        stats: stats
+      };
+    }));
+
+    // Group by test type
+    const byType = {
+      Exam: testSummaries.filter(t => t.type === 'Exam'),
+      CA: testSummaries.filter(t => t.type === 'CA'),
+      Test: testSummaries.filter(t => t.type === 'Test'),
+      Assignment: testSummaries.filter(t => t.type === 'Assignment'),
+      Quiz: testSummaries.filter(t => t.type === 'Quiz')
+    };
+
+    // Calculate overall statistics WITHOUT pass rates
+    const overallStats = {
+      totalTests: testSummaries.length,
+      totalStudents: testSummaries.reduce((sum, test) => sum + test.stats.totalStudents, 0),
+      averageScoreFormatted: calculateOverallAverageFormatted(testSummaries)
+    };
+
+    res.json({
+      success: true,
+      summary: {
+        byType: byType,
+        overall: overallStats,
+        recentTests: testSummaries.slice(0, 10)
+      }
+    });
+
+  } catch (error) {
+    console.error('Test scores summary error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error fetching test scores summary'
+    });
+  }
+});
+
+// Helper function to calculate overall average formatted
+function calculateOverallAverageFormatted(tests) {
+  if (tests.length === 0) return '0/100';
+  
+  let totalWeightedScore = 0;
+  let totalWeightedMarks = 0;
+  
+  tests.forEach(test => {
+    const testStats = test.stats;
+    if (testStats.totalStudents > 0) {
+      const averageScore = parseInt(testStats.averageScoreFormatted.split('/')[0]);
+      const totalMarks = test.totalMarks || 100;
+      const weight = testStats.totalStudents;
+      
+      totalWeightedScore += averageScore * weight;
+      totalWeightedMarks += totalMarks * weight;
+    }
+  });
+  
+  if (totalWeightedMarks === 0) return '0/100';
+  
+  const overallAverage = Math.round(totalWeightedScore / tests.length);
+  const mostCommonMarks = 100;
+  
+  return `${overallAverage}/${mostCommonMarks}`;
+}
+
+// GET SIMPLE PERFORMANCE TREND (UPDATED WITHOUT PASS RATES)
+router.get('/performance-trend', auth, async (req, res) => {
+  try {
+    // Only admins can access
+    if (!['admin', 'super_admin'].includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Admin access required'
+      });
+    }
+
+    const { months = 6 } = req.query;
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const trendData = [];
     
     const now = new Date();
     
@@ -258,17 +796,21 @@ router.get('/performance-trend', auth, async (req, res) => {
           $gte: startDate,
           $lte: endDate
         },
-        isActive: true
+        $or: [
+          { isActive: true },
+          { active: true },
+          { isActive: { $exists: false } },
+          { active: { $exists: false } }
+        ]
       }).lean();
 
-      // Calculate average score for the month
-      const scores = monthResults.map(r => r.score || 0);
-      const averageScore = scores.length > 0 
-        ? scores.reduce((sum, score) => sum + score, 0) / scores.length 
-        : 0;
-
-      // Get target (you can implement your own target logic)
-      const targetScore = 70 + (i * 1.5); // Example: increasing target
+      // Calculate average score
+      let averageScore = 0;
+      if (monthResults.length > 0) {
+        const totalScore = monthResults.reduce((sum, r) => sum + (r.score || 0), 0);
+        const totalMarks = monthResults.reduce((sum, r) => sum + (r.totalMarks || 100), 0);
+        averageScore = totalMarks > 0 ? (totalScore / totalMarks) * 100 : 0;
+      }
 
       const monthIndex = (now.getMonth() - i + 12) % 12;
       const year = now.getFullYear() - Math.floor((now.getMonth() - i) / 12);
@@ -276,20 +818,23 @@ router.get('/performance-trend', auth, async (req, res) => {
       trendData.push({
         month: `${monthNames[monthIndex]} ${year}`,
         score: parseFloat(averageScore.toFixed(1)),
-        target: parseFloat(targetScore.toFixed(1)),
-        testsTaken: monthResults.length,
-        date: startDate.toISOString().split('T')[0]
+        testsTaken: monthResults.length
       });
     }
 
+    // Filter out zero scores for summary calculations
+    const validScores = trendData.filter(d => d.score > 0).map(d => d.score);
+    
     res.json({
       success: true,
       trendData,
       summary: {
         currentScore: trendData[trendData.length - 1]?.score || 0,
-        highestScore: Math.max(...trendData.map(d => d.score)),
-        lowestScore: Math.min(...trendData.map(d => d.score)),
-        averageScore: parseFloat((trendData.reduce((sum, d) => sum + d.score, 0) / trendData.length).toFixed(1))
+        highestScore: validScores.length > 0 ? Math.max(...validScores) : 0,
+        lowestScore: validScores.length > 0 ? Math.min(...validScores) : 0,
+        averageScore: validScores.length > 0 
+          ? parseFloat((validScores.reduce((sum, s) => sum + s, 0) / validScores.length).toFixed(1))
+          : 0
       }
     });
 
@@ -302,8 +847,8 @@ router.get('/performance-trend', auth, async (req, res) => {
   }
 });
 
-// GET SUBJECT DISTRIBUTION DATA
-router.get('/subject-distribution', auth, async (req, res) => {
+// GET SIMPLE SUBJECT PERFORMANCE (UPDATED WITHOUT PASS RATES)
+router.get('/subject-performance', auth, async (req, res) => {
   try {
     if (!['admin', 'super_admin'].includes(req.user.role)) {
       return res.status(403).json({
@@ -312,717 +857,218 @@ router.get('/subject-distribution', auth, async (req, res) => {
       });
     }
 
-    // Get all subjects
-    const subjects = await Subject.find({ isActive: true }).select('name code category').lean();
-    
-    const distributionData = await Promise.all(subjects.map(async (subject) => {
-      // Get results for this subject
-      const subjectResults = await Result.find({ 
-        subject: subject.name,
-        isActive: true 
-      }).lean();
+    // Get all results grouped by subject
+    const subjectResults = await Result.aggregate([
+      { 
+        $match: { 
+          subject: { $exists: true, $ne: null, $ne: '' },
+          $or: [
+            { isActive: true },
+            { active: true },
+            { isActive: { $exists: false } },
+            { active: { $exists: false } }
+          ]
+        } 
+      },
+      { $group: {
+        _id: '$subject',
+        averageScore: { $avg: '$score' },
+        totalStudents: { $addToSet: '$userId' },
+        totalTests: { $sum: 1 },
+        highestScore: { $max: '$score' },
+        lowestScore: { $min: '$score' }
+      }},
+      { $sort: { averageScore: -1 } },
+      { $limit: 10 }
+    ]);
 
-      // Calculate average score
-      const scores = subjectResults.map(r => r.score || 0);
-      const averageScore = scores.length > 0 
-        ? scores.reduce((sum, score) => sum + score, 0) / scores.length 
-        : 0;
-
-      // Count unique students
-      const uniqueStudents = [...new Set(subjectResults.map(r => r.userId?.toString()).filter(Boolean))];
-
-      return {
-        subject: subject.name,
-        code: subject.code,
-        category: subject.category,
-        value: parseFloat(averageScore.toFixed(1)),
-        totalStudents: uniqueStudents.length,
-        totalTests: subjectResults.length,
-        color: getSubjectColor(subject.name)
-      };
-    }));
-
-    // Sort by score descending
-    distributionData.sort((a, b) => b.value - a.value);
-
-    res.json({
-      success: true,
-      distributionData,
-      summary: {
-        totalSubjects: distributionData.length,
-        topSubject: distributionData[0]?.subject || 'N/A',
-        weakestSubject: distributionData[distributionData.length - 1]?.subject || 'N/A',
-        averageAcrossSubjects: parseFloat((distributionData.reduce((sum, d) => sum + d.value, 0) / distributionData.length).toFixed(1))
-      }
-    });
-
-  } catch (error) {
-    console.error('Subject distribution error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Server error generating subject distribution'
-    });
-  }
-});
-
-// Helper function for subject colors
-function getSubjectColor(subjectName) {
-  const colorMap = {
-    'Mathematics': '#4B5320',    // Army Green
-    'English': '#00FF00',        // Bright Green
-    'Science': '#FFA500',        // Orange
-    'History': '#6B8E23',        // Light Army
-    'Geography': '#28A745',      // Success Green
-    'Computer Science': '#17A2B8' // Info Blue
-  };
-  
-  return colorMap[subjectName] || '#4B5320'; // Default to Army Green
-}
-
-// GET CLASS DISTRIBUTION DATA
-router.get('/class-distribution', auth, async (req, res) => {
-  try {
-    if (!['admin', 'super_admin'].includes(req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        error: 'Admin access required'
-      });
-    }
-
-    const allClasses = await Class.find({ isActive: true })
-      .sort({ level: 1, name: 1 })
-      .lean();
-
-    const distributionData = await Promise.all(allClasses.map(async (classDoc) => {
-      // Count students by gender in this class
-      const maleStudents = await User.countDocuments({
-        class: classDoc._id,
-        role: 'student',
-        sex: 'male',
-        isActive: true
-      });
-
-      const femaleStudents = await User.countDocuments({
-        class: classDoc._id,
-        role: 'student',
-        sex: 'female',
-        isActive: true
-      });
-
-      // Get class performance
-      const classResults = await Result.find({
-        class: classDoc._id,
-        isActive: true
-      }).lean();
-
-      const scores = classResults.map(r => r.score || 0);
-      const averageScore = scores.length > 0 
-        ? scores.reduce((sum, score) => sum + score, 0) / scores.length 
-        : 0;
-
-      return {
-        class: classDoc.name,
-        shortName: classDoc.shortName,
-        level: classDoc.level,
-        boys: maleStudents,
-        girls: femaleStudents,
-        totalStudents: maleStudents + femaleStudents,
-        averageScore: parseFloat(averageScore.toFixed(1)),
-        totalTests: classResults.length
-      };
+    // Format data WITHOUT pass rates
+    const subjectData = subjectResults.map(item => ({
+      subject: item._id || 'Unknown',
+      averageScore: parseFloat((item.averageScore || 0).toFixed(1)),
+      totalStudents: item.totalStudents?.length || 0,
+      totalTests: item.totalTests || 0,
+      highestScore: item.highestScore || 0,
+      lowestScore: item.lowestScore || 0,
+      color: getSubjectColor(item._id)
     }));
 
     res.json({
       success: true,
-      distributionData,
+      subjects: subjectData,
       summary: {
-        totalClasses: distributionData.length,
-        totalStudents: distributionData.reduce((sum, c) => sum + c.totalStudents, 0),
-        totalBoys: distributionData.reduce((sum, c) => sum + c.boys, 0),
-        totalGirls: distributionData.reduce((sum, c) => sum + c.girls, 0),
-        averageClassSize: parseFloat((distributionData.reduce((sum, c) => sum + c.totalStudents, 0) / distributionData.length).toFixed(1))
+        totalSubjects: subjectData.length,
+        overallAverage: subjectData.length > 0 
+          ? parseFloat((subjectData.reduce((sum, s) => sum + s.averageScore, 0) / subjectData.length).toFixed(1))
+          : 0
       }
     });
 
   } catch (error) {
-    console.error('Class distribution error:', error);
+    console.error('Subject performance error:', error);
     res.status(500).json({
       success: false,
-      error: 'Server error generating class distribution'
+      error: 'Server error generating subject performance'
     });
   }
 });
 
-// GET REVENUE DATA
-router.get('/revenue-data', auth, async (req, res) => {
+// GET TEACHER ANALYTICS (UPDATED WITHOUT PASS RATES)
+router.get('/teacher-analytics', auth, async (req, res) => {
   try {
-    if (!['admin', 'super_admin'].includes(req.user.role)) {
+    if (req.user.role !== 'teacher') {
       return res.status(403).json({
         success: false,
-        error: 'Admin access required'
+        error: 'Teacher access required'
       });
     }
-
-    const revenueData = [];
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    
-    // Fee structure (you should store this in your database)
-    const feeStructure = {
-      'JSS 1': 50000,
-      'JSS 2': 55000,
-      'JSS 3': 60000,
-      'SSS 1': 65000,
-      'SSS 2': 70000,
-      'SSS 3': 75000
-    };
-
-    for (let month = 0; month < 12; month++) {
-      // For each month, calculate revenue
-      // This is a simplified calculation - you should implement your actual revenue logic
-      const students = await User.find({ 
-        role: 'student',
-        isActive: true,
-        createdAt: { $lte: new Date(currentYear, month, 28) }
-      }).populate('class', 'name').lean();
-
-      let monthlyRevenue = 0;
-      
-      for (const student of students) {
-        if (student.class?.name && feeStructure[student.class.name]) {
-          // Divide annual fee by 12 for monthly revenue
-          monthlyRevenue += feeStructure[student.class.name] / 12;
-        }
-      }
-
-      // Add some randomness for demonstration (remove in production)
-      const randomFactor = 0.9 + (Math.random() * 0.2); // 0.9 to 1.1
-      monthlyRevenue *= randomFactor;
-
-      revenueData.push({
-        month: monthNames[month],
-        revenue: Math.round(monthlyRevenue),
-        year: currentYear,
-        students: students.length
-      });
-    }
-
-    // Calculate annual summary
-    const annualRevenue = revenueData.reduce((sum, month) => sum + month.revenue, 0);
-    const averageMonthly = Math.round(annualRevenue / 12);
-    const highestMonth = Math.max(...revenueData.map(m => m.revenue));
-    const lowestMonth = Math.min(...revenueData.map(m => m.revenue));
-
-    res.json({
-      success: true,
-      revenueData,
-      summary: {
-        annualRevenue,
-        averageMonthly,
-        highestMonth,
-        lowestMonth,
-        growthRate: parseFloat(((revenueData[11].revenue - revenueData[0].revenue) / revenueData[0].revenue * 100).toFixed(1))
-      }
-    });
-
-  } catch (error) {
-    console.error('Revenue data error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Server error generating revenue data'
-    });
-  }
-});
-
-// GET ALL CLASSES PERFORMANCE DATA
-router.get('/classes', auth, async (req, res) => {
-  try {
-    if (!['admin', 'super_admin'].includes(req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        error: 'Admin access required'
-      });
-    }
-
-    const allClasses = await Class.find({ isActive: true })
-      .sort({ level: 1, name: 1 })
-      .lean();
-
-    const classesData = await Promise.all(allClasses.map(async (classDoc) => {
-      // Get students in this class
-      const students = await User.find({
-        class: classDoc._id,
-        role: 'student',
-        isActive: true
-      }).lean();
-
-      // Get results for this class
-      const classResults = await Result.find({
-        class: classDoc._id,
-        isActive: true
-      }).lean();
-
-      // Calculate metrics
-      const scores = classResults.map(r => r.score || 0);
-      const averageScore = scores.length > 0 
-        ? scores.reduce((sum, score) => sum + score, 0) / scores.length 
-        : 0;
-
-      // Pass rate
-      const passingResults = classResults.filter(r => {
-        const score = r.score || 0;
-        const totalMarks = r.totalMarks || 100;
-        return (score / totalMarks) * 100 >= 50;
-      });
-      const passRate = classResults.length > 0 
-        ? (passingResults.length / classResults.length) * 100 
-        : 0;
-
-      // Completion rate (unique students who have taken tests)
-      const studentsWithResults = [...new Set(classResults.map(r => r.userId?.toString()).filter(Boolean))];
-      const completionRate = students.length > 0 
-        ? (studentsWithResults.length / students.length) * 100 
-        : 0;
-
-      // Calculate trend (compare with previous month)
-      const now = new Date();
-      const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-
-      const currentMonthResults = classResults.filter(r => 
-        new Date(r.submittedAt) >= currentMonth
-      );
-      const lastMonthResults = classResults.filter(r => 
-        new Date(r.submittedAt) >= lastMonth && new Date(r.submittedAt) < currentMonth
-      );
-
-      const currentMonthAvg = currentMonthResults.length > 0 
-        ? currentMonthResults.reduce((sum, r) => sum + (r.score || 0), 0) / currentMonthResults.length 
-        : 0;
-      const lastMonthAvg = lastMonthResults.length > 0 
-        ? lastMonthResults.reduce((sum, r) => sum + (r.score || 0), 0) / lastMonthResults.length 
-        : 0;
-
-      const trend = lastMonthAvg > 0 
-        ? ((currentMonthAvg - lastMonthAvg) / lastMonthAvg) * 100 
-        : 0;
-
-      return {
-        id: classDoc._id,
-        name: classDoc.name,
-        shortName: classDoc.shortName,
-        level: classDoc.level,
-        studentCount: students.length,
-        testCount: classResults.length,
-        averageScore: parseFloat(averageScore.toFixed(1)),
-        passRate: parseFloat(passRate.toFixed(1)),
-        completionRate: parseFloat(completionRate.toFixed(1)),
-        trend: parseFloat(trend.toFixed(1))
-      };
-    }));
-
-    res.json({
-      success: true,
-      classes: classesData,
-      summary: {
-        totalClasses: classesData.length,
-        totalStudents: classesData.reduce((sum, c) => sum + c.studentCount, 0),
-        averageClassSize: parseFloat((classesData.reduce((sum, c) => sum + c.studentCount, 0) / classesData.length).toFixed(1)),
-        topPerformingClass: classesData.sort((a, b) => b.averageScore - a.averageScore)[0]?.name || 'N/A'
-      }
-    });
-
-  } catch (error) {
-    console.error('Classes data error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Server error generating classes data'
-    });
-  }
-});
-
-// GET SUBJECT PERFORMANCE DATA
-router.get('/subjects', auth, async (req, res) => {
-  try {
-    if (!['admin', 'super_admin'].includes(req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        error: 'Admin access required'
-      });
-    }
-
-    // Get all subjects from Subject model or from Results
-    const subjects = await Subject.find({ isActive: true }).select('name code').lean();
-    
-    const subjectsData = await Promise.all(subjects.map(async (subject) => {
-      // Get results for this subject
-      const subjectResults = await Result.find({
-        subject: subject.name,
-        isActive: true
-      }).lean();
-
-      // Calculate metrics
-      const scores = subjectResults.map(r => r.score || 0);
-      const averageScore = scores.length > 0 
-        ? scores.reduce((sum, score) => sum + score, 0) / scores.length 
-        : 0;
-
-      // Count unique students
-      const uniqueStudents = [...new Set(subjectResults.map(r => r.userId?.toString()).filter(Boolean))];
-
-      // Calculate improvement (compare with previous 3 months)
-      const now = new Date();
-      const currentPeriod = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-      const previousPeriod = new Date(now.getFullYear(), now.getMonth() - 6, 1);
-
-      const currentResults = subjectResults.filter(r => 
-        new Date(r.submittedAt) >= currentPeriod
-      );
-      const previousResults = subjectResults.filter(r => 
-        new Date(r.submittedAt) >= previousPeriod && new Date(r.submittedAt) < currentPeriod
-      );
-
-      const currentAvg = currentResults.length > 0 
-        ? currentResults.reduce((sum, r) => sum + (r.score || 0), 0) / currentResults.length 
-        : 0;
-      const previousAvg = previousResults.length > 0 
-        ? previousResults.reduce((sum, r) => sum + (r.score || 0), 0) / previousResults.length 
-        : 0;
-
-      const improvement = previousAvg > 0 
-        ? ((currentAvg - previousAvg) / previousAvg) * 100 
-        : 0;
-
-      return {
-        subject: subject.name,
-        code: subject.code,
-        averageScore: parseFloat(averageScore.toFixed(1)),
-        totalStudents: uniqueStudents.length,
-        totalTests: subjectResults.length,
-        improvement: parseFloat(improvement.toFixed(1))
-      };
-    }));
-
-    // Sort by average score descending
-    subjectsData.sort((a, b) => b.averageScore - a.averageScore);
-
-    res.json({
-      success: true,
-      subjects: subjectsData,
-      summary: {
-        totalSubjects: subjectsData.length,
-        averageScore: parseFloat((subjectsData.reduce((sum, s) => sum + s.averageScore, 0) / subjectsData.length).toFixed(1)),
-        mostImproved: subjectsData.sort((a, b) => b.improvement - a.improvement)[0]?.subject || 'N/A',
-        highestScore: subjectsData[0]?.subject || 'N/A'
-      }
-    });
-
-  } catch (error) {
-    console.error('Subjects data error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Server error generating subjects data'
-    });
-  }
-});
-
-// GET RECENT ACTIVITY LOG
-router.get('/activity', auth, async (req, res) => {
-  try {
-    if (!['admin', 'super_admin'].includes(req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        error: 'Admin access required'
-      });
-    }
-
-    const now = new Date();
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-    // Get recent tests created
-    const recentTests = await Test.find({
-      createdAt: { $gte: sevenDaysAgo },
-      isActive: true
-    })
-    .populate('createdBy', 'username name')
-    .sort({ createdAt: -1 })
-    .limit(20)
-    .lean();
-
-    // Get recent results submitted
-    const recentResults = await Result.find({
-      submittedAt: { $gte: sevenDaysAgo },
-      isActive: true
-    })
-    .populate('userId', 'username name studentId')
-    .populate('testId', 'title')
-    .sort({ submittedAt: -1 })
-    .limit(20)
-    .lean();
-
-    // Get new users
-    const newUsers = await User.find({
-      createdAt: { $gte: sevenDaysAgo },
-      isActive: true
-    })
-    .sort({ createdAt: -1 })
-    .limit(10)
-    .lean();
-
-    // Format activity log
-    const activityLog = [];
-
-    // Add test creation activities
-    recentTests.forEach(test => {
-      activityLog.push({
-        id: test._id,
-        type: 'test',
-        title: `New Test Created: ${test.title}`,
-        user: test.createdBy?.name || test.createdBy?.username || 'System',
-        time: formatTimeAgo(test.createdAt),
-        status: 'success',
-        details: {
-          subject: test.subject,
-          class: test.class,
-          type: test.type || 'test'
-        }
-      });
-    });
-
-    // Add result submission activities
-    recentResults.forEach(result => {
-      activityLog.push({
-        id: result._id,
-        type: 'result',
-        title: `Test Submitted: ${result.testId?.title || 'Unknown Test'}`,
-        user: result.userId?.name || result.userId?.studentId || 'Student',
-        time: formatTimeAgo(result.submittedAt),
-        status: 'success',
-        details: {
-          score: result.score,
-          percentage: result.percentage,
-          subject: result.subject
-        }
-      });
-    });
-
-    // Add new user activities
-    newUsers.forEach(user => {
-      activityLog.push({
-        id: user._id,
-        type: 'user',
-        title: `New ${user.role} Registered: ${user.name || user.username}`,
-        user: 'System',
-        time: formatTimeAgo(user.createdAt),
-        status: 'success',
-        details: {
-          role: user.role,
-          email: user.email
-        }
-      });
-    });
-
-    // Sort by time (most recent first)
-    activityLog.sort((a, b) => new Date(b.time) - new Date(a.time));
-
-    // Limit to 15 most recent activities
-    const recentActivities = activityLog.slice(0, 15);
-
-    res.json({
-      success: true,
-      activity: recentActivities,
-      summary: {
-        totalActivities: activityLog.length,
-        testsCreated: recentTests.length,
-        resultsSubmitted: recentResults.length,
-        newUsers: newUsers.length
-      }
-    });
-
-  } catch (error) {
-    console.error('Activity log error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Server error generating activity log'
-    });
-  }
-});
-
-// Helper function to format time ago
-function formatTimeAgo(date) {
-  const now = new Date();
-  const past = new Date(date);
-  const diffInSeconds = Math.floor((now - past) / 1000);
-
-  if (diffInSeconds < 60) {
-    return 'Just now';
-  } else if (diffInSeconds < 3600) {
-    const minutes = Math.floor(diffInSeconds / 60);
-    return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
-  } else if (diffInSeconds < 86400) {
-    const hours = Math.floor(diffInSeconds / 3600);
-    return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
-  } else if (diffInSeconds < 604800) {
-    const days = Math.floor(diffInSeconds / 86400);
-    return `${days} day${days !== 1 ? 's' : ''} ago`;
-  } else {
-    return past.toLocaleDateString();
-  }
-}
-
-// ==================== TEACHER ANALYTICS ENDPOINT ====================
-
-// GET TEACHER-SPECIFIC ANALYTICS
-router.get('/teacher', auth, teacherOnly, async (req, res) => {
-  try {
-    console.log('📊 Teacher analytics requested by:', req.user.username);
 
     const teacherId = req.user.id;
-
-    // Get teacher's assigned classes and subjects
-    const teacher = await User.findById(teacherId).select('subjects teacherAssignments').lean();
-    
-    if (!teacher) {
-      return res.status(404).json({
-        success: false,
-        error: 'Teacher not found'
-      });
-    }
-
-    // Extract assigned classes and subjects
-    const assignedClasses = [];
-    const assignedSubjects = [];
-    
-    // From old format
-    if (teacher.subjects && Array.isArray(teacher.subjects)) {
-      teacher.subjects.forEach(sub => {
-        if (sub.subject && sub.class) {
-          assignedSubjects.push(sub.subject);
-          assignedClasses.push(sub.class);
-        }
-      });
-    }
-    
-    // From new format
-    if (teacher.teacherAssignments && Array.isArray(teacher.teacherAssignments)) {
-      teacher.teacherAssignments.forEach(assignment => {
-        if (assignment.class && assignment.subjects) {
-          assignedClasses.push(assignment.class);
-          assignment.subjects.forEach(sub => {
-            if (sub.subject) {
-              assignedSubjects.push(sub.subject);
-            }
-          });
-        }
-      });
-    }
-
-    // Get unique values
-    const uniqueClasses = [...new Set(assignedClasses)];
-    const uniqueSubjects = [...new Set(assignedSubjects)];
-
-    if (uniqueClasses.length === 0 || uniqueSubjects.length === 0) {
-      return res.json({
-        success: true,
-        analytics: [],
-        summary: {
-          totalClasses: 0,
-          totalSubjects: 0,
-          totalStudents: 0,
-          totalTests: 0
-        },
-        message: 'No classes or subjects assigned to teacher'
-      });
-    }
 
     // Get tests created by this teacher
     const teacherTests = await Test.find({
       createdBy: teacherId,
-      isActive: true
-    })
-    .populate('class', 'name')
-    .sort({ createdAt: -1 })
-    .lean();
-
-    // Get results for teacher's subjects/classes
-    const teacherResults = await Result.find({
       $or: [
-        { subject: { $in: uniqueSubjects } },
-        { class: { $in: uniqueClasses } }
-      ],
-      isActive: true
+        { isActive: true },
+        { active: true },
+        { isActive: { $exists: false } },
+        { active: { $exists: false } }
+      ]
     })
-    .populate('userId', 'name studentId')
-    .populate('testId', 'title subject')
+    .populate('class', 'name shortName')
     .lean();
 
-    // Calculate analytics for each test
-    const testAnalytics = await Promise.all(teacherTests.map(async (test) => {
-      const testResults = teacherResults.filter(r => 
-        r.testId?._id?.toString() === test._id.toString()
-      );
+    // Get results for teacher's tests
+    const testIds = teacherTests.map(test => test._id);
+    const teacherResults = await Result.find({
+      testId: { $in: testIds },
+      $or: [
+        { isActive: true },
+        { active: true },
+        { isActive: { $exists: false } },
+        { active: { $exists: false } }
+      ]
+    }).lean();
 
-      const scores = testResults.map(r => r.score || 0);
-      const averageScore = scores.length > 0 
-        ? scores.reduce((sum, score) => sum + score, 0) / scores.length 
-        : 0;
+    // Calculate statistics WITHOUT pass rates
+    const totalTests = teacherTests.length;
+    const totalResults = teacherResults.length;
+    
+    let averageScore = 0;
+    let averageScoreFormatted = '0/100';
+    
+    if (teacherResults.length > 0) {
+      const totalScore = teacherResults.reduce((sum, r) => sum + (r.score || 0), 0);
+      const totalMarksSum = teacherResults.reduce((sum, r) => sum + (r.totalMarks || 100), 0);
+      averageScore = totalMarksSum > 0 ? (totalScore / totalMarksSum) * 100 : 0;
+      
+      // Calculate formatted average score
+      const avgActualScore = Math.round(totalScore / teacherResults.length);
+      const avgTotalMarks = Math.round(totalMarksSum / teacherResults.length);
+      averageScoreFormatted = `${avgActualScore}/${avgTotalMarks}`;
+    }
 
-      // Count students in the class
-      const studentsInClass = await User.countDocuments({
-        class: test.class?._id || test.class,
-        role: 'student',
-        isActive: true
-      });
-
-      const completionRate = studentsInClass > 0 
-        ? (testResults.length / studentsInClass) * 100 
-        : 0;
-
-      // Find top performer
-      let topStudent = 'N/A';
-      let topScore = 0;
-      testResults.forEach(result => {
-        if (result.score > topScore) {
-          topScore = result.score;
-          topStudent = result.userId?.name || result.userId?.studentId || 'Unknown';
+    // Get top performing test with formatted scores
+    let topTest = null;
+    if (teacherTests.length > 0) {
+      const testWithScores = await Promise.all(teacherTests.map(async (test) => {
+        const testResults = teacherResults.filter(r => r.testId.toString() === test._id.toString());
+        let testAverage = 0;
+        let testAverageFormatted = '0/100';
+        
+        if (testResults.length > 0) {
+          const testTotalScore = testResults.reduce((sum, r) => sum + (r.score || 0), 0);
+          const testTotalMarks = test.totalMarks || 100;
+          testAverage = (testTotalScore / testResults.length / testTotalMarks) * 100;
+          
+          // Format as "X/Y"
+          const avgScore = Math.round(testTotalScore / testResults.length);
+          testAverageFormatted = `${avgScore}/${testTotalMarks}`;
         }
-      });
+        
+        // Get class name
+        let className = 'N/A';
+        if (test.class) {
+          if (typeof test.class === 'object') {
+            className = test.class.name || test.class.shortName || className;
+          } else {
+            className = test.class;
+          }
+        }
+        
+        return { 
+          test: { ...test, className }, 
+          average: testAverage,
+          averageFormatted: testAverageFormatted
+        };
+      }));
+      
+      testWithScores.sort((a, b) => b.average - a.average);
+      if (testWithScores[0]) {
+        topTest = {
+          title: testWithScores[0].test.title || 'Untitled',
+          subject: testWithScores[0].test.subject || 'General',
+          class: testWithScores[0].test.className,
+          averageScore: parseFloat(testWithScores[0].average.toFixed(1)),
+          averageScoreFormatted: testWithScores[0].averageFormatted
+        };
+      }
+    }
 
+    // Format recent tests WITHOUT pass rates
+    const recentTestsFormatted = await Promise.all(teacherTests.slice(0, 5).map(async (test) => {
+      const testResults = teacherResults.filter(r => r.testId.toString() === test._id.toString());
+      let averageScoreFormatted = '0/100';
+      
+      if (testResults.length > 0) {
+        const totalScore = testResults.reduce((sum, r) => sum + (r.score || 0), 0);
+        const totalMarks = test.totalMarks || 100;
+        const avgScore = Math.round(totalScore / testResults.length);
+        averageScoreFormatted = `${avgScore}/${totalMarks}`;
+      }
+      
+      // Determine test type
+      let testType = 'Test';
+      if (test.title) {
+        const titleLower = test.title.toLowerCase();
+        if (titleLower.includes('exam') || titleLower === 'examination') {
+          testType = 'Exam';
+        } else if (titleLower.includes('ca') || titleLower.includes('continuous')) {
+          testType = 'CA';
+        }
+      }
+      
+      // Get REAL status
+      let testStatus = test.status || 'draft';
+      const validStatuses = ['draft', 'approved', 'scheduled', 'active', 'completed', 'cancelled'];
+      if (!validStatuses.includes(testStatus)) {
+        testStatus = 'draft';
+      }
+      
       return {
-        testId: test._id,
-        testTitle: test.title,
-        subject: test.subject,
-        class: test.class?.name || test.class,
-        averageScore: parseFloat(averageScore.toFixed(1)),
-        completionRate: parseFloat(completionRate.toFixed(1)),
-        totalStudents: testResults.length,
-        topStudent,
-        createdAt: test.createdAt,
-        status: test.status || 'completed'
+        id: test._id,
+        title: test.title || 'Untitled Test',
+        subject: test.subject || 'General',
+        class: test.className || test.class || 'N/A',
+        type: testType,
+        totalMarks: test.totalMarks || 100,
+        averageScoreFormatted: averageScoreFormatted,
+        status: testStatus, // REAL status
+        createdAt: test.createdAt
       };
     }));
 
-    // Calculate overall statistics
-    const allScores = teacherResults.map(r => r.score || 0);
-    const overallAverageScore = allScores.length > 0 
-      ? allScores.reduce((sum, score) => sum + score, 0) / allScores.length 
-      : 0;
-
-    const uniqueStudentIds = [...new Set(teacherResults.map(r => r.userId?._id?.toString()).filter(Boolean))];
-
     res.json({
       success: true,
-      analytics: testAnalytics,
-      summary: {
-        totalClasses: uniqueClasses.length,
-        totalSubjects: uniqueSubjects.length,
-        totalStudents: uniqueStudentIds.length,
-        totalTests: teacherTests.length,
-        overallAverageScore: parseFloat(overallAverageScore.toFixed(1)),
-        assignedClasses: uniqueClasses,
-        assignedSubjects: uniqueSubjects
+      analytics: {
+        teacherId,
+        teacherName: req.user.name || req.user.username,
+        totalTests,
+        totalResults,
+        averageScore: parseFloat(averageScore.toFixed(1)),
+        averageScoreFormatted: averageScoreFormatted,
+        topTest,
+        recentTests: recentTestsFormatted
       }
     });
 
@@ -1035,16 +1081,96 @@ router.get('/teacher', auth, teacherOnly, async (req, res) => {
   }
 });
 
-// ==================== HEALTH CHECK ====================
+// GET TEST STATUS SUMMARY - NEW ENDPOINT FOR REAL STATUS
+router.get('/test-status-summary', auth, async (req, res) => {
+  try {
+    if (!['admin', 'super_admin'].includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Admin access required'
+      });
+    }
 
-router.get('/health', auth, async (req, res) => {
+    // Get all tests with their REAL status
+    const tests = await Test.find({
+      $or: [
+        { isActive: true },
+        { active: true },
+        { isActive: { $exists: false } },
+        { active: { $exists: false } }
+      ]
+    })
+    .select('title subject class status createdAt')
+    .populate('class', 'name')
+    .lean();
+
+    // Count tests by status
+    const statusCounts = {
+      draft: 0,
+      approved: 0,
+      scheduled: 0,
+      active: 0,
+      completed: 0,
+      cancelled: 0
+    };
+
+    const statusDetails = {
+      draft: [],
+      approved: [],
+      scheduled: [],
+      active: [],
+      completed: [],
+      cancelled: []
+    };
+
+    // Organize tests by status
+    tests.forEach(test => {
+      const status = test.status || 'draft';
+      const validStatus = ['draft', 'approved', 'scheduled', 'active', 'completed', 'cancelled'].includes(status) 
+        ? status 
+        : 'draft';
+      
+      statusCounts[validStatus]++;
+      
+      statusDetails[validStatus].push({
+        title: test.title || 'Untitled',
+        subject: test.subject || 'General',
+        class: test.class?.name || test.class || 'N/A',
+        createdAt: test.createdAt,
+        resultCount: 0 // You can add actual result count if needed
+      });
+    });
+
+    res.json({
+      success: true,
+      statusSummary: {
+        totalTests: tests.length,
+        counts: statusCounts,
+        details: statusDetails
+      }
+    });
+
+  } catch (error) {
+    console.error('Test status summary error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error fetching test status summary'
+    });
+  }
+});
+
+// GET HEALTH CHECK
+router.get('/health', async (req, res) => {
   try {
     const counts = await Promise.all([
-      User.countDocuments({ isActive: true }),
-      Test.countDocuments({ isActive: true }),
-      Result.countDocuments({ isActive: true }),
-      Class.countDocuments({ isActive: true })
+      User.countDocuments().maxTimeMS(5000),
+      Test.countDocuments().maxTimeMS(5000),
+      Result.countDocuments().maxTimeMS(5000),
+      Class.countDocuments().maxTimeMS(5000)
     ]);
+
+    // Test database connection
+    const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
 
     res.json({
       success: true,
@@ -1053,16 +1179,63 @@ router.get('/health', auth, async (req, res) => {
         tests: counts[1],
         results: counts[2],
         classes: counts[3],
-        database: 'connected',
-        timestamp: new Date().toISOString()
+        database: dbStatus,
+        serverTime: new Date().toISOString(),
+        uptime: process.uptime()
       }
     });
   } catch (error) {
+    console.error('Health check error:', error);
     res.status(500).json({
       success: false,
-      error: 'Analytics service health check failed'
+      error: 'Analytics service health check failed',
+      details: error.message
     });
   }
 });
+
+// HELPER FUNCTION: Get subject color
+function getSubjectColor(subjectName) {
+  if (!subjectName) return '#4B5320';
+  
+  const subject = subjectName.toLowerCase();
+  
+  const colorMap = {
+    'mathematics': '#4B5320',
+    'math': '#4B5320',
+    'english': '#00FF00',
+    'language': '#00FF00',
+    'science': '#FFA500',
+    'biology': '#2E7D32',
+    'chemistry': '#1565C0',
+    'physics': '#6A1B9A',
+    'history': '#6B8E23',
+    'geography': '#28A745',
+    'computer': '#17A2B8',
+    'ict': '#17A2B8',
+    'technology': '#17A2B8',
+    'french': '#D81B60',
+    'yoruba': '#F57C00',
+    'hausa': '#5D4037',
+    'igbo': '#795548',
+    'economics': '#7B1FA2',
+    'commerce': '#7B1FA2',
+    'accounting': '#00838F',
+    'government': '#5D4037',
+    'civic': '#5D4037'
+  };
+  
+  for (const [key, color] of Object.entries(colorMap)) {
+    if (subject.includes(key)) {
+      return color;
+    }
+  }
+  
+  // Generate consistent color based on subject name
+  const colors = ['#4B5320', '#00FF00', '#FFA500', '#6B8E23', '#28A745', 
+                  '#17A2B8', '#D81B60', '#F57C00', '#5D4037', '#7B1FA2'];
+  const index = subject.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0) % colors.length;
+  return colors[index];
+}
 
 module.exports = router;

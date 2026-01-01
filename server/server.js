@@ -8,6 +8,42 @@ const multer = require('multer');
 const Signature = require('./models/Signature');
 const { auth } = require('./middleware/auth');
 
+// ADD DEBUG PATHS CODE HERE
+console.log('🔍 DEBUG PATHS:');
+console.log('1. Server directory:', __dirname);
+console.log('2. Uploads should be at:', path.join(__dirname, '..', 'uploads'));
+console.log('3. Profiles should be at:', path.join(__dirname, '..', 'uploads', 'profiles'));
+
+const checkPath = path.join(__dirname, '..', 'uploads', 'profiles');
+console.log('4. Profiles folder exists?', fs.existsSync(checkPath));
+if (fs.existsSync(checkPath)) {
+  const files = fs.readdirSync(checkPath);
+  console.log('5. Files in profiles:', files);
+}
+
+// ================================
+// UTILITY FUNCTIONS - MUST BE DEFINED BEFORE USE
+// ================================
+
+// Ensure uploads directory exists - FIXED VERSION
+const ensureUploadDir = () => {
+  // FIXED: Change to match static file serving path (one level up)
+  const uploadsDir = path.join(__dirname, '..', 'uploads');  // CHANGED THIS LINE
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    console.log('✅ Created uploads directory at:', uploadsDir);
+  }
+  
+  // Ensure profiles subdirectory exists
+  const profilesDir = path.join(uploadsDir, 'profiles');
+  if (!fs.existsSync(profilesDir)) {
+    fs.mkdirSync(profilesDir, { recursive: true });
+    console.log('✅ Created profiles subdirectory at:', profilesDir);
+  }
+  
+  return uploadsDir;
+};
+
 // Import all routes
 const authRoutes = require('./routes/auth');
 const usersRoutes = require('./routes/users');
@@ -40,29 +76,23 @@ const app = express();
 process.env.TZ = 'Africa/Lagos';
 
 // ================================
-// UTILITY FUNCTIONS
-// ================================
-
-// Ensure uploads directory exists
-const ensureUploadDir = () => {
-  const uploadsDir = path.join(__dirname, 'Uploads');
-  if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-    console.log('✅ Created uploads directory');
-  }
-  return uploadsDir;
-};
-
-// ================================
 // MULTER CONFIGURATION
 // ================================
 
-// Ensure upload directory exists
+// Ensure upload directory exists - NOW THIS WILL WORK
 const uploadDir = ensureUploadDir();
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
+  destination: (req, file, cb) => {
+    // Save profile images to profiles subdirectory
+    if (file.fieldname === 'profileImage') {
+      const profilesDir = path.join(uploadDir, 'profiles');
+      cb(null, profilesDir);
+    } else {
+      cb(null, uploadDir);
+    }
+  },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '');
@@ -91,6 +121,9 @@ const upload = multer({
     }
   },
 });
+
+
+// ... rest of your server.js code remains the same ...
 
 // Configure multer for form data
 const formDataUpload = multer({
@@ -142,6 +175,26 @@ app.use((req, res, next) => {
 });
 
 // ================================
+// STATIC FILE SERVING - FIXED: Must be mounted BEFORE routes
+// ================================
+
+// Serve uploads directory with proper MIME types
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads'), {
+  maxAge: '1d',
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.png')) {
+      res.setHeader('Content-Type', 'image/png');
+    } else if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) {
+      res.setHeader('Content-Type', 'image/jpeg');
+    } else if (filePath.endsWith('.svg')) {
+      res.setHeader('Content-Type', 'image/svg+xml');
+    }
+  }
+}));
+
+console.log(`✅ Serving uploads from: ${path.join(__dirname, '..', 'uploads')}`);
+
+// ================================
 // EMERGENCY DEBUG ROUTES
 // ================================
 
@@ -153,6 +206,7 @@ app.get('/', (req, res) => {
     environment: process.env.NODE_ENV || 'development',
     server: 'Local Development Server',
     status: 'OK',
+    staticFiles: '✅ /uploads/profiles/ is now accessible',
     teacherEndpoints: {
       questions: '/api/teacher/questions',
       bulkQuestions: '/api/teacher/questions/bulk',
@@ -168,6 +222,55 @@ app.get('/', (req, res) => {
       bulkPromote: '/api/promotions/bulk-promote'
     }
   });
+});
+
+// Test static file serving
+app.get('/api/test-uploads', (req, res) => {
+  const uploadsPath = path.join(__dirname, 'uploads');
+  const profilesPath = path.join(uploadsPath, 'profiles');
+  
+  try {
+    const exists = fs.existsSync(uploadsPath);
+    const profilesExist = fs.existsSync(profilesPath);
+    const files = profilesExist ? fs.readdirSync(profilesPath) : [];
+    
+    // Test if a file can be accessed
+    const testFile = files.length > 0 ? files[0] : null;
+    const testUrl = testFile ? `http://localhost:${process.env.PORT || 5000}/uploads/profiles/${testFile}` : null;
+    
+    res.json({
+      success: true,
+      uploads: {
+        path: uploadsPath,
+        exists: exists,
+        isDirectory: exists ? fs.statSync(uploadsPath).isDirectory() : false
+      },
+      profiles: {
+        path: profilesPath,
+        exists: profilesExist,
+        isDirectory: profilesExist ? fs.statSync(profilesPath).isDirectory() : false,
+        fileCount: files.length,
+        files: files.map(f => ({
+          name: f,
+          size: fs.statSync(path.join(profilesPath, f)).size,
+          url: `/uploads/profiles/${f}`,
+          fullUrl: `http://localhost:${process.env.PORT || 5000}/uploads/profiles/${f}`
+        }))
+      },
+      test: {
+        file: testFile,
+        url: testUrl,
+        accessible: testUrl ? true : false
+      }
+    });
+  } catch (error) {
+    res.json({
+      success: false,
+      error: error.message,
+      uploadsPath: uploadsPath,
+      profilesPath: profilesPath
+    });
+  }
 });
 
 // Test database connection specifically
@@ -480,82 +583,28 @@ app.get('/api/promotions/test', (req, res) => {
 });
 
 // ================================
-// ✅ CRITICAL FIX: ROUTES MOUNTING ORDER
+// TEST FILE SERVING ROUTE
 // ================================
 
-console.log('🚀 Mounting application routes...');
-
-// Debug: Check if all routes exist
-try {
-  console.log('📋 Checking routes availability:');
-  console.log('   ✅ authRoutes:', !!authRoutes);
-  console.log('   ✅ usersRoutes:', !!usersRoutes);
-  console.log('   ✅ classRoutes:', !!classRoutes);
-  console.log('   ✅ subjectsRoutes:', !!subjectsRoutes);
-  console.log('   ✅ classSetupRoutes:', !!classSetupRoutes);
-  console.log('   ✅ teacherRoutes:', !!teacherRoutes);
-  console.log('   ✅ scheduleRoutes:', !!scheduleRoutes);
-  console.log('   ✅ resultsRoutes:', !!resultsRoutes);
-  console.log('   ✅ analyticsRoutes:', !!analyticsRoutes);
-  console.log('   ✅ testRoutes:', !!testRoutes);
-  console.log('   ✅ teacherQuestionsRoutes:', !!teacherQuestionsRoutes);
-  console.log('   ✅ promotionRoutes:', !!promotionRoutes);
-  console.log('   ✅ reportCardsRoutes:', !!reportCardsRoutes);
-} catch (error) {
-  console.log('❌ Error checking routes:', error.message);
-}
-
-// ✅ CRITICAL: MOUNT TEACHER QUESTION ROUTES FIRST
-// This is the MOST IMPORTANT FIX - teacherQuestionsRoutes must be mounted BEFORE other routes
-// to avoid route conflicts with /api/users/teachers/*
-console.log('🔧 Mounting teacher question routes FIRST...');
-app.use('/api', teacherQuestionsRoutes);
-console.log('✅ Teacher question routes mounted at /api/teacher/*');
-
-// Now mount all other routes
-console.log('🔧 Mounting other routes...');
-app.use('/api/auth', authRoutes);
-app.use('/api/users', usersRoutes); // This handles /api/users/* (except teachers)
-app.use('/api/users', teacherRoutes); // This handles /api/users/teachers/* routes
-app.use('/api', scheduleRoutes);
-app.use('/api/questions', formDataUpload.any(), questionRoutes);
-app.use('/api/tests', testRoutes);
-app.use('/api/analytics', analyticsRoutes);
-app.use('/api/cheat-logs', cheatLogRoutes);
-app.use('/api/classes', classRoutes);
-app.use('/api/results', resultsRoutes);
-app.use('/api/subjects', subjectsRoutes);
-app.use('/api/sessions', sessionsRoutes);
-app.use('/api/promotions', promotionRoutes); // ✅ FIXED: Changed from /api/promotion to /api/promotions
-app.use('/api/transcript', transcriptRoutes);
-app.use('/api/class-setup', classSetupRoutes);
-app.use('/api/class-subjects', classSubjectsRoutes);
-app.use('/api/reports', reportCardsRoutes);
-
-console.log('✅ All routes mounted successfully');
-console.log('🎯 IMPORTANT: Promotion routes are now accessible at:');
-console.log('   📍 /api/promotions/status');
-console.log('   📍 /api/promotions/session-eligibility/:classId');
-console.log('   📍 /api/promotions/bulk-promote');
-console.log('🎯 IMPORTANT: Teacher routes are now accessible at:');
-console.log('   📍 /api/teacher/questions-test');
-console.log('   📍 /api/teacher/questions');
-console.log('   📍 /api/teacher/questions/bulk');
-console.log('🎯 IMPORTANT: Report routes are now accessible at:');
-console.log('   📍 /api/reports/export/report/:studentId/:session');
-
-// ================================
-// TEMPORARY SUBJECTS ROUTE FOR TESTING
-// ================================
-
-// Add this temporary route to test if subjects is working
-app.get('/api/subjects-test', auth, (req, res) => {
-  console.log('🎯 TEMPORARY SUBJECTS TEST ROUTE HIT');
-  res.json([
-    { id: '1', name: 'Mathematics', code: 'MATH', category: 'Core' },
-    { id: '2', name: 'English Language', code: 'ENG', category: 'Core' },
-    { id: '3', name: 'Basic Science', code: 'SCI', category: 'Core' }
-  ]);
+// Test file serving
+app.get('/api/test-my-file/:filename', (req, res) => {
+  const filename = req.params.filename;
+  const filePath = path.join(__dirname, '..', 'uploads', 'profiles', filename);
+  
+  console.log('📤 Trying to serve file:', {
+    filename: filename,
+    path: filePath,
+    exists: fs.existsSync(filePath)
+  });
+  
+  if (fs.existsSync(filePath)) {
+    res.sendFile(filePath);
+  } else {
+    res.status(404).json({
+      error: 'File not found',
+      path: filePath
+    });
+  }
 });
 
 // ================================
@@ -618,6 +667,7 @@ app.get('/api/test', (req, res) => {
     environment: process.env.NODE_ENV || 'development',
     server: 'Local Development Server',
     database: 'MongoDB Connection',
+    staticFiles: '✅ /uploads/profiles/ is accessible',
     teacherEndpoints: {
       test: '/api/teacher/questions-test',
       simpleTest: '/api/teacher/questions/simple-test (POST)',
@@ -641,6 +691,13 @@ app.get('/api/health', (req, res) => {
   try {
     const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
     
+    // Check if uploads directory exists
+    const uploadsPath = path.join(__dirname, 'uploads');
+    const profilesPath = path.join(uploadsPath, 'profiles');
+    const uploadsExist = fs.existsSync(uploadsPath);
+    const profilesExist = fs.existsSync(profilesPath);
+    const profileFiles = profilesExist ? fs.readdirSync(profilesPath).length : 0;
+    
     const healthData = {
       status: 'OK',
       message: 'Local Server is running',
@@ -650,6 +707,12 @@ app.get('/api/health', (req, res) => {
       server: 'Local Development',
       port: process.env.PORT || 5000,
       frontendUrl: 'http://localhost:3000',
+      staticFiles: {
+        uploads: uploadsExist,
+        profiles: profilesExist,
+        profileCount: profileFiles,
+        url: 'http://localhost:5000/uploads/profiles/'
+      },
       teacherRoutes: {
         working: true,
         endpoints: [
@@ -690,11 +753,41 @@ app.get('/api/health', (req, res) => {
 
 // Debug route to check uploads
 app.get('/api/debug-uploads', (req, res) => {
-  res.json({
-    uploadDirExists: fs.existsSync(uploadDir),
-    files: fs.existsSync(uploadDir) ? fs.readdirSync(uploadDir) : [],
-    uploadDir: uploadDir
-  });
+  const uploadsPath = path.join(__dirname, 'uploads');
+  const profilesPath = path.join(uploadsPath, 'profiles');
+  
+  try {
+    const uploadsExist = fs.existsSync(uploadsPath);
+    const profilesExist = fs.existsSync(profilesPath);
+    const files = profilesExist ? fs.readdirSync(profilesPath) : [];
+    
+    res.json({
+      success: true,
+      uploads: {
+        path: uploadsPath,
+        exists: uploadsExist,
+        isDirectory: uploadsExist ? fs.statSync(uploadsPath).isDirectory() : false
+      },
+      profiles: {
+        path: profilesPath,
+        exists: profilesExist,
+        isDirectory: profilesExist ? fs.statSync(profilesPath).isDirectory() : false,
+        files: files.map(f => ({
+          name: f,
+          size: fs.statSync(path.join(profilesPath, f)).size,
+          url: `/uploads/profiles/${f}`,
+          accessible: `http://localhost:${process.env.PORT || 5000}/uploads/profiles/${f}`
+        }))
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      uploadsPath: uploadsPath,
+      profilesPath: profilesPath
+    });
+  }
 });
 
 // ================================
@@ -788,24 +881,83 @@ app.post('/api/signatures/upload',
 );
 
 // ================================
-// STATIC FILE SERVING
+// ✅ CRITICAL FIX: ROUTES MOUNTING ORDER
 // ================================
 
-// Serve uploads directory with proper MIME types
-app.use('/uploads', express.static(uploadDir, {
-  maxAge: '1d',
-  setHeaders: (res, filePath) => {
-    if (filePath.endsWith('.png')) {
-      res.setHeader('Content-Type', 'image/png');
-    } else if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) {
-      res.setHeader('Content-Type', 'image/jpeg');
-    } else if (filePath.endsWith('.svg')) {
-      res.setHeader('Content-Type', 'image/svg+xml');
-    }
-  }
-}));
+console.log('🚀 Mounting application routes...');
 
-console.log(`✅ Serving uploads from: ${uploadDir}`);
+// Debug: Check if all routes exist
+try {
+  console.log('📋 Checking routes availability:');
+  console.log('   ✅ authRoutes:', !!authRoutes);
+  console.log('   ✅ usersRoutes:', !!usersRoutes);
+  console.log('   ✅ classRoutes:', !!classRoutes);
+  console.log('   ✅ subjectsRoutes:', !!subjectsRoutes);
+  console.log('   ✅ classSetupRoutes:', !!classSetupRoutes);
+  console.log('   ✅ teacherRoutes:', !!teacherRoutes);
+  console.log('   ✅ scheduleRoutes:', !!scheduleRoutes);
+  console.log('   ✅ resultsRoutes:', !!resultsRoutes);
+  console.log('   ✅ analyticsRoutes:', !!analyticsRoutes);
+  console.log('   ✅ testRoutes:', !!testRoutes);
+  console.log('   ✅ teacherQuestionsRoutes:', !!teacherQuestionsRoutes);
+  console.log('   ✅ promotionRoutes:', !!promotionRoutes);
+  console.log('   ✅ reportCardsRoutes:', !!reportCardsRoutes);
+} catch (error) {
+  console.log('❌ Error checking routes:', error.message);
+}
+
+// ✅ CRITICAL: MOUNT TEACHER QUESTION ROUTES FIRST
+// This is the MOST IMPORTANT FIX - teacherQuestionsRoutes must be mounted BEFORE other routes
+// to avoid route conflicts with /api/users/teachers/*
+console.log('🔧 Mounting teacher question routes FIRST...');
+app.use('/api', teacherQuestionsRoutes);
+console.log('✅ Teacher question routes mounted at /api/teacher/*');
+
+// Now mount all other routes
+console.log('🔧 Mounting other routes...');
+app.use('/api/auth', authRoutes);
+app.use('/api/users', usersRoutes); // This handles /api/users/* (except teachers)
+app.use('/api/users', teacherRoutes); // This handles /api/users/teachers/* routes
+app.use('/api', scheduleRoutes);
+app.use('/api/questions', formDataUpload.any(), questionRoutes);
+app.use('/api/tests', testRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/cheat-logs', cheatLogRoutes);
+app.use('/api/classes', classRoutes);
+app.use('/api/results', resultsRoutes);
+app.use('/api/subjects', subjectsRoutes);
+app.use('/api/sessions', sessionsRoutes);
+app.use('/api/promotions', promotionRoutes); // ✅ FIXED: Changed from /api/promotion to /api/promotions
+app.use('/api/transcripts', transcriptRoutes);
+app.use('/api/class-setup', classSetupRoutes);
+app.use('/api/class-subjects', classSubjectsRoutes);
+app.use('/api/reports', reportCardsRoutes);
+
+console.log('✅ All routes mounted successfully');
+console.log('🎯 IMPORTANT: Promotion routes are now accessible at:');
+console.log('   📍 /api/promotions/status');
+console.log('   📍 /api/promotions/session-eligibility/:classId');
+console.log('   📍 /api/promotions/bulk-promote');
+console.log('🎯 IMPORTANT: Teacher routes are now accessible at:');
+console.log('   📍 /api/teacher/questions-test');
+console.log('   📍 /api/teacher/questions');
+console.log('   📍 /api/teacher/questions/bulk');
+console.log('🎯 IMPORTANT: Report routes are now accessible at:');
+console.log('   📍 /api/reports/export/report/:studentId/:session');
+
+// ================================
+// TEMPORARY SUBJECTS ROUTE FOR TESTING
+// ================================
+
+// Add this temporary route to test if subjects is working
+app.get('/api/subjects-test', auth, (req, res) => {
+  console.log('🎯 TEMPORARY SUBJECTS TEST ROUTE HIT');
+  res.json([
+    { id: '1', name: 'Mathematics', code: 'MATH', category: 'Core' },
+    { id: '2', name: 'English Language', code: 'ENG', category: 'Core' },
+    { id: '3', name: 'Basic Science', code: 'SCI', category: 'Core' }
+  ]);
+});
 
 // ================================
 // API 404 HANDLER
@@ -990,6 +1142,11 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`📅 Started: ${new Date().toISOString()}`);
   console.log('🎉 ================================');
   console.log('');
+  console.log('✅ STATIC FILES:');
+  console.log(`   📍 Uploads: http://localhost:${PORT}/uploads/profiles/`);
+  console.log(`   📍 Test: http://localhost:${PORT}/api/test-uploads`);
+  console.log(`   📍 File Test: http://localhost:${PORT}/api/test-my-file/filename.jpg`);
+  console.log('');
   console.log('🔍 QUICK TEST ENDPOINTS:');
   console.log(`   📍 Server: http://localhost:${PORT}/`);
   console.log(`   📍 Health: http://localhost:${PORT}/api/health`);
@@ -1027,6 +1184,8 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`   3. Use POST to: http://localhost:${PORT}/api/teacher/questions/simple-test`);
   console.log(`   4. Test promotion: http://localhost:${PORT}/api/promotions/test`);
   console.log(`   5. Test reports: http://localhost:${PORT}/api/reports/export/report/69340bb643e15fa3f5b42a6e/2025/2026?term=First Term`);
+  console.log(`   6. Test uploads: http://localhost:${PORT}/api/test-uploads`);
+  console.log(`   7. Test file serving: http://localhost:${PORT}/api/test-my-file/filename.jpg`);
   console.log('🎉 ================================');
 });
 

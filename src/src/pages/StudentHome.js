@@ -63,6 +63,10 @@ const StudentHome = ({ children }) => {
     totalMarks: 0
   });
 
+  // Profile image state
+  const [profileImageUrl, setProfileImageUrl] = useState('');
+  const [loadingProfile, setLoadingProfile] = useState(false);
+
   // Brand colors - Army Green with Orange and Light Green
   const colors = {
     primary: '#4B5320',      // Army Green (main brand)
@@ -92,6 +96,71 @@ const StudentHome = ({ children }) => {
     dark: 'linear-gradient(135deg, #1A202C 0%, #2D3748 100%)'
   };
 
+  // Get student name
+  const getStudentName = () => {
+    return user?.name || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'Student';
+  };
+
+  // Get student email
+  const getStudentEmail = () => {
+    return user?.email || 'student@example.com';
+  };
+
+  // Get student initials for fallback avatar
+  const getStudentInitials = () => {
+    const name = getStudentName();
+    return name.charAt(0).toUpperCase();
+  };
+
+  // Fetch student profile data including profile image
+  const fetchStudentProfile = async () => {
+    if (!user || user.role !== 'student') return;
+
+    try {
+      setLoadingProfile(true);
+      const token = localStorage.getItem('token');
+      
+      console.log('📊 Fetching student profile for:', user.id);
+      
+      const response = await fetch(`http://localhost:5000/api/users/${user.id}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ HTTP error:', response.status, errorText);
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('✅ Student profile API response:', data);
+      
+      if (data.success && data.user) {
+        const studentData = data.user;
+        
+        // Set profile image URL if available
+        if (studentData.profileImage) {
+          setProfileImageUrl(`http://localhost:5000/uploads/profiles/${studentData.profileImage}`);
+        }
+        
+        setError(null);
+      }
+    } catch (err) {
+      console.error('❌ Error fetching student profile:', err);
+      setError('Failed to load student profile information.');
+      
+      // Try to set profile image from user object
+      if (user.profileImage) {
+        setProfileImageUrl(`http://localhost:5000/uploads/profiles/${user.profileImage}`);
+      }
+    } finally {
+      setLoadingProfile(false);
+    }
+  };
+
   useEffect(() => {
     const verifyUser = async () => {
       const token = localStorage.getItem('token');
@@ -110,6 +179,7 @@ const StudentHome = ({ children }) => {
         // Don't call setUser here - AuthContext should handle this
         setLoading(false);
         fetchTests();
+        fetchStudentProfile(); // Fetch profile data
       } catch (err) {
         setError(err.message);
         setLoading(false);
@@ -122,6 +192,7 @@ const StudentHome = ({ children }) => {
     } else {
       setLoading(false);
       fetchTests();
+      fetchStudentProfile(); // Fetch profile data
     }
 
     // Set mock notifications
@@ -678,7 +749,19 @@ const StudentHome = ({ children }) => {
               </button>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
+            {/* Student Profile with Image */}
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '12px', 
+              cursor: 'pointer',
+              padding: '4px 8px',
+              borderRadius: '8px',
+              transition: 'background-color 0.2s ease',
+              ':hover': {
+                backgroundColor: 'rgba(75, 83, 32, 0.05)'
+              }
+            }}>
               <div style={{
                 width: '36px',
                 height: '36px',
@@ -689,13 +772,36 @@ const StudentHome = ({ children }) => {
                 color: colors.primary,
                 fontWeight: '600',
                 fontSize: '14px',
-                backgroundColor: colors.accent
+                backgroundColor: colors.accent,
+                position: 'relative',
+                overflow: 'hidden'
               }}>
-                {user.name ? user.name.charAt(0).toUpperCase() : <FiUser size={16} />}
+                {profileImageUrl ? (
+                  <img 
+                    src={profileImageUrl} 
+                    alt={getStudentName()} 
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                      borderRadius: '50%'
+                    }}
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.style.display = 'none';
+                      // Show fallback avatar if image fails to load
+                      e.target.parentElement.style.backgroundColor = colors.accent;
+                      e.target.parentElement.style.color = colors.primary;
+                      e.target.parentElement.textContent = getStudentInitials();
+                    }}
+                  />
+                ) : (
+                  getStudentInitials()
+                )}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
                 <span style={{ fontSize: '14px', fontWeight: '600', color: colors.primary }}>
-                  {user.name || user.username}
+                  {getStudentName()}
                 </span>
                 <span style={{ fontSize: '12px', color: colors.gray }}>Student</span>
               </div>
@@ -755,16 +861,38 @@ const StudentHome = ({ children }) => {
                 fontSize: '32px',
                 marginBottom: '16px',
                 border: '3px solid rgba(255, 255, 255, 0.3)',
-                backgroundColor: colors.accent
+                backgroundColor: colors.accent,
+                overflow: 'hidden'
               }}>
-                {user.name ? user.name.charAt(0).toUpperCase() : <FiUser size={24} />}
+                {profileImageUrl ? (
+                  <img 
+                    src={profileImageUrl} 
+                    alt={getStudentName()} 
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                      borderRadius: '50%'
+                    }}
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.style.display = 'none';
+                      // Show fallback avatar if image fails to load
+                      e.target.parentElement.style.backgroundColor = colors.accent;
+                      e.target.parentElement.style.color = colors.primary;
+                      e.target.parentElement.textContent = getStudentInitials();
+                    }}
+                  />
+                ) : (
+                  getStudentInitials()
+                )}
               </div>
               <div style={{ width: '100%' }}>
                 <h3 style={{ fontSize: '18px', fontWeight: '700', color: colors.white, margin: '0 0 4px 0' }}>
-                  {user.name || user.username}
+                  {getStudentName()}
                 </h3>
                 <p style={{ fontSize: '14px', color: 'rgba(255, 255, 255, 0.8)', margin: '0 0 12px 0' }}>
-                  {user.email || 'student@example.com'}
+                  {getStudentEmail()}
                 </p>
                 <div style={{ display: 'flex', justifyContent: 'center', gap: '16px', fontSize: '12px', color: 'rgba(255, 255, 255, 0.9)' }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -931,7 +1059,7 @@ const StudentHome = ({ children }) => {
                       WebkitBackgroundClip: 'text',
                       WebkitTextFillColor: 'transparent'
                     }}>
-                      Welcome back, {user.name?.split(' ')[0] || 'Student'}!
+                      Welcome back, {getStudentName().split(' ')[0] || 'Student'}!
                     </h1>
                     <span style={{ fontSize: '28px' }}>👋</span>
                   </div>

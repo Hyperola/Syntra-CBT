@@ -579,16 +579,16 @@ const EditResults = () => {
             }}>
               <thead>
                 <tr style={{
-                  backgroundColor: '#f8f9fa',
+                  backgroundColor: '#4B5320', // Changed to match header color
                   borderBottom: '2px solid #dee2e6'
                 }}>
-                  <th style={{ padding: '12px', textAlign: 'left', color: '#4B5320' }}>Student</th>
-                  <th style={{ padding: '12px', textAlign: 'left', color: '#4B5320' }}>Test</th>
-                  <th style={{ padding: '12px', textAlign: 'left', color: '#4B5320' }}>Subject</th>
-                  <th style={{ padding: '12px', textAlign: 'left', color: '#4B5320' }}>Class</th>
-                  <th style={{ padding: '12px', textAlign: 'left', color: '#4B5320' }}>Score</th>
-                  <th style={{ padding: '12px', textAlign: 'left', color: '#4B5320' }}>Submitted</th>
-                  <th style={{ padding: '12px', textAlign: 'left', color: '#4B5320' }}>Actions</th>
+                  <th style={{ padding: '12px', textAlign: 'left', color: 'white', fontWeight: '600' }}>Student</th>
+                  <th style={{ padding: '12px', textAlign: 'left', color: 'white', fontWeight: '600' }}>Test</th>
+                  <th style={{ padding: '12px', textAlign: 'left', color: 'white', fontWeight: '600' }}>Subject</th>
+                  <th style={{ padding: '12px', textAlign: 'left', color: 'white', fontWeight: '600' }}>Class</th>
+                  <th style={{ padding: '12px', textAlign: 'left', color: 'white', fontWeight: '600' }}>Score</th>
+                  <th style={{ padding: '12px', textAlign: 'left', color: 'white', fontWeight: '600' }}>Submitted</th>
+                  <th style={{ padding: '12px', textAlign: 'left', color: 'white', fontWeight: '600' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -930,8 +930,8 @@ const EditResults = () => {
                               cursor: 'pointer',
                               fontSize: '12px',
                               display: 'flex',
-                              alignItems: 'center',
-                              gap: '4px'
+                            alignItems: 'center',
+                            gap: '4px'
                             }}
                           >
                             <FiTrash2 /> Delete

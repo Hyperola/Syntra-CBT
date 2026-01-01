@@ -460,7 +460,7 @@ router.put('/:id', auth, requireAdmin, validateSessionInput, checkDuplicateSessi
   }
 });
 
-// Set session as active - FIXED VERSION
+// Set session as active - FIXED VERSION with term deactivation
 router.patch('/:id/activate', auth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -504,6 +504,33 @@ router.patch('/:id/activate', auth, requireAdmin, async (req, res) => {
       }
     }
 
+    // CRITICAL FIX: Find and deactivate all terms in currently active session
+    console.log('🔍 ACTIVATE SESSION - Finding and deactivating terms in currently active session...');
+    const activeSession = await Session.findOne({ isActive: true });
+    
+    if (activeSession) {
+      console.log('🔍 Currently active session found:', {
+        sessionName: activeSession.sessionName,
+        activeTerms: activeSession.terms.filter(t => t.isActive).map(t => t.name)
+      });
+      
+      // Deactivate all terms in the old active session
+      let termsDeactivated = false;
+      activeSession.terms.forEach(term => {
+        if (term.isActive) {
+          term.isActive = false;
+          termsDeactivated = true;
+        }
+      });
+      
+      if (termsDeactivated) {
+        await activeSession.save();
+        console.log('✅ Deactivated all terms in old active session');
+      } else {
+        console.log('ℹ️ No active terms found in old session');
+      }
+    }
+
     // Deactivate all other sessions
     console.log('🔍 ACTIVATE SESSION - Deactivating other sessions...');
     const deactivateResult = await Session.updateMany(
@@ -512,6 +539,20 @@ router.patch('/:id/activate', auth, requireAdmin, async (req, res) => {
     );
     console.log('🔍 ACTIVATE SESSION - Deactivated sessions:', deactivateResult.modifiedCount);
 
+    // CRITICAL FIX: Deactivate all terms in the target session before activation
+    console.log('🔍 ACTIVATE SESSION - Deactivating all terms in target session...');
+    let targetTermsDeactivated = false;
+    targetSession.terms.forEach(term => {
+      if (term.isActive) {
+        term.isActive = false;
+        targetTermsDeactivated = true;
+      }
+    });
+    
+    if (targetTermsDeactivated) {
+      console.log('✅ Deactivated previously active terms in target session');
+    }
+
     // Activate target session
     console.log('🔍 ACTIVATE SESSION - Activating target session...');
     targetSession.isActive = true;
@@ -519,12 +560,23 @@ router.patch('/:id/activate', auth, requireAdmin, async (req, res) => {
 
     await targetSession.save();
 
-    console.log('✅ ACTIVATE SESSION - Successfully activated:', targetSession.sessionName);
+    console.log('✅ ACTIVATE SESSION - Successfully activated:', {
+      sessionName: targetSession.sessionName,
+      sessionActive: targetSession.isActive,
+      termsStatus: targetSession.terms.map(t => ({ name: t.name, isActive: t.isActive }))
+    });
 
     res.json({
       message: 'Session activated successfully',
       session: targetSession,
-      previousActiveSessionsDeactivated: deactivateResult.modifiedCount > 0
+      previousActiveSessionsDeactivated: deactivateResult.modifiedCount > 0,
+      termsStatus: {
+        message: 'All terms have been deactivated. Please activate a specific term.',
+        terms: targetSession.terms.map(t => ({ 
+          name: t.name, 
+          isActive: t.isActive 
+        }))
+      }
     });
 
   } catch (error) {
@@ -535,7 +587,6 @@ router.patch('/:id/activate', auth, requireAdmin, async (req, res) => {
       name: error.name
     });
     
-    // More specific error messages
     if (error.name === 'ValidationError') {
       const errors = Object.values(error.errors).map(err => err.message);
       return res.status(400).json({ 
@@ -558,7 +609,7 @@ router.patch('/:id/activate', auth, requireAdmin, async (req, res) => {
   }
 });
 
-// Activate a term in a session
+// Activate a term in a session - FIXED VERSION
 router.patch('/:id/terms/:termName/activate', auth, requireAdmin, async (req, res) => {
   try {
     const { id, termName } = req.params;
@@ -588,8 +639,41 @@ router.patch('/:id/terms/:termName/activate', auth, requireAdmin, async (req, re
       });
     }
 
+    console.log('🔍 ACTIVATE TERM - Before activation:', {
+      sessionName: targetSession.sessionName,
+      targetTerm: termName,
+      currentTerms: targetSession.terms.map(t => ({ name: t.name, isActive: t.isActive }))
+    });
+
+    // CRITICAL FIX: Check if there's another active session with active terms
+    const otherActiveSession = await Session.findOne({
+      _id: { $ne: id },
+      isActive: true,
+      'terms.isActive': true
+    });
+
+    if (otherActiveSession) {
+      console.log('⚠️ Found another active session with active terms:', {
+        sessionName: otherActiveSession.sessionName,
+        activeTerms: otherActiveSession.terms.filter(t => t.isActive).map(t => t.name)
+      });
+      
+      // Deactivate all terms in the other active session
+      otherActiveSession.terms.forEach(term => {
+        term.isActive = false;
+      });
+      await otherActiveSession.save();
+      console.log('✅ Deactivated terms in other active session');
+    }
+
     // Activate the term using the instance method
     await targetSession.activateTerm(termName);
+
+    console.log('✅ ACTIVATE TERM - After activation:', {
+      sessionName: targetSession.sessionName,
+      targetTerm: termName,
+      currentTerms: targetSession.terms.map(t => ({ name: t.name, isActive: t.isActive }))
+    });
 
     res.json({
       message: `Term ${termName} activated successfully`,
@@ -607,8 +691,11 @@ router.patch('/:id/terms/:termName/activate', auth, requireAdmin, async (req, re
     });
 
   } catch (error) {
-    console.error('PATCH /api/sessions/:id/terms/:termName/activate - Error:', error);
-    res.status(500).json({ error: error.message || 'Server error activating term' });
+    console.error('❌ PATCH /api/sessions/:id/terms/:termName/activate - Error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Server error activating term',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 
@@ -909,6 +996,60 @@ router.delete('/:id', auth, requireAdmin, async (req, res) => {
   }
 });
 
+// Debug endpoint to check term status
+router.get('/debug/term-status', auth, async (req, res) => {
+  try {
+    const allSessions = await Session.find({});
+    
+    const sessionStatus = allSessions.map(session => ({
+      sessionName: session.sessionName,
+      isActive: session.isActive,
+      terms: session.terms.map(term => ({
+        name: term.name,
+        isActive: term.isActive,
+        sequence: term.sequence
+      }))
+    }));
+
+    // Find truly active session and term
+    const activeSession = sessionStatus.find(s => s.isActive);
+    let activeTerm = null;
+    
+    if (activeSession) {
+      const term = activeSession.terms.find(t => t.isActive);
+      if (term) {
+        activeTerm = {
+          session: activeSession.sessionName,
+          term: term.name
+        };
+      }
+    }
+
+    // Use the getActiveTerm static method
+    const staticActiveTerm = await Session.getActiveTerm();
+
+    res.json({
+      allSessions: sessionStatus,
+      activeSession: activeSession ? activeSession.sessionName : null,
+      activeTerm: activeTerm,
+      staticMethodResult: staticActiveTerm,
+      message: activeTerm 
+        ? `Active: ${activeTerm.session} - ${activeTerm.term}`
+        : 'No active term found',
+      debug: {
+        totalSessions: allSessions.length,
+        activeSessions: sessionStatus.filter(s => s.isActive).length,
+        sessionsWithActiveTerms: sessionStatus.filter(s => 
+          s.terms.some(t => t.isActive)
+        ).length
+      }
+    });
+  } catch (error) {
+    console.error('Debug endpoint error:', error);
+    res.status(500).json({ error: 'Debug failed' });
+  }
+});
+
 // Emergency cleanup endpoint for tests
 router.delete('/tests/emergency/cleanup', auth, requireAdmin, async (req, res) => {
   try {
@@ -991,6 +1132,28 @@ router.get('/:id/statistics', auth, async (req, res) => {
   } catch (error) {
     console.error('GET /api/sessions/:id/statistics - Error:', error);
     res.status(500).json({ error: 'Server error fetching session statistics' });
+  }
+});
+
+// Get active term (simple endpoint)
+router.get('/active-term/current', auth, async (req, res) => {
+  try {
+    const activeTerm = await Session.getActiveTerm();
+    
+    if (!activeTerm) {
+      return res.status(404).json({ 
+        error: 'No active term found',
+        suggestion: 'Please activate a session and a term'
+      });
+    }
+
+    res.json({
+      message: 'Active term retrieved successfully',
+      activeTerm: activeTerm
+    });
+  } catch (error) {
+    console.error('GET /api/sessions/active-term/current - Error:', error);
+    res.status(500).json({ error: 'Server error fetching active term' });
   }
 });
 

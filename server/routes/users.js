@@ -72,7 +72,7 @@ const handleBase64Image = async (base64Data, userId, isUpdate = false, user = nu
       return null;
     }
 
-    console.log('📸 Processing base64 image');
+    console.log('📸 Processing base64 image for user:', userId);
     
     // Extract base64 data
     const matches = base64Data.match(/^data:image\/(\w+);base64,/);
@@ -85,7 +85,7 @@ const handleBase64Image = async (base64Data, userId, isUpdate = false, user = nu
     const base64Image = base64Data.replace(/^data:image\/\w+;base64,/, '');
     const buffer = Buffer.from(base64Image, 'base64');
     
-    // Generate filename
+    // Generate filename with user ID - FIXED: Always use the provided userId
     const fileName = `profile_${userId}_${Date.now()}.${extension}`;
     const uploadDir = path.join(__dirname, '../../uploads/profiles');
     
@@ -1058,13 +1058,77 @@ router.post('/', auth, checkPermission('create_users'), validateUserInput, async
       className = await getClassName(classId);
     }
 
-    // Handle base64 profile image if provided - ADDED FOR CREATION
+    // Create new user object first to get the _id
+    const userData = {
+      username,
+      firstName,
+      lastName,
+      middleName,
+      email: email ? email.toLowerCase() : undefined,
+      password: password, // Raw password - will be hashed by model
+      role,
+      studentId,
+      class: classValue,
+      adminPermissions: role === 'admin' ? adminPermissions : undefined,
+      active,
+      dateOfBirth: dateOfBirth || undefined,
+      address: address || undefined,
+      phoneNumber: phoneNumber || undefined,
+      sex: sex || undefined,
+      age: age ? parseInt(age) : undefined,
+      teacherAssignments: [], // Will be populated below
+      enrolledSubjects: [], // Will be populated below
+      createdBy: req.user.id
+    };
+
+    console.log('💾 Creating user with data:', { 
+      ...userData, 
+      password: '***'
+    });
+
+    const user = new User(userData);
+    await user.save({ session });
+
+    console.log('✅ User created with ID:', user._id);
+
+    // Now handle base64 profile image with the actual user ID - FIXED
     let profileImageFileName = null;
     if (profileImage && profileImage.startsWith('data:image')) {
-      console.log('📸 Handling base64 profile image during user creation');
-      profileImageFileName = await handleBase64Image(profileImage, 'new', false);
-      if (profileImageFileName) {
-        console.log('✅ Base64 image processed for new user:', profileImageFileName);
+      try {
+        console.log('📸 Handling base64 profile image during user creation with ID:', user._id);
+        
+        // Extract base64 data
+        const matches = profileImage.match(/^data:image\/(\w+);base64,/);
+        if (!matches || matches.length < 2) {
+          throw new Error('Invalid base64 image format');
+        }
+        
+        const mimeType = matches[1];
+        const extension = mimeType === 'jpeg' ? 'jpg' : mimeType;
+        const base64Data = profileImage.replace(/^data:image\/\w+;base64,/, '');
+        const buffer = Buffer.from(base64Data, 'base64');
+        
+        // Generate filename with actual user ID - FIXED
+        const fileName = `profile_${user._id}_${Date.now()}.${extension}`;
+        const uploadDir = path.join(__dirname, '../../uploads/profiles');
+        
+        // Ensure directory exists
+        if (!fs.existsSync(uploadDir)) {
+          fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        
+        // Save new image
+        const filePath = path.join(uploadDir, fileName);
+        fs.writeFileSync(filePath, buffer);
+        
+        profileImageFileName = fileName;
+        user.profileImage = fileName;
+        user.profilePicture = fileName;
+        
+        console.log('✅ Base64 image saved for new user:', fileName);
+        
+      } catch (imageError) {
+        console.error('❌ Error saving base64 image:', imageError.message);
       }
     }
 
@@ -1154,38 +1218,15 @@ router.post('/', auth, checkPermission('create_users'), validateUserInput, async
       }
     }
 
-    // Create new user - password will be hashed by User model
-    const userData = {
-      username,
-      firstName,
-      lastName,
-      middleName,
-      email: email ? email.toLowerCase() : undefined,
-      password: password, // Raw password - will be hashed by model
-      role,
-      studentId,
-      class: classValue,
-      adminPermissions: role === 'admin' ? adminPermissions : undefined,
-      active,
-      dateOfBirth: dateOfBirth || undefined,
-      address: address || undefined,
-      phoneNumber: phoneNumber || undefined,
-      sex: sex || undefined,
-      age: age ? parseInt(age) : undefined,
-      teacherAssignments: processedTeacherAssignments,  // This is now properly set
-      enrolledSubjects: processedEnrolledSubjects,
-      profileImage: profileImageFileName, // Store the image filename
-      profilePicture: profileImageFileName, // For backward compatibility
-      createdBy: req.user.id
-    };
-
-    console.log('💾 Creating user with data:', { 
-      ...userData, 
-      password: '***',
-      teacherAssignments: userData.teacherAssignments 
-    });
-
-    const user = new User(userData);
+    // Update user with assignments and image
+    user.teacherAssignments = processedTeacherAssignments;
+    user.enrolledSubjects = processedEnrolledSubjects;
+    
+    if (profileImageFileName) {
+      user.profileImage = profileImageFileName;
+      user.profilePicture = profileImageFileName;
+    }
+    
     await user.save({ session });
 
     console.log('✅ User saved with assignments:', {
@@ -1328,7 +1369,7 @@ router.put('/:id', auth, checkPermission('edit_users'), async (req, res) => {
       if (profileImage && profileImage.startsWith('data:image')) {
         try {
           console.log('📸 Handling base64 profile image update');
-          const fileName = await handleBase64Image(profileImage, req.params.id, true, user);
+          const fileName = await handleBase64Image(profileImage, user._id.toString(), true, user);
           if (fileName) {
             user.profileImage = fileName;
             user.profilePicture = fileName;
@@ -2819,7 +2860,7 @@ router.put('/profile/me', auth, async (req, res) => {
       if (profileImage && profileImage.startsWith('data:image')) {
         try {
           console.log('📸 Handling base64 profile image update for current user');
-          const fileName = await handleBase64Image(profileImage, req.user.id, true, user);
+          const fileName = await handleBase64Image(profileImage, user._id.toString(), true, user);
           if (fileName) {
             user.profileImage = fileName;
             user.profilePicture = fileName;

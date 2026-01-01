@@ -1,4 +1,4 @@
-// pages/CreateAdmin.js - UPDATED TO MATCH USER MODEL STRUCTURE
+// pages/CreateAdmin.js - UPDATED WITH SINGLE REQUEST PROFILE IMAGE UPLOAD
 import React, { useState, useContext, useEffect } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -34,7 +34,6 @@ const CreateAdmin = () => {
     address: '',
     phoneNumber: '',
     sex: '',
-    profileImage: null
   });
   
   // Image upload state
@@ -67,6 +66,16 @@ const CreateAdmin = () => {
       navigate('/admin/users');
     }
   }, [user, navigate]);
+
+  // Helper function to convert image to base64
+  const convertImageToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = error => reject(error);
+    });
+  };
 
   const validateForm = () => {
     const newErrors = {};
@@ -178,7 +187,19 @@ const CreateAdmin = () => {
       // Clean username
       const cleanedUsername = cleanUsername(adminData.username);
       
-      // Build admin data matching User model structure
+      // Convert image to base64 if exists
+      let profileImageBase64 = null;
+      if (profileImage) {
+        try {
+          profileImageBase64 = await convertImageToBase64(profileImage);
+          console.log('✅ Image converted to base64, length:', profileImageBase64.length);
+        } catch (imageErr) {
+          console.warn('⚠️ Could not convert image to base64:', imageErr);
+          // Continue without image - don't fail the whole request
+        }
+      }
+      
+      // Build admin data matching User model structure - INCLUDING profileImage as base64
       const adminDataToSend = {
         username: cleanedUsername,
         password: adminData.password,
@@ -194,49 +215,37 @@ const CreateAdmin = () => {
         address: adminData.address?.trim() || undefined,
         phoneNumber: adminData.phoneNumber?.trim() || undefined,
         sex: adminData.sex || undefined,
-        createdBy: user.id
+        createdBy: user.id,
+        // Add profile image as base64 if available
+        ...(profileImageBase64 && { profileImage: profileImageBase64 })
       };
       
-      console.log('📤 Creating admin with data:', JSON.stringify(adminDataToSend, null, 2));
+      console.log('📤 Creating admin with data (SINGLE REQUEST):', {
+        ...adminDataToSend,
+        password: '***',
+        profileImage: profileImageBase64 ? 'BASE64_IMAGE_INCLUDED' : 'NO_IMAGE',
+        adminPermissions: adminDataToSend.adminPermissions
+      });
       
-      // Step 1: Create the admin
+      // SINGLE REQUEST: Create admin with profile image in one request
       const response = await axios.post('http://localhost:5000/api/users', 
         adminDataToSend, 
         {
           headers: { 
             Authorization: `Bearer ${authToken}`,
             'Content-Type': 'application/json'
-          }
+          },
+          timeout: 30000 // 30 second timeout
         }
       );
       
-      const adminId = response.data.data?._id || response.data.user?._id || response.data._id;
-      
-      // Step 2: Upload profile image if selected
-      if (profileImage && adminId) {
-        const formDataImage = new FormData();
-        formDataImage.append('profileImage', profileImage);
-        
-        try {
-          await axios.post(
-            `http://localhost:5000/api/users/${adminId}/upload-profile-image`,
-            formDataImage,
-            {
-              headers: { 
-                Authorization: `Bearer ${authToken}`,
-                'Content-Type': 'multipart/form-data'
-              }
-            }
-          );
-          console.log('✅ Profile image uploaded successfully');
-        } catch (imageErr) {
-          console.warn('⚠️ Could not upload profile image:', imageErr);
-          // Continue even if image upload fails
-        }
-      }
+      console.log('✅ Admin creation response:', {
+        success: response.data.success,
+        userId: response.data.user?._id || response.data.data?._id
+      });
       
       if (response.data.success) {
-        setSuccess('Admin created successfully! Redirecting...');
+        setSuccess('Admin created successfully with profile image! Redirecting...');
         
         // Reset form
         setAdminData({
@@ -253,7 +262,6 @@ const CreateAdmin = () => {
           address: '',
           phoneNumber: '',
           sex: '',
-          profileImage: null
         });
         setProfileImage(null);
         setImagePreview(null);
@@ -267,9 +275,15 @@ const CreateAdmin = () => {
       }
       
     } catch (err) {
-      console.error('Error creating admin:', err);
+      console.error('❌ Error creating admin:', err);
       
       if (err.response) {
+        console.error('📡 Response error details:', {
+          status: err.response.status,
+          data: err.response.data,
+          headers: err.response.headers
+        });
+        
         if (err.response.status === 400) {
           const errorMsg = err.response.data.message || 'Validation error. Please check the form.';
           setError(errorMsg);
@@ -283,6 +297,7 @@ const CreateAdmin = () => {
               if (errorMsg.includes('Password')) validationErrors.password = errorMsg;
               if (errorMsg.includes('First name')) validationErrors.firstName = errorMsg;
               if (errorMsg.includes('Last name')) validationErrors.lastName = errorMsg;
+              if (errorMsg.includes('profile image')) validationErrors.profileImage = errorMsg;
             });
             setErrors(validationErrors);
           }
@@ -297,6 +312,7 @@ const CreateAdmin = () => {
           setError(err.response.data?.message || `Server error: ${err.response.status}`);
         }
       } else if (err.request) {
+        console.error('🌐 Network error details:', err.request);
         setError('Network error. Please check your connection and try again.');
       } else {
         setError('An unexpected error occurred. Please try again.');
@@ -369,6 +385,9 @@ const CreateAdmin = () => {
         {/* Profile Image Upload Section */}
         <div style={styles.imageUploadSection}>
           <h3 style={styles.sectionTitle}>Profile Image (Optional)</h3>
+          <p style={styles.imageUploadHelp}>
+            Image will be sent as base64 in the same request with admin data.
+          </p>
           <div style={styles.imageUploadContainer}>
             <div style={styles.imagePreviewArea}>
               {imagePreview ? (
@@ -417,6 +436,8 @@ const CreateAdmin = () => {
               )}
               <div style={styles.imageUploadInfo}>
                 <small>JPG, PNG, GIF, WebP up to 5MB</small>
+                <br />
+                <small>Image will be saved with admin creation</small>
               </div>
             </div>
           </div>
@@ -442,6 +463,7 @@ const CreateAdmin = () => {
                 placeholder="admin_user"
                 style={{...styles.input, ...(errors.username && styles.inputError)}}
                 disabled={loading}
+                autoComplete="new-username"
               />
               {errors.username && <span style={styles.errorText}>{errors.username}</span>}
               <small style={styles.helpText}>No spaces allowed. Use underscores if needed.</small>
@@ -460,6 +482,7 @@ const CreateAdmin = () => {
                 placeholder="admin@school.com"
                 style={{...styles.input, ...(errors.email && styles.inputError)}}
                 disabled={loading}
+                autoComplete="email"
               />
               {errors.email && <span style={styles.errorText}>{errors.email}</span>}
             </div>
@@ -477,6 +500,7 @@ const CreateAdmin = () => {
                 placeholder="John"
                 style={{...styles.input, ...(errors.firstName && styles.inputError)}}
                 disabled={loading}
+                autoComplete="given-name"
               />
               {errors.firstName && <span style={styles.errorText}>{errors.firstName}</span>}
             </div>
@@ -492,6 +516,7 @@ const CreateAdmin = () => {
                 placeholder="Michael (optional)"
                 style={styles.input}
                 disabled={loading}
+                autoComplete="additional-name"
               />
             </div>
             
@@ -508,6 +533,7 @@ const CreateAdmin = () => {
                 placeholder="Doe"
                 style={{...styles.input, ...(errors.lastName && styles.inputError)}}
                 disabled={loading}
+                autoComplete="family-name"
               />
               {errors.lastName && <span style={styles.errorText}>{errors.lastName}</span>}
             </div>
@@ -525,6 +551,8 @@ const CreateAdmin = () => {
                 placeholder="••••••••"
                 style={{...styles.input, ...(errors.password && styles.inputError)}}
                 disabled={loading}
+                autoComplete="new-password"
+                minLength="6"
               />
               {errors.password && <span style={styles.errorText}>{errors.password}</span>}
               <small style={styles.helpText}>Minimum 6 characters</small>
@@ -543,6 +571,7 @@ const CreateAdmin = () => {
                 placeholder="••••••••"
                 style={{...styles.input, ...(errors.confirmPassword && styles.inputError)}}
                 disabled={loading}
+                autoComplete="new-password"
               />
               {errors.confirmPassword && <span style={styles.errorText}>{errors.confirmPassword}</span>}
             </div>
@@ -558,6 +587,7 @@ const CreateAdmin = () => {
                 placeholder="+1234567890"
                 style={{...styles.input, ...(errors.phoneNumber && styles.inputError)}}
                 disabled={loading}
+                autoComplete="tel"
               />
               {errors.phoneNumber && <span style={styles.errorText}>{errors.phoneNumber}</span>}
             </div>
@@ -591,6 +621,7 @@ const CreateAdmin = () => {
                 style={styles.textarea}
                 disabled={loading}
                 rows={3}
+                autoComplete="street-address"
               />
             </div>
             
@@ -604,8 +635,8 @@ const CreateAdmin = () => {
                 style={styles.select}
                 disabled={loading}
               >
-                <option value="true">Active</option>
-                <option value="false">Inactive</option>
+                <option value={true}>Active</option>
+                <option value={false}>Inactive</option>
               </select>
             </div>
           </div>
@@ -805,6 +836,12 @@ const styles = {
     borderRadius: '8px',
     border: '1px solid #E2E8F0'
   },
+  imageUploadHelp: {
+    color: '#718096',
+    fontSize: '14px',
+    marginBottom: '16px',
+    fontStyle: 'italic'
+  },
   imageUploadContainer: {
     display: 'flex',
     alignItems: 'center',
@@ -896,7 +933,8 @@ const styles = {
   },
   imageUploadInfo: {
     color: '#718096',
-    fontSize: '12px'
+    fontSize: '12px',
+    lineHeight: '1.5'
   },
   formGrid: {
     display: 'grid',
@@ -923,7 +961,7 @@ const styles = {
     border: '1px solid #E2E8F0',
     borderRadius: '4px',
     fontSize: '14px',
-    transition: 'border-color 0.2s',
+    transition: 'border-color 0.2s, box-shadow 0.2s',
     backgroundColor: 'white',
     boxSizing: 'border-box',
     color: '#2D3748',
@@ -943,7 +981,7 @@ const styles = {
     border: '1px solid #E2E8F0',
     borderRadius: '4px',
     fontSize: '14px',
-    transition: 'border-color 0.2s',
+    transition: 'border-color 0.2s, box-shadow 0.2s',
     backgroundColor: 'white',
     boxSizing: 'border-box',
     color: '#2D3748',
@@ -1177,6 +1215,10 @@ styleSheet.textContent = `
       top: auto;
       right: auto;
       margin-top: 16px;
+    }
+    
+    .formGrid {
+      grid-template-columns: 1fr;
     }
   }
 `;

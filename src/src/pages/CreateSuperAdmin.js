@@ -1,4 +1,4 @@
-// pages/CreateSuperAdmin.js - UPDATED VERSION FOR firstName/lastName
+// pages/CreateSuperAdmin.js - UPDATED WITH SINGLE REQUEST PROFILE IMAGE UPLOAD
 import React, { useState, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -24,7 +24,7 @@ const CreateSuperAdmin = () => {
     confirmPassword: '',
     email: '',
     firstName: '',
-    middleName: '',  // Added middleName field
+    middleName: '',
     lastName: '',
     role: 'super_admin',
     active: true,
@@ -38,6 +38,16 @@ const CreateSuperAdmin = () => {
   
   // Form validation
   const [errors, setErrors] = useState({});
+
+  // Helper function to convert image to base64 (from createadmin.js)
+  const convertImageToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = error => reject(error);
+    });
+  };
 
   const validateForm = () => {
     const newErrors = {};
@@ -67,11 +77,12 @@ const CreateSuperAdmin = () => {
     return Object.keys(newErrors).length === 0;
   };
 
+  // UPDATED: Image upload handler (from createadmin.js)
   const handleImageUpload = async (file) => {
     if (!file) return;
     
     const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    const maxSize = 5 * 1024 * 1024;
+    const maxSize = 5 * 1024 * 1024; // 5MB
     
     if (!validTypes.includes(file.type)) {
       setError('Please upload a valid image file (JPG, PNG, GIF, WebP).');
@@ -85,6 +96,7 @@ const CreateSuperAdmin = () => {
     
     setUploadingImage(true);
     try {
+      // Create preview
       const reader = new FileReader();
       reader.onloadend = () => {
         setImagePreview(reader.result);
@@ -111,6 +123,7 @@ const CreateSuperAdmin = () => {
     return cleaned.replace(/[^a-zA-Z0-9_]/g, '');
   };
 
+  // UPDATED: Main submit function with single request profile image upload
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -126,24 +139,47 @@ const CreateSuperAdmin = () => {
     try {
       const token = localStorage.getItem('token');
       
+      if (!token) {
+        throw new Error('Authentication required. Please log in again.');
+      }
+      
       // Clean username
       const cleanedUsername = cleanUsername(superAdminData.username);
       
-      // Build super admin data - MATCHING BACKEND EXPECTATIONS
+      // UPDATED: Convert image to base64 if exists (from createadmin.js)
+      let profileImageBase64 = null;
+      if (profileImage) {
+        try {
+          profileImageBase64 = await convertImageToBase64(profileImage);
+          console.log('✅ Image converted to base64, length:', profileImageBase64.length);
+        } catch (imageErr) {
+          console.warn('⚠️ Could not convert image to base64:', imageErr);
+          // Continue without image - don't fail the whole request
+        }
+      }
+      
+      // Build super admin data with profile image as base64 - SINGLE REQUEST
       const superAdminDataToSend = {
         username: cleanedUsername,
         password: superAdminData.password,
         email: superAdminData.email.trim().toLowerCase(),
         firstName: superAdminData.firstName.trim(),
         lastName: superAdminData.lastName.trim(),
-        middleName: superAdminData.middleName.trim() || undefined, // Optional field
+        middleName: superAdminData.middleName?.trim() || undefined,
         role: 'super_admin',
-        active: superAdminData.active
+        active: superAdminData.active,
+        createdBy: user.id,
+        // Add profile image as base64 if available
+        ...(profileImageBase64 && { profileImage: profileImageBase64 })
       };
       
-      console.log('📤 Creating super admin with data:', JSON.stringify(superAdminDataToSend, null, 2));
+      console.log('📤 Creating super admin with data (SINGLE REQUEST):', {
+        ...superAdminDataToSend,
+        password: '***',
+        profileImage: profileImageBase64 ? 'BASE64_IMAGE_INCLUDED' : 'NO_IMAGE'
+      });
       
-      // Step 1: Create the super admin
+      // SINGLE REQUEST: Create super admin with profile image in one request
       const response = await axios.post('http://localhost:5000/api/users', 
         superAdminDataToSend, 
         {
@@ -151,80 +187,86 @@ const CreateSuperAdmin = () => {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json'
           },
-          timeout: 10000
+          timeout: 30000 // 30 second timeout
         }
       );
       
-      console.log('✅ API Response:', response.data);
-      
-      const superAdminId = response.data.user?._id || response.data.data?._id || response.data._id;
-      
-      // Step 2: Upload profile image if selected
-      if (profileImage && superAdminId) {
-        const formDataImage = new FormData();
-        formDataImage.append('profileImage', profileImage);
-        
-        try {
-          await axios.post(
-            `http://localhost:5000/api/users/${superAdminId}/upload-profile-image`,
-            formDataImage,
-            {
-              headers: { 
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'multipart/form-data'
-              },
-              timeout: 15000
-            }
-          );
-          console.log('✅ Profile image uploaded successfully');
-        } catch (imageErr) {
-          console.warn('⚠️ Could not upload profile image:', imageErr.response?.data || imageErr.message);
-          // Continue even if image upload fails
-        }
-      }
-      
-      setSuccess('Super Admin created successfully! Redirecting...');
-      
-      // Reset form
-      setSuperAdminData({
-        username: '',
-        password: '',
-        confirmPassword: '',
-        email: '',
-        firstName: '',
-        middleName: '',
-        lastName: '',
-        role: 'super_admin',
-        active: true,
-        profileImage: null
+      console.log('✅ Super admin creation response:', {
+        success: response.data.success,
+        userId: response.data.user?._id || response.data.data?._id
       });
-      setConfirmation('');
-      setProfileImage(null);
-      setImagePreview(null);
       
-      // Navigate back after 2 seconds
-      setTimeout(() => {
-        navigate('/admin/users');
-      }, 2000);
+      if (response.data.success) {
+        setSuccess('Super Admin created successfully with profile image! Redirecting...');
+        
+        // Reset form
+        setSuperAdminData({
+          username: '',
+          password: '',
+          confirmPassword: '',
+          email: '',
+          firstName: '',
+          middleName: '',
+          lastName: '',
+          role: 'super_admin',
+          active: true,
+          profileImage: null
+        });
+        setConfirmation('');
+        setProfileImage(null);
+        setImagePreview(null);
+        
+        // Navigate back after 2 seconds
+        setTimeout(() => {
+          navigate('/admin/users');
+        }, 2000);
+      } else {
+        setError(response.data.message || 'Failed to create super admin');
+      }
       
     } catch (err) {
       console.error('❌ Error creating super admin:', err);
-      console.error('❌ Error response:', err.response?.data);
       
-      let errorMessage = 'Failed to create super admin';
-      
-      if (err.response?.data) {
-        if (err.response.data.message) {
-          errorMessage = err.response.data.message;
+      if (err.response) {
+        console.error('📡 Response error details:', {
+          status: err.response.status,
+          data: err.response.data,
+          headers: err.response.headers
+        });
+        
+        if (err.response.status === 400) {
+          const errorMsg = err.response.data.message || 'Validation error. Please check the form.';
+          setError(errorMsg);
+          
+          // Handle validation errors
+          if (err.response.data.errors) {
+            const validationErrors = {};
+            err.response.data.errors.forEach(errorMsg => {
+              if (errorMsg.includes('Username')) validationErrors.username = errorMsg;
+              if (errorMsg.includes('Email')) validationErrors.email = errorMsg;
+              if (errorMsg.includes('Password')) validationErrors.password = errorMsg;
+              if (errorMsg.includes('First name')) validationErrors.firstName = errorMsg;
+              if (errorMsg.includes('Last name')) validationErrors.lastName = errorMsg;
+              if (errorMsg.includes('profile image')) validationErrors.profileImage = errorMsg;
+            });
+            setErrors(validationErrors);
+          }
+        } else if (err.response.status === 401) {
+          setError('Authentication failed. Please log in again.');
+          setTimeout(() => navigate('/login'), 2000);
+        } else if (err.response.status === 403) {
+          setError('Permission denied. Only existing Super Admins can create new Super Admins.');
+        } else if (err.response.status === 409) {
+          setError('User with this username or email already exists.');
+        } else {
+          setError(err.response.data?.message || `Server error: ${err.response.status}`);
         }
-        if (err.response.data.errors && Array.isArray(err.response.data.errors)) {
-          errorMessage = `${errorMessage}: ${err.response.data.errors.join(', ')}`;
-        }
-      } else if (err.message) {
-        errorMessage = err.message;
+      } else if (err.request) {
+        console.error('🌐 Network error details:', err.request);
+        setError('Network error. Please check your connection and try again.');
+      } else {
+        setError('An unexpected error occurred. Please try again.');
       }
-      
-      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -236,6 +278,14 @@ const CreateSuperAdmin = () => {
       ...prev,
       [field]: value
     }));
+    
+    // Clear error for this field when user starts typing
+    if (errors[field]) {
+      setErrors(prev => ({
+        ...prev,
+        [field]: null
+      }));
+    }
   };
 
   if (!user || user.role !== 'super_admin') {
@@ -270,9 +320,12 @@ const CreateSuperAdmin = () => {
       )}
 
       <form onSubmit={handleSubmit} style={styles.form}>
-        {/* Profile Image Upload Section */}
+        {/* UPDATED: Profile Image Upload Section (from createadmin.js) */}
         <div style={styles.imageUploadSection}>
-          <h3 style={styles.sectionTitle}>Profile Image</h3>
+          <h3 style={styles.sectionTitle}>Profile Image (Optional)</h3>
+          <p style={styles.imageUploadHelp}>
+            Image will be sent as base64 in the same request with super admin data.
+          </p>
           <div style={styles.imageUploadContainer}>
             <div style={styles.imagePreviewArea}>
               {imagePreview ? (
@@ -291,7 +344,7 @@ const CreateSuperAdmin = () => {
                 accept="image/jpeg,image/png,image/gif,image/webp"
                 onChange={(e) => handleImageUpload(e.target.files[0])}
                 style={{ display: 'none' }}
-                disabled={uploadingImage}
+                disabled={uploadingImage || loading}
               />
               <label htmlFor="profileImage" style={styles.uploadButton}>
                 {uploadingImage ? (
@@ -314,13 +367,15 @@ const CreateSuperAdmin = () => {
                   type="button"
                   onClick={removeProfileImage}
                   style={styles.removeImageButton}
-                  disabled={uploadingImage}
+                  disabled={uploadingImage || loading}
                 >
                   <FiXCircle /> Remove
                 </button>
               )}
               <div style={styles.imageUploadInfo}>
                 <small>JPG, PNG, GIF, WebP up to 5MB</small>
+                <br />
+                <small>Image will be saved with super admin creation</small>
               </div>
             </div>
           </div>
@@ -351,6 +406,8 @@ const CreateSuperAdmin = () => {
                 onChange={(e) => handleFieldChange('username', e.target.value)}
                 placeholder="super_admin"
                 style={{...styles.input, ...(errors.username && styles.inputError)}}
+                disabled={loading}
+                autoComplete="new-username"
               />
               {errors.username && <span style={styles.errorText}>{errors.username}</span>}
               <small style={styles.helpText}>No spaces allowed. Use underscores if needed.</small>
@@ -366,6 +423,8 @@ const CreateSuperAdmin = () => {
                 onChange={(e) => handleFieldChange('email', e.target.value)}
                 placeholder="superadmin@school.com"
                 style={{...styles.input, ...(errors.email && styles.inputError)}}
+                disabled={loading}
+                autoComplete="email"
               />
               {errors.email && <span style={styles.errorText}>{errors.email}</span>}
             </div>
@@ -380,6 +439,8 @@ const CreateSuperAdmin = () => {
                 onChange={(e) => handleFieldChange('firstName', e.target.value)}
                 placeholder="Ibrahim"
                 style={{...styles.input, ...(errors.firstName && styles.inputError)}}
+                disabled={loading}
+                autoComplete="given-name"
               />
               {errors.firstName && <span style={styles.errorText}>{errors.firstName}</span>}
               <small style={styles.helpText}>First name is required</small>
@@ -395,6 +456,8 @@ const CreateSuperAdmin = () => {
                 onChange={(e) => handleFieldChange('middleName', e.target.value)}
                 placeholder="(Optional)"
                 style={styles.input}
+                disabled={loading}
+                autoComplete="additional-name"
               />
               <small style={styles.helpText}>Optional middle name</small>
             </div>
@@ -409,6 +472,8 @@ const CreateSuperAdmin = () => {
                 onChange={(e) => handleFieldChange('lastName', e.target.value)}
                 placeholder="Amao"
                 style={{...styles.input, ...(errors.lastName && styles.inputError)}}
+                disabled={loading}
+                autoComplete="family-name"
               />
               {errors.lastName && <span style={styles.errorText}>{errors.lastName}</span>}
               <small style={styles.helpText}>Last name is required</small>
@@ -424,6 +489,9 @@ const CreateSuperAdmin = () => {
                 onChange={(e) => handleFieldChange('password', e.target.value)}
                 placeholder="••••••••"
                 style={{...styles.input, ...(errors.password && styles.inputError)}}
+                disabled={loading}
+                autoComplete="new-password"
+                minLength="6"
               />
               {errors.password && <span style={styles.errorText}>{errors.password}</span>}
               <small style={styles.helpText}>Minimum 6 characters</small>
@@ -439,6 +507,8 @@ const CreateSuperAdmin = () => {
                 onChange={(e) => handleFieldChange('confirmPassword', e.target.value)}
                 placeholder="••••••••"
                 style={{...styles.input, ...(errors.confirmPassword && styles.inputError)}}
+                disabled={loading}
+                autoComplete="new-password"
               />
               {errors.confirmPassword && <span style={styles.errorText}>{errors.confirmPassword}</span>}
             </div>
@@ -449,6 +519,7 @@ const CreateSuperAdmin = () => {
                 value={superAdminData.active}
                 onChange={(e) => handleFieldChange('active', e.target.value === 'true')}
                 style={styles.select}
+                disabled={loading}
               >
                 <option value="true">Active</option>
                 <option value="false">Inactive</option>
@@ -511,6 +582,7 @@ const CreateSuperAdmin = () => {
                   onChange={(e) => setConfirmation(e.target.value)}
                   placeholder="I UNDERSTAND"
                   style={{...styles.input, ...(errors.confirmation && styles.inputError)}}
+                  disabled={loading}
                 />
               </label>
               {errors.confirmation && <span style={styles.errorText}>{errors.confirmation}</span>}
@@ -644,7 +716,7 @@ const styles = {
     alignItems: 'flex-start',
     gap: '12px'
   },
-  // Image Upload Styles
+  // UPDATED: Image Upload Styles (from createadmin.js)
   imageUploadSection: {
     marginBottom: '32px',
     padding: '20px',
@@ -652,10 +724,19 @@ const styles = {
     borderRadius: '8px',
     border: '1px solid #E2E8F0'
   },
+  imageUploadHelp: {
+    color: '#718096',
+    fontSize: '14px',
+    marginBottom: '16px',
+    fontStyle: 'italic'
+  },
   imageUploadContainer: {
     display: 'flex',
     alignItems: 'center',
-    gap: '20px'
+    gap: '20px',
+    '@media (max-width: 768px)': {
+      flexDirection: 'column'
+    }
   },
   imagePreviewArea: {
     width: '150px',
@@ -666,7 +747,8 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    border: '2px dashed #CBD5E0'
+    border: '2px dashed #CBD5E0',
+    flexShrink: 0
   },
   imagePreview: {
     width: '100%',
@@ -703,9 +785,14 @@ const styles = {
     gap: '8px',
     justifyContent: 'center',
     transition: 'all 0.2s',
-    '&:hover': {
+    width: 'fit-content',
+    '&:hover:not(:disabled)': {
       backgroundColor: '#2C5282',
       transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.5,
+      cursor: 'not-allowed'
     }
   },
   removeImageButton: {
@@ -722,15 +809,20 @@ const styles = {
     gap: '8px',
     justifyContent: 'center',
     transition: 'all 0.2s',
-    '&:hover': {
+    width: 'fit-content',
+    '&:hover:not(:disabled)': {
       backgroundColor: '#FEB2B2',
       transform: 'translateY(-2px)'
+    },
+    '&:disabled': {
+      opacity: 0.5,
+      cursor: 'not-allowed'
     }
   },
   imageUploadInfo: {
     color: '#718096',
     fontSize: '12px',
-    textAlign: 'center'
+    lineHeight: '1.5'
   },
   formGrid: {
     display: 'grid',
@@ -759,11 +851,16 @@ const styles = {
     fontSize: '14px',
     transition: 'border-color 0.2s',
     backgroundColor: 'white',
+    boxSizing: 'border-box',
     color: '#2D3748',
     '&:focus': {
       outline: 'none',
       borderColor: '#3182CE',
       boxShadow: '0 0 0 3px rgba(49, 130, 206, 0.1)'
+    },
+    '&:disabled': {
+      backgroundColor: '#F5F7FA',
+      cursor: 'not-allowed'
     }
   },
   inputError: {
@@ -783,6 +880,10 @@ const styles = {
       outline: 'none',
       borderColor: '#3182CE',
       boxShadow: '0 0 0 3px rgba(49, 130, 206, 0.1)'
+    },
+    '&:disabled': {
+      backgroundColor: '#F5F7FA',
+      cursor: 'not-allowed'
     }
   },
   errorText: {
@@ -896,6 +997,11 @@ styleSheet.textContent = `
   @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
+  }
+  
+  input:disabled, select:disabled, textarea:disabled {
+    background-color: #F5F7FA;
+    cursor: not-allowed;
   }
   
   @media (max-width: 768px) {

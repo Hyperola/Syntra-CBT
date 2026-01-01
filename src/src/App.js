@@ -9,6 +9,7 @@ import TestResults from './pages/TestResults';
 import Results from './pages/Results';
 import EditResults from './pages/EditResults';
 import ClassSubjectsManager from './pages/ClassSubjectsManager';
+import StudentTranscriptPage from './pages/StudentTranscriptPage';
 import ClassDetails from './pages/ClassDetails';
 import EditClass from './pages/EditClass';
 import TeacherAnalytics from './components/teacher/TeacherAnalytics'; 
@@ -262,14 +263,17 @@ const AppContent = () => {
           }
         />
         
+
+        {/* Transcript and Promotion Route */}
+
         <Route
-          path="/admin/classes/:classId/subjects"
-          element={
-            <ProtectedRoute requiredRoles={['admin', 'super_admin']}>
-              <AdminLayout><ClassSubjectsManager /></AdminLayout>
-            </ProtectedRoute>
-          }
-        />
+  path="/admin/transcripts"
+  element={
+    <ProtectedRoute requiredRoles={['admin', 'super_admin']}>
+      <AdminLayout><StudentTranscriptPage /></AdminLayout>
+    </ProtectedRoute>
+  }
+/>
         
         {/* Class Subjects Management Route (Legacy - redirects to new structure) */}
         <Route
