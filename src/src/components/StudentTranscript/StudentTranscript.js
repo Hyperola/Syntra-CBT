@@ -1,192 +1,29 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  Typography,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  Chip,
-  LinearProgress,
-  Box,
-  Grid,
-  IconButton,
-  Tooltip,
-  Alert,
-  AlertTitle,
-  CircularProgress,
-  Button,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Avatar,
-  Divider,
-  Stepper,
-  Step,
-  StepLabel,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  Fade
-} from '@mui/material';
-import {
-  School as SchoolIcon,
-  Person as PersonIcon,
-  Refresh as RefreshIcon,
-  Download as DownloadIcon,
-  Assessment as AssessmentIcon,
-  TrendingUp as TrendingUpIcon,
-  Grade as GradeIcon,
-  CalendarToday as CalendarIcon,
-  Class as ClassIcon,
-  ExpandMore as ExpandMoreIcon,
-  CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon,
-  Info as InfoIcon,
-  BarChart as BarChartIcon,
-  Print as PrintIcon,
-  Share as ShareIcon,
-  Email as EmailIcon,
-  History as HistoryIcon
-} from '@mui/icons-material';
-import { useTheme } from '@mui/material/styles';
-import { styled } from '@mui/material/styles';
-import { keyframes } from '@emotion/react';
-
-// ==================== STYLED COMPONENTS ====================
-
-const fadeIn = keyframes`
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
-`;
-
-const StyledCard = styled(Card)(({ theme }) => ({
-  animation: `${fadeIn} 0.6s ease-out`,
-  background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)',
-  borderRadius: '16px',
-  overflow: 'visible',
-  marginBottom: theme.spacing(3),
-  boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
-  '&:hover': {
-    boxShadow: '0 15px 50px rgba(0,0,0,0.15)',
-    transform: 'translateY(-4px)',
-    transition: 'all 0.3s ease'
-  }
-}));
-
-const HeaderCard = styled(Card)(({ theme }) => ({
-  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-  color: 'white',
-  borderRadius: '16px',
-  marginBottom: theme.spacing(3),
-  padding: theme.spacing(3),
-  position: 'relative',
-  overflow: 'hidden',
-  '&::before': {
-    content: '""',
-    position: 'absolute',
-    top: '-50%',
-    right: '-50%',
-    width: '200%',
-    height: '200%',
-    background: 'radial-gradient(circle, rgba(255,255,255,0.1) 1px, transparent 1px)',
-    backgroundSize: '20px 20px',
-    opacity: 0.1
-  }
-}));
-
-const StatCard = styled(Card)(({ theme }) => ({
-  background: 'white',
-  borderRadius: '12px',
-  padding: theme.spacing(2),
-  textAlign: 'center',
-  height: '100%',
-  transition: 'all 0.3s ease',
-  '&:hover': {
-    transform: 'translateY(-8px)',
-    boxShadow: '0 12px 20px rgba(0,0,0,0.1)',
-    background: 'linear-gradient(135deg, #fdfcfb 0%, #e2d1c3 100%)'
-  }
-}));
-
-const GradeBadge = styled(Chip)(({ grade, theme }) => {
-  const gradeColors = {
-    'A+': '#00C853',
-    'A': '#00E676',
-    'B': '#76FF03',
-    'C': '#C6FF00',
-    'D': '#FFEA00',
-    'E': '#FF9100',
-    'F': '#D32F2F'
-  };
-  return {
-    backgroundColor: gradeColors[grade] || '#9E9E9E',
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: '0.75rem',
-    height: '24px',
-    '& .MuiChip-label': {
-      padding: '0 8px'
-    }
-  };
-});
-
-const ProgressBar = styled(LinearProgress)(({ value, theme }) => ({
-  height: '10px',
-  borderRadius: '5px',
-  backgroundColor: '#e0e0e0',
-  '& .MuiLinearProgress-bar': {
-    borderRadius: '5px',
-    background: value >= 70 ? 'linear-gradient(90deg, #00C853, #64DD17)' :
-               value >= 50 ? 'linear-gradient(90deg, #FFEA00, #FFD600)' :
-               'linear-gradient(90deg, #FF5252, #FF4081)'
-  }
-}));
-
-const StyledTableRow = styled(TableRow)(({ theme, index }) => ({
-  backgroundColor: index % 2 === 0 ? '#f8f9fa' : 'white',
-  '&:hover': {
-    backgroundColor: '#e3f2fd',
-    transition: 'background-color 0.2s ease'
-  },
-  '& td': {
-    borderBottom: '1px solid #e0e0e0'
-  }
-}));
-
-const TermCard = styled(Card)(({ theme }) => ({
-  marginBottom: theme.spacing(2),
-  borderLeft: '5px solid',
-  borderLeftColor: theme.palette.primary.main,
-  borderRadius: '12px',
-  overflow: 'hidden',
-  transition: 'all 0.3s ease',
-  '&:hover': {
-    boxShadow: '0 8px 25px rgba(0,0,0,0.15)',
-    transform: 'translateX(5px)'
-  }
-}));
-
-// ==================== MAIN COMPONENT ====================
 
 const StudentTranscript = ({ studentId, studentName: propStudentName }) => {
-  const theme = useTheme();
   const [transcript, setTranscript] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [retryCount, setRetryCount] = useState(0);
-  const [downloadDialog, setDownloadDialog] = useState(false);
-  const [selectedTerm, setSelectedTerm] = useState(null);
   const [expandedTerms, setExpandedTerms] = useState({});
 
-  // ==================== DATA FETCHING ====================
+  // Brand colors
+  const COLORS = {
+    primary: '#4B5320',      // Army Green
+    secondary: '#76FF03',    // Bright Green
+    accent: '#FF9800',       // Orange
+    dark: '#2C3E50',
+    light: '#F8F9FA',
+    text: '#333333',
+    textLight: '#666666',
+    border: '#E0E0E0',
+    success: '#4CAF50',
+    warning: '#FF9800',
+    danger: '#D32F2F',
+    info: '#2196F3'
+  };
+
+  // Fetch transcript data
   const fetchTranscript = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -209,12 +46,6 @@ const StudentTranscript = ({ studentId, studentName: propStudentName }) => {
       if (response.data?.success !== false) {
         const processedData = processTranscriptData(response.data);
         setTranscript(processedData);
-        
-        // Auto-expand current term
-        if (processedData.records?.[0]) {
-          const firstTermKey = `${processedData.records[0].session}|${processedData.records[0].term}`;
-          setExpandedTerms({ [firstTermKey]: true });
-        }
       } else {
         throw new Error(response.data?.message || 'Failed to fetch transcript data');
       }
@@ -227,132 +58,70 @@ const StudentTranscript = ({ studentId, studentName: propStudentName }) => {
     }
   }, [studentId]);
 
-  // ==================== DATA PROCESSING ====================
+  // Process raw transcript data
   const processTranscriptData = (data) => {
-    if (!data) return data;
+    if (!data) return null;
     
     const student = data.student || {};
+    const records = data.records || [];
     
-    let currentClass = 'Not assigned';
-    let level = 'N/A';
-    
-    if (student.currentClass) {
-      if (typeof student.currentClass === 'object') {
-        currentClass = student.currentClass.name || student.currentClass;
-        level = student.currentClass.level || student.level || 'N/A';
-      } else {
-        currentClass = student.currentClass;
-        level = student.level || 'N/A';
+    // Ensure proper score calculation
+    const processedRecords = records.map(record => {
+      if (!record.grades || Object.keys(record.grades).length === 0) {
+        return record;
       }
-    }
-    
-    let processedRecords = [];
-    if (data.records && Array.isArray(data.records)) {
-      processedRecords = data.records.map(record => {
-        if (!record.grades) {
-          return {
-            session: record.session,
-            term: record.term,
-            class: record.class,
-            grades: {},
-            average: record.average || '0.0',
-            subjectCount: 0,
-            totalTests: record.testCount || 0
-          };
+      
+      // Calculate totals from subject scores
+      let totalScore = 0;
+      let totalPossible = 0;
+      let subjectCount = 0;
+      
+      Object.values(record.grades).forEach(grade => {
+        if (grade && typeof grade === 'object') {
+          // Use total score if available, otherwise calculate from components
+          const score = parseFloat(grade.total) || 
+            (parseFloat(grade.ca1 || 0) + parseFloat(grade.ca2 || 0) + parseFloat(grade.exam || 0));
+          
+          const maxPossible = grade.maxPossible || 100;
+          
+          totalScore += score;
+          totalPossible += maxPossible;
+          subjectCount++;
+          
+          // Ensure percentage is calculated correctly
+          const percentage = maxPossible > 0 ? (score / maxPossible) * 100 : 0;
+          grade.percentage = percentage.toFixed(1);
+          grade.grade = calculateGrade(percentage);
         }
-        
-        let totalSubjectPercentage = 0;
-        let subjectCount = 0;
-        let totalScore = 0;
-        let totalPossible = 0;
-        const processedGrades = {};
-        
-        Object.entries(record.grades).forEach(([subject, grade]) => {
-          if (grade && typeof grade === 'object') {
-            const percentage = parseFloat(grade.percentage) || 0;
-            const averageScore = parseFloat(grade.averageScore) || 0;
-            const averageTotalMarks = parseFloat(grade.averageTotalMarks) || 100;
-            
-            let finalPercentage = percentage;
-            if (!percentage && averageTotalMarks > 0) {
-              finalPercentage = (averageScore / averageTotalMarks) * 100;
-            }
-            
-            processedGrades[subject] = {
-              subject: subject,
-              score: Math.round(averageScore),
-              totalMarks: Math.round(averageTotalMarks),
-              percentage: finalPercentage.toFixed(1),
-              grade: grade.grade || calculateGrade(finalPercentage),
-              remark: grade.remark || getRemark(finalPercentage),
-              firstCA: grade.firstCA || 0,
-              secondCA: grade.secondCA || 0,
-              exam: grade.exam || 0
-            };
-            
-            totalScore += averageScore;
-            totalPossible += averageTotalMarks;
-            totalSubjectPercentage += finalPercentage;
-            subjectCount++;
-          }
-        });
-        
-        let termAverage;
-        if (record.average !== undefined) {
-          termAverage = parseFloat(record.average) || 0;
-        } else if (totalPossible > 0) {
-          termAverage = (totalScore / totalPossible) * 100;
-        } else if (subjectCount > 0) {
-          termAverage = totalSubjectPercentage / subjectCount;
-        } else {
-          termAverage = 0;
-        }
-        
-        return {
-          session: record.session,
-          term: record.term,
-          class: record.class,
-          grades: processedGrades,
-          average: termAverage.toFixed(1),
-          subjectCount: subjectCount,
-          totalTests: record.testCount || 0,
-          promoted: record.promoted,
-          attendance: record.attendance,
-          _totalScore: Math.round(totalScore),
-          _totalPossible: Math.round(totalPossible),
-          gpa: record.gpa || '0.00'
-        };
       });
       
-      processedRecords.sort((a, b) => {
-        const sessionA = a.session || '';
-        const sessionB = b.session || '';
-        return sessionB.localeCompare(sessionA);
-      });
-    }
+      // Calculate term average
+      const termAverage = totalPossible > 0 ? (totalScore / totalPossible) * 100 : 0;
+      
+      return {
+        ...record,
+        totalScore: Math.round(totalScore),
+        totalPossible: Math.round(totalPossible),
+        average: termAverage.toFixed(1),
+        subjectCount,
+        _realScore: totalScore,
+        _realPossible: totalPossible
+      };
+    });
     
+    // Calculate overall statistics
     const overallStats = calculateOverallStats(processedRecords);
-    
-    const processedStudent = {
-      name: student.name || propStudentName || 'Unknown Student',
-      studentId: student.studentId || studentId,
-      currentClass: currentClass,
-      level: level,
-      admissionDate: student.admissionDate,
-      dateOfBirth: student.dateOfBirth,
-      gender: student.gender,
-      email: student.email
-    };
     
     return {
       ...data,
-      student: processedStudent,
+      student,
       records: processedRecords,
       summary: overallStats,
       generatedAt: data.generatedAt || new Date().toISOString()
     };
   };
 
+  // Calculate overall statistics
   const calculateOverallStats = (records) => {
     if (!records || records.length === 0) {
       return {
@@ -360,10 +129,8 @@ const StudentTranscript = ({ studentId, studentName: propStudentName }) => {
         overallAverage: '0%',
         totalSubjects: 0,
         totalTests: 0,
-        promotionRate: '0%',
-        bestTerm: null,
-        worstTerm: null,
-        overallRemark: 'No records available'
+        totalScore: 0,
+        totalPossible: 0
       };
     }
     
@@ -371,23 +138,18 @@ const StudentTranscript = ({ studentId, studentName: propStudentName }) => {
     let totalTests = 0;
     let totalScore = 0;
     let totalPossible = 0;
-    let promotionCount = 0;
     const allSubjects = new Set();
-    let bestTerm = records[0];
-    let bestAverage = parseFloat(records[0].average) || 0;
-    let worstTerm = records[0];
-    let worstAverage = parseFloat(records[0].average) || 0;
+    let bestTerm = null;
+    let worstTerm = null;
+    let bestAverage = -1;
+    let worstAverage = 101;
     
     records.forEach(record => {
       const termAverage = parseFloat(record.average) || 0;
       totalAverage += termAverage;
-      totalTests += record.totalTests || 0;
-      totalScore += record._totalScore || 0;
-      totalPossible += record._totalPossible || 0;
-      
-      if (record.promoted === true) {
-        promotionCount++;
-      }
+      totalTests += record.testCount || 0;
+      totalScore += record._realScore || 0;
+      totalPossible += record._realPossible || 0;
       
       if (record.grades) {
         Object.keys(record.grades).forEach(subject => {
@@ -395,6 +157,7 @@ const StudentTranscript = ({ studentId, studentName: propStudentName }) => {
         });
       }
       
+      // Track best and worst terms
       if (termAverage > bestAverage) {
         bestAverage = termAverage;
         bestTerm = record;
@@ -407,38 +170,34 @@ const StudentTranscript = ({ studentId, studentName: propStudentName }) => {
     });
     
     const overallAverage = (totalAverage / records.length).toFixed(1);
-    const promotionRate = ((promotionCount / records.length) * 100).toFixed(0);
-    
-    let weightedAverage = 0;
-    if (totalPossible > 0) {
-      weightedAverage = (totalScore / totalPossible) * 100;
-    }
+    const weightedAverage = totalPossible > 0 ? (totalScore / totalPossible) * 100 : 0;
     
     return {
       totalTerms: records.length,
       overallAverage: `${overallAverage}%`,
       weightedAverage: `${weightedAverage.toFixed(1)}%`,
       totalSubjects: allSubjects.size,
-      totalTests: totalTests,
+      totalTests,
       totalScore: Math.round(totalScore),
       totalPossible: Math.round(totalPossible),
-      promotionRate: `${promotionRate}%`,
-      promotionCount: promotionCount,
       bestTerm: bestTerm ? {
         session: bestTerm.session,
         term: bestTerm.term,
-        average: bestTerm.average
+        average: bestTerm.average,
+        score: bestTerm.totalScore,
+        possible: bestTerm.totalPossible
       } : null,
       worstTerm: worstTerm ? {
         session: worstTerm.session,
         term: worstTerm.term,
-        average: worstTerm.average
-      } : null,
-      overallRemark: getOverallRemark(parseFloat(overallAverage))
+        average: worstTerm.average,
+        score: worstTerm.totalScore,
+        possible: worstTerm.totalPossible
+      } : null
     };
   };
 
-  // ==================== HELPER FUNCTIONS ====================
+  // Helper functions
   const calculateGrade = (percentage) => {
     if (percentage >= 90) return 'A+';
     if (percentage >= 80) return 'A';
@@ -449,36 +208,27 @@ const StudentTranscript = ({ studentId, studentName: propStudentName }) => {
     return 'F';
   };
 
+  const getGradeColor = (grade) => {
+    const colors = {
+      'A+': COLORS.success,
+      'A': COLORS.success,
+      'B': '#4CAF50', // Slightly darker green
+      'C': COLORS.accent,
+      'D': COLORS.warning,
+      'E': '#FF5722', // Darker orange
+      'F': COLORS.danger
+    };
+    return colors[grade] || COLORS.textLight;
+  };
+
   const getRemark = (percentage) => {
     if (percentage >= 90) return 'Outstanding';
     if (percentage >= 80) return 'Excellent';
     if (percentage >= 70) return 'Very Good';
     if (percentage >= 60) return 'Good';
-    if (percentage >= 50) return 'Pass';
-    if (percentage >= 40) return 'Below Average';
+    if (percentage >= 50) return 'Satisfactory';
+    if (percentage >= 40) return 'Pass';
     return 'Needs Improvement';
-  };
-
-  const getOverallRemark = (average) => {
-    if (average >= 80) return 'EXCELLENT';
-    if (average >= 70) return 'VERY GOOD';
-    if (average >= 60) return 'GOOD';
-    if (average >= 50) return 'SATISFACTORY';
-    if (average >= 40) return 'PASS';
-    return 'NEEDS IMPROVEMENT';
-  };
-
-  const getGradeColor = (grade) => {
-    const colors = {
-      'A+': '#00C853',
-      'A': '#00E676',
-      'B': '#76FF03',
-      'C': '#C6FF00',
-      'D': '#FFEA00',
-      'E': '#FF9100',
-      'F': '#D32F2F'
-    };
-    return colors[grade] || '#9E9E9E';
   };
 
   const handleFetchError = (err) => {
@@ -515,53 +265,6 @@ const StudentTranscript = ({ studentId, studentName: propStudentName }) => {
     }
   };
 
-  const handleRetry = () => {
-    setRetryCount(prev => prev + 1);
-    fetchTranscript();
-  };
-
-  const toggleTermExpansion = (termKey) => {
-    setExpandedTerms(prev => ({
-      ...prev,
-      [termKey]: !prev[termKey]
-    }));
-  };
-
-  const handleDownloadPDF = (term = null) => {
-    const studentName = transcript?.student?.name || 'Student';
-    const fileName = term 
-      ? `Transcript_${studentName}_${term.session}_${term.term}.pdf`
-      : `Transcript_${studentName}_Full.pdf`;
-    
-    console.log('Downloading:', fileName);
-    // Implement PDF generation here
-    setDownloadDialog(false);
-  };
-
-  const handlePrint = () => {
-    window.print();
-  };
-
-  const handleShare = () => {
-    if (navigator.share) {
-      navigator.share({
-        title: `Transcript - ${transcript?.student?.name}`,
-        text: `Academic transcript for ${transcript?.student?.name}`,
-        url: window.location.href
-      });
-    } else {
-      navigator.clipboard.writeText(window.location.href);
-      alert('Link copied to clipboard!');
-    }
-  };
-
-  const handleEmail = () => {
-    const subject = `Transcript - ${transcript?.student?.name}`;
-    const body = `Please find attached the academic transcript for ${transcript?.student?.name}`;
-    window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  };
-
-  // ==================== EFFECTS ====================
   useEffect(() => {
     if (studentId) {
       fetchTranscript();
@@ -569,173 +272,89 @@ const StudentTranscript = ({ studentId, studentName: propStudentName }) => {
       setError('No student ID provided');
       setLoading(false);
     }
-  }, [studentId, retryCount, fetchTranscript]);
+  }, [studentId, fetchTranscript]);
 
   // ==================== RENDER FUNCTIONS ====================
+
   const renderLoading = () => (
-    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
-      <Box sx={{ textAlign: 'center' }}>
-        <CircularProgress size={60} thickness={4} sx={{ mb: 3, color: theme.palette.primary.main }} />
-        <Typography variant="h6" color="textSecondary" gutterBottom>
-          Loading Academic Transcript
-        </Typography>
-        <Typography variant="body2" color="textSecondary">
-          Fetching data for Student ID: {studentId}
-        </Typography>
-        <LinearProgress sx={{ mt: 2, width: '300px', mx: 'auto', borderRadius: '5px' }} />
-      </Box>
-    </Box>
+    <div style={styles.loadingContainer}>
+      <div style={styles.spinner}></div>
+      <div style={{ marginTop: '20px' }}>
+        <h3 style={{ color: COLORS.dark, marginBottom: '8px' }}>Loading Academic Transcript</h3>
+        <p style={{ color: COLORS.textLight, fontSize: '14px' }}>Student ID: {studentId}</p>
+      </div>
+    </div>
   );
 
   const renderError = () => (
-    <Box sx={{ mt: 4 }}>
-      <Alert 
-        severity="error" 
-        sx={{ 
-          borderRadius: '12px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-        }}
-      >
-        <AlertTitle>Error Loading Transcript</AlertTitle>
-        {error}
-        <Box sx={{ mt: 2, display: 'flex', gap: 2 }}>
-          <Button 
-            variant="contained" 
-            onClick={handleRetry}
-            startIcon={<RefreshIcon />}
-          >
-            Retry
-          </Button>
-          <Button 
-            variant="outlined" 
-            onClick={() => window.location.reload()}
-          >
-            Refresh Page
-          </Button>
-        </Box>
-      </Alert>
-    </Box>
+    <div style={styles.errorContainer}>
+      <h3 style={{ color: COLORS.danger, marginBottom: '12px' }}>Error Loading Transcript</h3>
+      <p style={{ color: COLORS.text, marginBottom: '20px' }}>{error}</p>
+      <div style={{ display: 'flex', gap: '12px' }}>
+        <button style={styles.primaryButton} onClick={() => fetchTranscript()}>
+          Retry
+        </button>
+        <button style={styles.secondaryButton} onClick={() => window.location.reload()}>
+          Refresh Page
+        </button>
+      </div>
+    </div>
   );
 
   const renderEmpty = () => (
-    <Box sx={{ textAlign: 'center', py: 8 }}>
-      <AssessmentIcon sx={{ fontSize: 80, color: 'text.secondary', mb: 2 }} />
-      <Typography variant="h5" gutterBottom color="textSecondary">
-        No Academic Records Found
-      </Typography>
-      <Typography variant="body1" color="textSecondary" paragraph>
+    <div style={styles.emptyContainer}>
+      <h3 style={{ color: COLORS.dark, marginBottom: '12px' }}>No Academic Records</h3>
+      <p style={{ color: COLORS.textLight, marginBottom: '24px' }}>
         This student does not have any academic records yet.
-      </Typography>
-      <Button 
-        variant="contained" 
-        onClick={fetchTranscript}
-        startIcon={<RefreshIcon />}
-      >
+      </p>
+      <button style={styles.primaryButton} onClick={() => fetchTranscript()}>
         Check Again
-      </Button>
-    </Box>
+      </button>
+    </div>
   );
 
   const renderStudentHeader = () => {
     if (!transcript?.student) return null;
     
     const student = transcript.student;
-    const stats = transcript.summary || {};
     
     return (
-      <HeaderCard>
-        <Grid container spacing={3} alignItems="center">
-          <Grid item xs={12} md={8}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-              <Avatar
-                sx={{
-                  width: 100,
-                  height: 100,
-                  bgcolor: 'white',
-                  color: theme.palette.primary.main,
-                  fontSize: '2.5rem',
-                  fontWeight: 'bold',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-                  border: '4px solid rgba(255,255,255,0.3)'
-                }}
-              >
-                {student.name?.charAt(0) || 'S'}
-              </Avatar>
-              <Box>
-                <Typography variant="h3" sx={{ fontWeight: 'bold', mb: 1 }}>
-                  {student.name}
-                </Typography>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-                  <Chip 
-                    icon={<PersonIcon />} 
-                    label={`ID: ${student.studentId}`}
-                    size="small"
-                    sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}
-                  />
-                  <Chip 
-                    icon={<ClassIcon />} 
-                    label={`Class: ${student.currentClass}`}
-                    size="small"
-                    sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}
-                  />
-                  <Chip 
-                    icon={<SchoolIcon />} 
-                    label={`Level: ${student.level}`}
-                    size="small"
-                    sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}
-                  />
-                </Box>
-                {student.admissionDate && (
-                  <Typography variant="body2" sx={{ mt: 1, opacity: 0.9 }}>
-                    <CalendarIcon sx={{ fontSize: 14, verticalAlign: 'middle', mr: 0.5 }} />
-                    Admitted: {new Date(student.admissionDate).toLocaleDateString()}
-                  </Typography>
-                )}
-              </Box>
-            </Box>
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <Box sx={{ textAlign: 'right' }}>
-              <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', mb: 2 }}>
-                <Tooltip title="Print Transcript">
-                  <IconButton onClick={handlePrint} sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}>
-                    <PrintIcon />
-                  </IconButton>
-                </Tooltip>
-                <Tooltip title="Share Transcript">
-                  <IconButton onClick={handleShare} sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}>
-                    <ShareIcon />
-                  </IconButton>
-                </Tooltip>
-                <Tooltip title="Email Transcript">
-                  <IconButton onClick={handleEmail} sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}>
-                    <EmailIcon />
-                  </IconButton>
-                </Tooltip>
-                <Tooltip title="Download PDF">
-                  <IconButton onClick={() => setDownloadDialog(true)} sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}>
-                    <DownloadIcon />
-                  </IconButton>
-                </Tooltip>
-              </Box>
-              <Typography variant="caption" sx={{ opacity: 0.8, display: 'block' }}>
-                Generated: {new Date(transcript.generatedAt).toLocaleDateString()}
-              </Typography>
-              <Chip 
-                label="OFFICIAL TRANSCRIPT"
-                size="small"
-                sx={{ 
-                  mt: 1,
-                  bgcolor: '#4CAF50', 
-                  color: 'white',
-                  fontWeight: 'bold',
-                  fontSize: '0.7rem'
-                }}
-              />
-            </Box>
-          </Grid>
-        </Grid>
-      </HeaderCard>
+      <div style={styles.headerCard}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <h1 style={styles.studentName}>{student.name}</h1>
+            <div style={styles.studentInfo}>
+              <div style={styles.infoItem}>
+                <span style={styles.infoLabel}>Student ID:</span>
+                <span style={styles.infoValue}>{student.studentId}</span>
+              </div>
+              <div style={styles.infoItem}>
+                <span style={styles.infoLabel}>Class:</span>
+                <span style={styles.infoValue}>{student.currentClass}</span>
+              </div>
+              <div style={styles.infoItem}>
+                <span style={styles.infoLabel}>Level:</span>
+                <span style={styles.infoValue}>{student.level}</span>
+              </div>
+              {student.admissionDate && (
+                <div style={styles.infoItem}>
+                  <span style={styles.infoLabel}>Admission:</span>
+                  <span style={styles.infoValue}>
+                    {new Date(student.admissionDate).toLocaleDateString('en-GB')}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+          
+          <div style={{ textAlign: 'right' }}>
+            <div style={styles.officialBadge}>Official Transcript</div>
+            <p style={{ color: COLORS.textLight, fontSize: '12px', marginTop: '8px' }}>
+              Generated: {new Date(transcript.generatedAt).toLocaleDateString('en-GB')}
+            </p>
+          </div>
+        </div>
+      </div>
     );
   };
 
@@ -744,425 +363,596 @@ const StudentTranscript = ({ studentId, studentName: propStudentName }) => {
     
     const stats = transcript.summary;
     
-    const statItems = [
-      {
-        icon: <AssessmentIcon />,
-        value: stats.totalTerms || 0,
-        label: 'Academic Terms',
-        color: '#667eea'
-      },
-      {
-        icon: <TrendingUpIcon />,
-        value: stats.overallAverage || '0%',
-        label: 'Overall Average',
-        color: '#4CAF50'
-      },
-      {
-        icon: <GradeIcon />,
-        value: stats.totalSubjects || 0,
-        label: 'Total Subjects',
-        color: '#FF9800'
-      },
-      {
-        icon: <BarChartIcon />,
-        value: stats.promotionRate || '0%',
-        label: 'Promotion Rate',
-        color: '#9C27B0'
-      },
-      {
-        icon: <CheckCircleIcon />,
-        value: stats.totalTests || 0,
-        label: 'Total Tests',
-        color: '#2196F3'
-      },
-      {
-        icon: <HistoryIcon />,
-        value: stats.promotionCount || 0,
-        label: 'Promotions',
-        color: '#00BCD4'
-      }
-    ];
-    
     return (
-      <StyledCard>
-        <CardHeader
-          title="Academic Overview"
-          titleTypographyProps={{ variant: 'h5', fontWeight: 'bold' }}
-          action={
-            <Button 
-              startIcon={<RefreshIcon />} 
-              onClick={fetchTranscript}
-              size="small"
-            >
-              Refresh
-            </Button>
-          }
-        />
-        <CardContent>
-          <Grid container spacing={2}>
-            {statItems.map((item, index) => (
-              <Grid item xs={6} sm={4} md={2} key={index}>
-                <StatCard>
-                  <Box sx={{ 
-                    width: 50, 
-                    height: 50, 
-                    borderRadius: '50%', 
-                    bgcolor: item.color,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    margin: '0 auto 16px',
-                    color: 'white'
-                  }}>
-                    {item.icon}
-                  </Box>
-                  <Typography variant="h4" fontWeight="bold" gutterBottom>
-                    {item.value}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    {item.label}
-                  </Typography>
-                </StatCard>
-              </Grid>
-            ))}
-          </Grid>
+      <div style={styles.statisticsCard}>
+        <h2 style={styles.sectionTitle}>Academic Summary</h2>
+        
+        <div style={styles.statsGrid}>
+          <div style={styles.statBox}>
+            <div style={styles.statValue}>{stats.totalTerms}</div>
+            <div style={styles.statLabel}>Academic Terms</div>
+          </div>
           
-          <Divider sx={{ my: 3 }} />
+          <div style={styles.statBox}>
+            <div style={styles.statValue}>{stats.overallAverage}</div>
+            <div style={styles.statLabel}>Overall Average</div>
+          </div>
           
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={6}>
-              <Box sx={{ mb: 2 }}>
-                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-                  Overall Performance
-                </Typography>
-                <ProgressBar 
-                  variant="determinate" 
-                  value={parseFloat(stats.overallAverage) || 0} 
-                />
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
-                  <Typography variant="body2" color="textSecondary">
-                    Performance: {stats.overallRemark}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    {stats.overallAverage}
-                  </Typography>
-                </Box>
-              </Box>
-              
-              {stats.bestTerm && (
-                <Alert severity="success" icon={<CheckCircleIcon />}>
-                  <AlertTitle>Best Performance</AlertTitle>
-                  {stats.bestTerm.session} ({stats.bestTerm.term}) - {stats.bestTerm.average}%
-                </Alert>
-              )}
-            </Grid>
-            
-            <Grid item xs={12} md={6}>
-              <Box sx={{ p: 2, bgcolor: '#f5f5f5', borderRadius: '8px' }}>
-                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-                  Academic Summary
-                </Typography>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="body2">Total Score:</Typography>
-                  <Typography variant="body2" fontWeight="bold">
-                    {stats.totalScore || 0}/{stats.totalPossible || 0}
-                  </Typography>
-                </Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="body2">Weighted Average:</Typography>
-                  <Typography variant="body2" fontWeight="bold">
-                    {stats.weightedAverage || '0%'}
-                  </Typography>
-                </Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <Typography variant="body2">Promotion Status:</Typography>
-                  <Chip 
-                    label={parseFloat(stats.overallAverage) >= 40 ? "ELIGIBLE" : "NOT ELIGIBLE"}
-                    size="small"
-                    color={parseFloat(stats.overallAverage) >= 40 ? "success" : "error"}
-                  />
-                </Box>
-              </Box>
-              
-              {stats.worstTerm && (
-                <Alert severity="warning" sx={{ mt: 2 }} icon={<ErrorIcon />}>
-                  <AlertTitle>Needs Improvement</AlertTitle>
-                  {stats.worstTerm.session} ({stats.worstTerm.term}) - {stats.worstTerm.average}%
-                </Alert>
-              )}
-            </Grid>
-          </Grid>
-        </CardContent>
-      </StyledCard>
+          <div style={styles.statBox}>
+            <div style={styles.statValue}>{stats.totalSubjects}</div>
+            <div style={styles.statLabel}>Total Subjects</div>
+          </div>
+          
+          <div style={styles.statBox}>
+            <div style={styles.statValue}>{stats.totalTests}</div>
+            <div style={styles.statLabel}>Total Tests</div>
+          </div>
+        </div>
+        
+        <div style={styles.detailedStats}>
+          <div style={styles.statRow}>
+            <span style={styles.statLabel}>Total Score:</span>
+            <span style={styles.statValue}>
+              {stats.totalScore} / {stats.totalPossible}
+            </span>
+          </div>
+          <div style={styles.statRow}>
+            <span style={styles.statLabel}>Weighted Average:</span>
+            <span style={styles.statValue}>{stats.weightedAverage}</span>
+          </div>
+          
+          {stats.bestTerm && (
+            <div style={styles.statRow}>
+              <span style={styles.statLabel}>Best Performance:</span>
+              <span style={styles.statValue}>
+                {stats.bestTerm.session} ({stats.bestTerm.average})
+              </span>
+            </div>
+          )}
+          
+          {stats.worstTerm && (
+            <div style={styles.statRow}>
+              <span style={styles.statLabel}>Needs Improvement:</span>
+              <span style={{ ...styles.statValue, color: COLORS.danger }}>
+                {stats.worstTerm.session} ({stats.worstTerm.average})
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
     );
   };
 
   const renderTermCard = (record, index) => {
     const termKey = `${record.session}|${record.term}`;
     const isExpanded = expandedTerms[termKey];
+    const grade = calculateGrade(parseFloat(record.average));
     
     return (
-      <TermCard key={termKey}>
-        <Accordion 
-          expanded={isExpanded}
-          onChange={() => toggleTermExpansion(termKey)}
-          sx={{ 
-            boxShadow: 'none',
-            '&:before': { display: 'none' }
-          }}
+      <div key={termKey} style={styles.termCard}>
+        <div 
+          style={styles.termHeader}
+          onClick={() => setExpandedTerms(prev => ({ ...prev, [termKey]: !prev[termKey] }))}
         >
-          <AccordionSummary
-            expandIcon={<ExpandMoreIcon />}
-            sx={{
-              bgcolor: 'white',
-              borderBottom: '1px solid #e0e0e0',
-              '&:hover': { bgcolor: '#f5f5f5' }
-            }}
-          >
-            <Grid container alignItems="center" spacing={2}>
-              <Grid item xs={12} md={4}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                  <Box sx={{ 
-                    width: 40, 
-                    height: 40, 
-                    borderRadius: '50%', 
-                    bgcolor: theme.palette.primary.main,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'white',
-                    fontWeight: 'bold'
-                  }}>
-                    {index + 1}
-                  </Box>
-                  <Box>
-                    <Typography variant="h6" fontWeight="bold">
-                      {record.session}
-                    </Typography>
-                    <Typography variant="body2" color="textSecondary">
-                      {record.term} • Class: {record.class}
-                    </Typography>
-                  </Box>
-                </Box>
-              </Grid>
-              
-              <Grid item xs={12} md={3}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Typography variant="h5" fontWeight="bold" color="primary">
-                    {record.average}%
-                  </Typography>
-                  <GradeBadge 
-                    label={record.gpa || '0.00'} 
-                    grade={calculateGrade(parseFloat(record.average))}
-                  />
-                </Box>
-                <Typography variant="body2" color="textSecondary">
-                  Term Average • GPA: {record.gpa || '0.00'}
-                </Typography>
-              </Grid>
-              
-              <Grid item xs={12} md={3}>
-                <Box>
-                  <Typography variant="body2">
-                    Subjects: {record.subjectCount} • Tests: {record.totalTests}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    Score: {record._totalScore || 0}/{record._totalPossible || 0}
-                  </Typography>
-                </Box>
-              </Grid>
-              
-              <Grid item xs={12} md={2}>
-                <Box sx={{ textAlign: 'right' }}>
-                  <Chip 
-                    label={record.promoted ? "PROMOTED" : "NOT PROMOTED"}
-                    size="small"
-                    color={record.promoted ? "success" : "error"}
-                    icon={record.promoted ? <CheckCircleIcon /> : <ErrorIcon />}
-                  />
-                </Box>
-              </Grid>
-            </Grid>
-          </AccordionSummary>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+            <div style={styles.termNumber}>{index + 1}</div>
+            <div>
+              <h3 style={styles.termTitle}>{record.session} • {record.term}</h3>
+              <p style={styles.termSubtitle}>
+                Class: {record.class} • Subjects: {record.subjectCount} • Tests: {record.totalTests}
+              </p>
+            </div>
+          </div>
           
-          <AccordionDetails>
-            {Object.keys(record.grades).length > 0 ? (
-              <TableContainer component={Paper} sx={{ borderRadius: '8px' }}>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow sx={{ bgcolor: theme.palette.primary.main }}>
-                      <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Subject</TableCell>
-                      <TableCell sx={{ color: 'white', fontWeight: 'bold' }} align="center">Score</TableCell>
-                      <TableCell sx={{ color: 'white', fontWeight: 'bold' }} align="center">Percentage</TableCell>
-                      <TableCell sx={{ color: 'white', fontWeight: 'bold' }} align="center">Grade</TableCell>
-                      <TableCell sx={{ color: 'white', fontWeight: 'bold' }} align="center">Remark</TableCell>
-                      <TableCell sx={{ color: 'white', fontWeight: 'bold' }} align="center">Components</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {Object.entries(record.grades).map(([subject, grade], idx) => (
-                      <StyledTableRow key={subject} index={idx}>
-                        <TableCell sx={{ fontWeight: 'bold' }}>{subject}</TableCell>
-                        <TableCell align="center">
-                          <Typography variant="body1" fontWeight="bold">
-                            {grade.score}/{grade.totalMarks}
-                          </Typography>
-                        </TableCell>
-                        <TableCell align="center">
-                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
-                            <Typography variant="body1" fontWeight="bold">
-                              {grade.percentage}%
-                            </Typography>
-                            <ProgressBar 
-                              variant="determinate" 
-                              value={parseFloat(grade.percentage)} 
-                              sx={{ width: '60px' }}
-                            />
-                          </Box>
-                        </TableCell>
-                        <TableCell align="center">
-                          <GradeBadge label={grade.grade} grade={grade.grade} />
-                        </TableCell>
-                        <TableCell align="center">
-                          <Chip 
-                            label={grade.remark}
-                            size="small"
-                            variant="outlined"
-                            sx={{ 
-                              borderColor: getGradeColor(grade.grade),
-                              color: getGradeColor(grade.grade)
-                            }}
-                          />
-                        </TableCell>
-                        <TableCell align="center">
-                          {grade.firstCA > 0 && (
-                            <Box sx={{ fontSize: '0.75rem' }}>
-                              <Typography variant="caption" display="block">
-                                CA1: {grade.firstCA}/20
-                              </Typography>
-                              <Typography variant="caption" display="block">
-                                CA2: {grade.secondCA || 0}/20
-                              </Typography>
-                              <Typography variant="caption" display="block">
-                                Exam: {grade.exam || 0}/60
-                              </Typography>
-                            </Box>
-                          )}
-                        </TableCell>
-                      </StyledTableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            ) : (
-              <Box sx={{ textAlign: 'center', py: 4 }}>
-                <InfoIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                <Typography variant="body1" color="textSecondary">
-                  No grade data available for this term
-                </Typography>
-              </Box>
-            )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={styles.termAverage}>{record.average}%</span>
+                <span style={{ 
+                  ...styles.gradeBadge,
+                  backgroundColor: getGradeColor(grade)
+                }}>
+                  {grade}
+                </span>
+              </div>
+              <p style={styles.scoreInfo}>
+                Score: {record.totalScore} / {record.totalPossible}
+              </p>
+            </div>
             
-            <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
-              <Button 
-                size="small" 
-                startIcon={<DownloadIcon />}
-                onClick={() => {
-                  setSelectedTerm(record);
-                  setDownloadDialog(true);
-                }}
-              >
-                Download Term Report
-              </Button>
-            </Box>
-          </AccordionDetails>
-        </Accordion>
-      </TermCard>
+            <div style={styles.expandIcon}>
+              {isExpanded ? '−' : '+'}
+            </div>
+          </div>
+        </div>
+        
+        {isExpanded && record.grades && Object.keys(record.grades).length > 0 && (
+          <div style={styles.gradesContainer}>
+            <div style={styles.scoreSystemInfo}>
+              <strong>Score System:</strong> CA1 (20 marks) + CA2 (20 marks) + Exam (60 marks) = Total (100 marks)
+            </div>
+            <table style={styles.gradesTable}>
+              <thead>
+                <tr>
+                  <th style={styles.tableHeader}>Subject</th>
+                  <th style={styles.tableHeader}>CA1</th>
+                  <th style={styles.tableHeader}>CA2</th>
+                  <th style={styles.tableHeader}>Exam</th>
+                  <th style={styles.tableHeader}>Total</th>
+                  <th style={styles.tableHeader}>%</th>
+                  <th style={styles.tableHeader}>Grade</th>
+                  <th style={styles.tableHeader}>Remark</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(record.grades).map(([subject, gradeData], idx) => (
+                  <tr key={subject} style={styles.tableRow(idx)}>
+                    <td style={styles.subjectCell}>{subject}</td>
+                    <td style={styles.caCell}>{gradeData.ca1 || '0.0'}</td>
+                    <td style={styles.caCell}>{gradeData.ca2 || '0.0'}</td>
+                    <td style={styles.examCell}>{gradeData.exam || '0.0'}</td>
+                    <td style={styles.totalCell}>
+                      <div style={{ fontWeight: '600' }}>
+                        {gradeData.total || '0.0'} / {gradeData.maxPossible || 100}
+                      </div>
+                    </td>
+                    <td style={styles.percentageCell}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <span>{gradeData.percentage}%</span>
+                        <div style={styles.progressBar}>
+                          <div 
+                            style={{ 
+                              ...styles.progressFill, 
+                              width: `${gradeData.percentage}%`,
+                              backgroundColor: getGradeColor(gradeData.grade)
+                            }} 
+                          />
+                        </div>
+                      </div>
+                    </td>
+                    <td style={styles.gradeCell}>
+                      <span style={{ 
+                        ...styles.gradeBadge,
+                        backgroundColor: getGradeColor(gradeData.grade)
+                      }}>
+                        {gradeData.grade}
+                      </span>
+                    </td>
+                    <td style={styles.remarkCell}>
+                      {gradeData.remark}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     );
   };
 
-  const renderAcademicTimeline = () => {
+  const renderAcademicRecords = () => {
     if (!transcript?.records?.length) return null;
     
     return (
-      <StyledCard>
-        <CardHeader
-          title="Academic Timeline"
-          titleTypographyProps={{ variant: 'h5', fontWeight: 'bold' }}
-          subheader="Click on any term to view detailed results"
-          subheaderTypographyProps={{ variant: 'body2', color: 'textSecondary' }}
-        />
-        <CardContent>
+      <div style={styles.recordsCard}>
+        <h2 style={styles.sectionTitle}>Academic Records</h2>
+        <p style={styles.sectionSubtitle}>
+          Click on any term to view detailed subject grades (CA1/CA2/Exam breakdown)
+        </p>
+        
+        <div style={styles.termsContainer}>
           {transcript.records.map((record, index) => renderTermCard(record, index))}
-          
-          {transcript.records.length === 0 && (
-            <Box sx={{ textAlign: 'center', py: 4 }}>
-              <AssessmentIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-              <Typography variant="body1" color="textSecondary">
-                No academic records available
-              </Typography>
-            </Box>
-          )}
-        </CardContent>
-      </StyledCard>
+        </div>
+      </div>
     );
   };
 
+  // ==================== STYLES ====================
+  const styles = {
+    // Container
+    container: {
+      padding: '20px',
+      backgroundColor: COLORS.light,
+      minHeight: '100vh',
+      fontFamily: "'Inter', 'Segoe UI', 'Roboto', sans-serif",
+      fontSize: '14px' // Reduced base font size
+    },
+    
+    // Loading
+    loadingContainer: {
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'center',
+      alignItems: 'center',
+      minHeight: '60vh'
+    },
+    spinner: {
+      width: '40px',
+      height: '40px',
+      border: `3px solid ${COLORS.border}`,
+      borderTop: `3px solid ${COLORS.primary}`,
+      borderRadius: '50%',
+      animation: 'spin 1s linear infinite'
+    },
+    
+    // Error
+    errorContainer: {
+      padding: '24px',
+      backgroundColor: 'white',
+      borderRadius: '6px',
+      maxWidth: '500px',
+      margin: '30px auto',
+      boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
+      fontSize: '14px'
+    },
+    
+    // Empty
+    emptyContainer: {
+      padding: '32px',
+      backgroundColor: 'white',
+      borderRadius: '6px',
+      textAlign: 'center',
+      maxWidth: '400px',
+      margin: '30px auto',
+      boxShadow: '0 1px 4px rgba(0,0,0,0.1)'
+    },
+    
+    // Header
+    headerCard: {
+      backgroundColor: 'white',
+      padding: '20px',
+      borderRadius: '6px',
+      marginBottom: '16px',
+      boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
+      borderLeft: `4px solid ${COLORS.primary}`
+    },
+    studentName: {
+      fontSize: '20px', // Reduced from 32px
+      fontWeight: '700',
+      color: COLORS.dark,
+      margin: '0 0 12px 0'
+    },
+    studentInfo: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: '16px',
+      fontSize: '13px'
+    },
+    infoItem: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '2px'
+    },
+    infoLabel: {
+      fontSize: '11px',
+      color: COLORS.textLight,
+      textTransform: 'uppercase',
+      letterSpacing: '0.3px'
+    },
+    infoValue: {
+      fontSize: '14px',
+      color: COLORS.text,
+      fontWeight: '600'
+    },
+    officialBadge: {
+      display: 'inline-block',
+      padding: '4px 12px',
+      backgroundColor: COLORS.primary,
+      color: 'white',
+      fontSize: '11px',
+      fontWeight: '600',
+      borderRadius: '3px',
+      textTransform: 'uppercase',
+      letterSpacing: '0.3px'
+    },
+    
+    // Statistics
+    statisticsCard: {
+      backgroundColor: 'white',
+      padding: '20px',
+      borderRadius: '6px',
+      marginBottom: '16px',
+      boxShadow: '0 1px 4px rgba(0,0,0,0.1)'
+    },
+    sectionTitle: {
+      fontSize: '18px', // Reduced from 24px
+      fontWeight: '700',
+      color: COLORS.dark,
+      margin: '0 0 12px 0'
+    },
+    statsGrid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+      gap: '12px',
+      marginBottom: '20px'
+    },
+    statBox: {
+      textAlign: 'center',
+      padding: '16px',
+      backgroundColor: '#F8F9FA',
+      borderRadius: '4px',
+      border: `1px solid ${COLORS.border}`
+    },
+    statValue: {
+      fontSize: '20px', // Reduced from 32px
+      fontWeight: '700',
+      color: COLORS.primary,
+      marginBottom: '6px'
+    },
+    statLabel: {
+      fontSize: '12px',
+      color: COLORS.textLight,
+      textTransform: 'uppercase',
+      letterSpacing: '0.3px'
+    },
+    detailedStats: {
+      backgroundColor: '#F8F9FA',
+      padding: '16px',
+      borderRadius: '4px',
+      border: `1px solid ${COLORS.border}`,
+      fontSize: '13px'
+    },
+    statRow: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: '8px 0',
+      borderBottom: `1px solid ${COLORS.border}`,
+      '&:last-child': {
+        borderBottom: 'none'
+      }
+    },
+    
+    // Academic Records
+    recordsCard: {
+      backgroundColor: 'white',
+      padding: '20px',
+      borderRadius: '6px',
+      boxShadow: '0 1px 4px rgba(0,0,0,0.1)'
+    },
+    sectionSubtitle: {
+      fontSize: '13px',
+      color: COLORS.textLight,
+      margin: '0 0 16px 0'
+    },
+    termsContainer: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '12px'
+    },
+    
+    // Term Card
+    termCard: {
+      backgroundColor: 'white',
+      borderRadius: '4px',
+      border: `1px solid ${COLORS.border}`,
+      overflow: 'hidden',
+      transition: 'all 0.2s ease'
+    },
+    termHeader: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: '16px',
+      backgroundColor: '#F8F9FA',
+      cursor: 'pointer',
+      borderBottom: `1px solid ${COLORS.border}`
+    },
+    termNumber: {
+      width: '32px',
+      height: '32px',
+      backgroundColor: COLORS.primary,
+      color: 'white',
+      borderRadius: '50%',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontWeight: '700',
+      fontSize: '14px'
+    },
+    termTitle: {
+      fontSize: '16px',
+      fontWeight: '600',
+      color: COLORS.dark,
+      margin: '0 0 2px 0'
+    },
+    termSubtitle: {
+      fontSize: '12px',
+      color: COLORS.textLight,
+      margin: 0
+    },
+    termAverage: {
+      fontSize: '18px', // Reduced from 24px
+      fontWeight: '700',
+      color: COLORS.primary
+    },
+    scoreInfo: {
+      fontSize: '11px',
+      color: COLORS.textLight,
+      margin: '2px 0 0 0'
+    },
+    expandIcon: {
+      fontSize: '16px',
+      fontWeight: '600',
+      color: COLORS.primary,
+      width: '28px',
+      height: '28px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: '50%',
+      border: `2px solid ${COLORS.primary}`
+    },
+    
+    // Grades Table
+    gradesContainer: {
+      padding: '16px',
+      fontSize: '13px'
+    },
+    scoreSystemInfo: {
+      backgroundColor: '#F0F7FF',
+      padding: '8px 12px',
+      borderRadius: '4px',
+      marginBottom: '12px',
+      fontSize: '12px',
+      color: COLORS.info,
+      borderLeft: `3px solid ${COLORS.info}`
+    },
+    gradesTable: {
+      width: '100%',
+      borderCollapse: 'collapse',
+      fontSize: '12px'
+    },
+    tableHeader: {
+      padding: '12px 8px',
+      backgroundColor: '#F8F9FA',
+      color: COLORS.text,
+      textAlign: 'left',
+      fontWeight: '600',
+      borderBottom: `2px solid ${COLORS.border}`,
+      fontSize: '12px'
+    },
+    tableRow: (idx) => ({
+      backgroundColor: idx % 2 === 0 ? 'white' : '#FAFAFA',
+      borderBottom: `1px solid ${COLORS.border}`
+    }),
+    subjectCell: {
+      padding: '12px 8px',
+      color: COLORS.text,
+      fontWeight: '600',
+      minWidth: '120px'
+    },
+    caCell: {
+      padding: '12px 8px',
+      color: COLORS.text,
+      textAlign: 'center',
+      minWidth: '50px',
+      fontWeight: '500'
+    },
+    examCell: {
+      padding: '12px 8px',
+      color: COLORS.text,
+      textAlign: 'center',
+      minWidth: '60px',
+      fontWeight: '600'
+    },
+    totalCell: {
+      padding: '12px 8px',
+      color: COLORS.text,
+      textAlign: 'center',
+      minWidth: '80px'
+    },
+    percentageCell: {
+      padding: '12px 8px',
+      color: COLORS.text,
+      minWidth: '120px'
+    },
+    gradeCell: {
+      padding: '12px 8px',
+      textAlign: 'center',
+      minWidth: '60px'
+    },
+    remarkCell: {
+      padding: '12px 8px',
+      color: COLORS.text,
+      fontStyle: 'italic',
+      minWidth: '100px',
+      fontSize: '12px'
+    },
+    
+    // Progress Bar
+    progressBar: {
+      flex: 1,
+      height: '4px',
+      backgroundColor: COLORS.border,
+      borderRadius: '2px',
+      overflow: 'hidden'
+    },
+    progressFill: {
+      height: '100%',
+      borderRadius: '2px',
+      transition: 'width 0.3s ease'
+    },
+    
+    // Grade Badge
+    gradeBadge: {
+      display: 'inline-block',
+      padding: '4px 8px',
+      color: 'white',
+      fontSize: '11px',
+      fontWeight: '700',
+      borderRadius: '3px',
+      textAlign: 'center',
+      minWidth: '32px'
+    },
+    
+    // Buttons
+    primaryButton: {
+      padding: '10px 20px',
+      backgroundColor: COLORS.primary,
+      color: 'white',
+      border: 'none',
+      borderRadius: '4px',
+      cursor: 'pointer',
+      fontWeight: '600',
+      fontSize: '13px',
+      transition: 'all 0.2s ease'
+    },
+    secondaryButton: {
+      padding: '10px 20px',
+      backgroundColor: 'white',
+      color: COLORS.text,
+      border: `1px solid ${COLORS.border}`,
+      borderRadius: '4px',
+      cursor: 'pointer',
+      fontWeight: '600',
+      fontSize: '13px',
+      transition: 'all 0.2s ease'
+    }
+  };
+
   // ==================== MAIN RENDER ====================
-  if (loading) return renderLoading();
-  if (error) return renderError();
-  if (!transcript) return renderEmpty();
+  if (loading) return (
+    <div style={styles.container}>
+      {renderLoading()}
+    </div>
+  );
+  
+  if (error) return (
+    <div style={styles.container}>
+      {renderError()}
+    </div>
+  );
+  
+  if (!transcript) return (
+    <div style={styles.container}>
+      {renderEmpty()}
+    </div>
+  );
 
   return (
-    <Box sx={{ py: 3, px: { xs: 2, sm: 3, md: 4 } }}>
-      <Fade in timeout={600}>
-        <Box>
-          {/* Student Header */}
-          {renderStudentHeader()}
-          
-          {/* Statistics */}
-          {renderStatistics()}
-          
-          {/* Academic Timeline */}
-          {renderAcademicTimeline()}
-          
-          {/* Download Dialog */}
-          <Dialog open={downloadDialog} onClose={() => setDownloadDialog(false)}>
-            <DialogTitle>Download Transcript</DialogTitle>
-            <DialogContent>
-              <Typography variant="body1" gutterBottom>
-                Select download option:
-              </Typography>
-              <Box sx={{ mt: 2 }}>
-                <Button
-                  fullWidth
-                  variant="outlined"
-                  onClick={() => handleDownloadPDF()}
-                  sx={{ mb: 2, justifyContent: 'flex-start', py: 2 }}
-                  startIcon={<DownloadIcon />}
-                >
-                  Full Transcript (All Terms)
-                </Button>
-                {selectedTerm && (
-                  <Button
-                    fullWidth
-                    variant="outlined"
-                    onClick={() => handleDownloadPDF(selectedTerm)}
-                    sx={{ justifyContent: 'flex-start', py: 2 }}
-                    startIcon={<DownloadIcon />}
-                  >
-                    Single Term: {selectedTerm.session} - {selectedTerm.term}
-                  </Button>
-                )}
-              </Box>
-            </DialogContent>
-            <DialogActions>
-              <Button onClick={() => setDownloadDialog(false)}>Cancel</Button>
-            </DialogActions>
-          </Dialog>
-        </Box>
-      </Fade>
-    </Box>
+    <div style={styles.container}>
+      <style>
+        {`
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 6px rgba(75, 83, 32, 0.15);
+          }
+          th, td {
+            font-size: 12px;
+          }
+        `}
+      </style>
+      
+      {renderStudentHeader()}
+      {renderStatistics()}
+      {renderAcademicRecords()}
+    </div>
   );
 };
 
