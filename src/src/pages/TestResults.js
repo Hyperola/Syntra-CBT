@@ -1,3 +1,4 @@
+// Teacher TestResults page - REDESIGNED WITH IMPROVED COLORS
 import React, { useState, useEffect, useContext } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
@@ -23,7 +24,12 @@ import {
   FiTrendingDown,
   FiEye,
   FiCalendar,
-  FiChevronRight
+  FiChevronRight,
+  FiFileText,
+  FiUsers,
+  FiBook,
+  FiHash,
+  FiFilter
 } from 'react-icons/fi';
 
 const TestResults = () => {
@@ -50,6 +56,413 @@ const TestResults = () => {
     aboveAverage: 0
   });
   const [activeFilter, setActiveFilter] = useState('all');
+
+  // Enhanced color palette
+  const colors = {
+    // Primary palette
+    primary: '#4B5320',        // Army Green
+    primaryLight: '#6B7A32',   // Lighter green
+    primaryLighter: '#8B9A44', // Even lighter
+    primaryDark: '#3A431A',    // Darker green
+    
+    // Secondary palette
+    secondary: '#D4A017',      // Golden rod
+    secondaryLight: '#E8B850',
+    secondaryLighter: '#F0D080',
+    secondaryDark: '#B8860B',
+    
+    // Status colors
+    success: '#28a745',
+    successLight: '#4cd964',
+    successLighter: 'rgba(76, 217, 100, 0.1)',
+    warning: '#ffc107',
+    warningLight: '#ffd54f',
+    warningLighter: 'rgba(255, 213, 79, 0.1)',
+    danger: '#dc3545',
+    dangerLight: '#ff6b6b',
+    dangerLighter: 'rgba(255, 107, 107, 0.1)',
+    info: '#17a2b8',
+    infoLight: '#4dc0e0',
+    infoLighter: 'rgba(77, 192, 224, 0.1)',
+    
+    // Neutral colors
+    dark: '#2c3e50',
+    light: '#f8f9fa',
+    gray50: '#fafbfc',
+    gray100: '#f8f9fa',
+    gray200: '#e9ecef',
+    gray300: '#dee2e6',
+    gray400: '#ced4da',
+    gray500: '#adb5bd',
+    gray600: '#6c757d',
+    gray700: '#495057',
+    gray800: '#343a40',
+    gray900: '#212529',
+    white: '#ffffff',
+    
+    // Text colors
+    textPrimary: '#2c3e50',
+    textSecondary: '#5a6c7d',
+    textTertiary: '#6c757d',
+    
+    // Border colors
+    border: '#e1e5eb',
+    borderLight: '#f0f4f8',
+    
+    // Background colors
+    background: '#f5f7fa',
+    cardBackground: '#ffffff',
+    
+    // Gradients
+    gradientPrimary: 'linear-gradient(135deg, #4B5320 0%, #3A431A 100%)',
+    gradientSuccess: 'linear-gradient(135deg, #28a745 0%, #20c997 100%)',
+    gradientWarning: 'linear-gradient(135deg, #ffc107 0%, #ffa500 100%)',
+    gradientDanger: 'linear-gradient(135deg, #dc3545 0%, #ff6b6b 100%)',
+    gradientInfo: 'linear-gradient(135deg, #17a2b8 0%, #4dc0e0 100%)',
+    gradientLight: 'linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)'
+  };
+
+  // Typography scale
+  const typography = {
+    xs: '11px',
+    sm: '13px',
+    base: '14px',
+    lg: '16px',
+    xl: '18px',
+    '2xl': '20px',
+    '3xl': '24px',
+    '4xl': '32px'
+  };
+
+  // Main container styles
+  const containerStyle = {
+    backgroundColor: colors.background,
+    minHeight: '100vh',
+    padding: '20px',
+    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+    fontSize: typography.base,
+    lineHeight: '1.5'
+  };
+
+  // Loading state styles
+  const loadingContainerStyle = {
+    minHeight: '100vh',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: colors.gradientLight
+  };
+
+  const spinnerStyle = {
+    width: '56px',
+    height: '56px',
+    border: '3px solid rgba(75, 83, 32, 0.1)',
+    borderTop: '3px solid ' + colors.primary,
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite',
+    marginBottom: '20px'
+  };
+
+  const loadingTextStyle = {
+    fontSize: typography.xl,
+    fontWeight: '600',
+    color: colors.primary,
+    margin: '0 0 6px 0'
+  };
+
+  const loadingSubtextStyle = {
+    fontSize: typography.sm,
+    color: colors.textTertiary,
+    opacity: '0.8'
+  };
+
+  // Error state styles
+  const errorContainerStyle = {
+    minHeight: '100vh',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: colors.gradientLight
+  };
+
+  const errorCardStyle = {
+    backgroundColor: colors.cardBackground,
+    padding: '36px',
+    borderRadius: '12px',
+    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.08)',
+    textAlign: 'center',
+    maxWidth: '480px',
+    border: `1px solid ${colors.danger}20`
+  };
+
+  const errorActionsStyle = {
+    display: 'flex',
+    gap: '12px',
+    justifyContent: 'center',
+    marginTop: '24px'
+  };
+
+  // Button styles
+  const createButtonStyle = (type, disabled = false) => {
+    const baseStyle = {
+      padding: '10px 20px',
+      border: 'none',
+      borderRadius: '8px',
+      cursor: disabled ? 'not-allowed' : 'pointer',
+      fontWeight: '600',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      transition: 'all 0.2s ease',
+      opacity: disabled ? 0.6 : 1,
+      fontSize: typography.sm
+    };
+
+    const styles = {
+      primary: {
+        ...baseStyle,
+        backgroundColor: colors.primary,
+        color: colors.white,
+        ':hover': disabled ? {} : {
+          backgroundColor: colors.primaryDark,
+          transform: 'translateY(-1px)',
+          boxShadow: `0 4px 12px ${colors.primary}20`
+        }
+      },
+      secondary: {
+        ...baseStyle,
+        backgroundColor: colors.secondary,
+        color: colors.white,
+        ':hover': disabled ? {} : {
+          backgroundColor: colors.secondaryDark,
+          transform: 'translateY(-1px)',
+          boxShadow: `0 4px 12px ${colors.secondary}20`
+        }
+      },
+      success: {
+        ...baseStyle,
+        backgroundColor: colors.success,
+        color: colors.white,
+        ':hover': disabled ? {} : {
+          backgroundColor: '#1e7e34',
+          transform: 'translateY(-1px)',
+          boxShadow: `0 4px 12px ${colors.success}20`
+        }
+      },
+      warning: {
+        ...baseStyle,
+        backgroundColor: colors.warning,
+        color: colors.gray900,
+        ':hover': disabled ? {} : {
+          backgroundColor: '#e0a800',
+          transform: 'translateY(-1px)',
+          boxShadow: `0 4px 12px ${colors.warning}20`
+        }
+      },
+      danger: {
+        ...baseStyle,
+        backgroundColor: colors.danger,
+        color: colors.white,
+        ':hover': disabled ? {} : {
+          backgroundColor: '#c82333',
+          transform: 'translateY(-1px)',
+          boxShadow: `0 4px 12px ${colors.danger}20`
+        }
+      },
+      info: {
+        ...baseStyle,
+        backgroundColor: colors.info,
+        color: colors.white,
+        ':hover': disabled ? {} : {
+          backgroundColor: '#138496',
+          transform: 'translateY(-1px)',
+          boxShadow: `0 4px 12px ${colors.info}20`
+        }
+      },
+      outline: {
+        ...baseStyle,
+        backgroundColor: 'transparent',
+        color: colors.primary,
+        border: `1px solid ${colors.primary}`,
+        ':hover': disabled ? {} : {
+          backgroundColor: `${colors.primary}08`,
+          transform: 'translateY(-1px)'
+        }
+      },
+      ghost: {
+        ...baseStyle,
+        backgroundColor: 'transparent',
+        color: colors.textSecondary,
+        border: `1px solid ${colors.border}`,
+        ':hover': disabled ? {} : {
+          backgroundColor: colors.gray100,
+          transform: 'translateY(-1px)'
+        }
+      }
+    };
+
+    return styles[type] || baseStyle;
+  };
+
+  // Card styles
+  const cardStyle = {
+    backgroundColor: colors.cardBackground,
+    borderRadius: '12px',
+    padding: '20px',
+    boxShadow: '0 2px 16px rgba(0, 0, 0, 0.06)',
+    marginBottom: '20px',
+    border: `1px solid ${colors.border}`
+  };
+
+  // Navigation bar styles
+  const navBarStyle = {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '16px 0',
+    marginBottom: '20px',
+    flexWrap: 'wrap',
+    gap: '16px'
+  };
+
+  const breadcrumbStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    color: colors.textTertiary,
+    fontSize: typography.sm
+  };
+
+  // Test header styles
+  const testHeaderStyle = {
+    background: colors.gradientPrimary,
+    borderRadius: '12px',
+    padding: '28px',
+    marginBottom: '20px',
+    color: colors.white,
+    boxShadow: '0 4px 24px rgba(75, 83, 32, 0.15)'
+  };
+
+  // Stat card styles
+  const statCardStyle = (type) => {
+    const colorsMap = {
+      average: colors.primary,
+      pass: colors.success,
+      high: colors.secondary,
+      above: colors.info,
+      low: colors.warning
+    };
+    
+    const bgColor = colorsMap[type] || colors.primary;
+    
+    return {
+      backgroundColor: colors.cardBackground,
+      borderRadius: '10px',
+      padding: '18px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '14px',
+      transition: 'all 0.2s ease',
+      borderLeft: `3px solid ${bgColor}`,
+      border: `1px solid ${colors.border}`,
+      ':hover': {
+        transform: 'translateY(-2px)',
+        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.08)',
+        borderColor: bgColor + '40'
+      }
+    };
+  };
+
+  // Table styles
+  const tableHeaderStyle = {
+    display: 'grid',
+    gridTemplateColumns: '2fr 1.5fr 1fr 1fr 120px',
+    backgroundColor: colors.gray50,
+    padding: '14px 20px',
+    borderBottom: `1px solid ${colors.border}`,
+    fontWeight: '600',
+    color: colors.primary,
+    fontSize: typography.sm,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px'
+  };
+
+  const tableRowStyle = {
+    display: 'grid',
+    gridTemplateColumns: '2fr 1.5fr 1fr 1fr 120px',
+    padding: '18px 20px',
+    alignItems: 'center',
+    borderBottom: `1px solid ${colors.borderLight}`,
+    transition: 'background-color 0.2s ease',
+    ':hover': {
+      backgroundColor: colors.gray50
+    }
+  };
+
+  // Student info styles
+  const studentInfoStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '14px'
+  };
+
+  const studentAvatarStyle = (color) => ({
+    width: '44px',
+    height: '44px',
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontWeight: '600',
+    fontSize: typography.lg,
+    color: colors.white,
+    backgroundColor: color,
+    flexShrink: '0'
+  });
+
+  // Grade badge styles
+  const gradeBadgeStyle = (percentage) => {
+    const getColor = () => {
+      if (percentage >= 80) return colors.success;
+      if (percentage >= 60) return colors.info;
+      if (percentage >= 40) return colors.warning;
+      return colors.danger;
+    };
+    
+    const color = getColor();
+    
+    return {
+      width: '36px',
+      height: '36px',
+      borderRadius: '8px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontWeight: '700',
+      fontSize: typography.base,
+      backgroundColor: color + '15',
+      color: color,
+      border: `1px solid ${color}30`
+    };
+  };
+
+  // Answer card styles
+  const answerCardStyle = (isCorrect) => ({
+    backgroundColor: colors.cardBackground,
+    borderRadius: '10px',
+    padding: '18px',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+    border: `1px solid ${isCorrect ? colors.success + '30' : colors.danger + '30'}`,
+    background: isCorrect ? 
+      `linear-gradient(135deg, ${colors.successLighter} 0%, rgba(40, 167, 69, 0.05) 100%)` : 
+      `linear-gradient(135deg, ${colors.dangerLighter} 0%, rgba(220, 53, 69, 0.05) 100%)`,
+    transition: 'all 0.2s ease',
+    ':hover': {
+      transform: 'translateY(-1px)',
+      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)'
+    }
+  });
 
   const checkTeacherAccess = (teacher, testData) => {
     if (!teacher || !testData) return false;
@@ -197,6 +610,27 @@ const TestResults = () => {
     }
   };
 
+  const getGradeColor = (percentage) => {
+    if (percentage >= 80) return colors.success;
+    if (percentage >= 60) return colors.info;
+    if (percentage >= 40) return colors.warning;
+    return colors.danger;
+  };
+
+  const getGradeLetter = (percentage) => {
+    if (percentage >= 80) return 'A';
+    if (percentage >= 70) return 'B';
+    if (percentage >= 60) return 'C';
+    if (percentage >= 40) return 'D';
+    return 'F';
+  };
+
+  const getPerformanceIcon = (percentage) => {
+    if (percentage >= 70) return <FiTrendingUp />;
+    if (percentage >= 40) return <FiTrendingUp />;
+    return <FiTrendingDown />;
+  };
+
   const filteredResults = results
     .filter(result => {
       if (!result?.userId) return false;
@@ -294,54 +728,35 @@ const TestResults = () => {
     });
   };
 
-  const getGradeColor = (percentage) => {
-    if (percentage >= 80) return '#4B5320'; // Army Green for excellent
-    if (percentage >= 60) return '#90EE90'; // Light Green for good
-    if (percentage >= 40) return '#FFA500'; // Orange for average
-    return '#FF4500'; // Red-Orange for poor
-  };
-
-  const getGradeLetter = (percentage) => {
-    if (percentage >= 80) return 'A';
-    if (percentage >= 70) return 'B';
-    if (percentage >= 60) return 'C';
-    if (percentage >= 40) return 'D';
-    return 'F';
-  };
-
-  const getPerformanceIcon = (percentage) => {
-    if (percentage >= 70) return <FiTrendingUp />;
-    if (percentage >= 40) return <FiTrendingUp />;
-    return <FiTrendingDown />;
-  };
-
   if (loading) {
     return (
-      <div className="loading-container">
-        <div className="spinner"></div>
-        <p className="loading-text">Loading Test Results...</p>
-        <p className="loading-subtext">Preparing detailed analysis...</p>
+      <div style={loadingContainerStyle}>
+        <div style={spinnerStyle}></div>
+        <p style={loadingTextStyle}>Loading Test Results...</p>
+        <p style={loadingSubtextStyle}>Preparing detailed analysis...</p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="error-container">
-        <div className="error-card">
-          <div className="error-icon">⚠️</div>
-          <h3>Unable to Load Results</h3>
-          <p className="error-message">{error}</p>
-          <div className="error-actions">
+      <div style={errorContainerStyle}>
+        <div style={errorCardStyle}>
+          <div style={{ fontSize: '40px', marginBottom: '16px', color: colors.danger }}>⚠️</div>
+          <h3 style={{ color: colors.danger, margin: '0 0 12px 0', fontSize: typography.xl }}>
+            Unable to Load Results
+          </h3>
+          <p style={{ color: colors.textSecondary, margin: '0 0 24px 0', lineHeight: '1.6', fontSize: typography.sm }}>{error}</p>
+          <div style={errorActionsStyle}>
             <button
               onClick={() => navigate(-1)}
-              className="btn-back"
+              style={createButtonStyle('primary')}
             >
               <FiArrowLeft /> Go Back
             </button>
             <button
               onClick={refreshResults}
-              className="btn-retry"
+              style={createButtonStyle('outline')}
             >
               <FiRefreshCw /> Try Again
             </button>
@@ -352,145 +767,346 @@ const TestResults = () => {
   }
 
   return (
-    <div className="test-results">
-      {/* Top Navigation Bar */}
-      <div className="nav-bar">
-        <div className="nav-left">
+    <div style={containerStyle}>
+      {/* Navigation Bar */}
+      <div style={navBarStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
           <button
             onClick={() => navigate(-1)}
-            className="nav-back"
+            style={createButtonStyle('ghost')}
           >
-            <FiArrowLeft /> Back to Dashboard
+            <FiArrowLeft /> Back
           </button>
-          <div className="breadcrumb">
-            <span>Tests</span>
-            <FiChevronRight />
-            <span>{test?.subject}</span>
-            <FiChevronRight />
-            <span className="current">{test?.title}</span>
+          <div style={breadcrumbStyle}>
+            <span style={{ color: colors.textTertiary }}>Tests</span>
+            <FiChevronRight size={14} />
+            <span style={{ color: colors.textSecondary }}>{test?.subject}</span>
+            <FiChevronRight size={14} />
+            <span style={{ color: colors.primary, fontWeight: '600' }}>{test?.title}</span>
           </div>
         </div>
-        <div className="nav-right">
-          <div className="test-info-badge">
-            <FiCalendar />
-            <span>Test Date: {new Date(test?.createdAt).toLocaleDateString()}</span>
+        <div>
+          <div style={{
+            backgroundColor: colors.primary + '08',
+            color: colors.primary,
+            padding: '6px 14px',
+            borderRadius: '6px',
+            fontSize: typography.sm,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            border: `1px solid ${colors.primary}20`
+          }}>
+            <FiCalendar size={14} />
+            <span>Test: {new Date(test?.createdAt).toLocaleDateString()}</span>
           </div>
         </div>
       </div>
 
       {/* Test Header */}
-      <div className="test-header">
-        <div className="test-header-content">
-          <div className="test-title-section">
-            <h1>
-              <span className="test-subject">{test?.subject}</span>
-              <span className="test-title">{test?.title}</span>
-            </h1>
-            <div className="test-details">
-              <span className="detail-item">
-                <FiUser /> Class: {test?.class?.name || test?.class}
+      <div style={testHeaderStyle}>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'flex-start',
+          flexWrap: 'wrap',
+          gap: '20px'
+        }}>
+          <div style={{ flex: 1, minWidth: '300px' }}>
+            <div style={{ marginBottom: '16px' }}>
+              <span style={{ 
+                fontSize: typography.xs, 
+                opacity: '0.9', 
+                fontWeight: '500', 
+                textTransform: 'uppercase', 
+                letterSpacing: '1px',
+                display: 'inline-block',
+                marginBottom: '8px'
+              }}>
+                {test?.subject}
               </span>
-              <span className="detail-item">
-                <FiClock /> Duration: {test?.duration} minutes
+              <h1 style={{ 
+                fontSize: typography['3xl'], 
+                fontWeight: '700', 
+                margin: '0 0 16px 0',
+                lineHeight: '1.2'
+              }}>
+                {test?.title}
+              </h1>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+              <span style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: typography.sm,
+                backdropFilter: 'blur(10px)'
+              }}>
+                <FiUser size={14} /> Class: {test?.class?.name || test?.class}
               </span>
-              <span className="detail-item">
-                📝 Total Marks: {test?.totalMarks || 100}
+              <span style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: typography.sm,
+                backdropFilter: 'blur(10px)'
+              }}>
+                <FiClock size={14} /> Duration: {test?.duration} min
               </span>
-              <span className="detail-item">
-                📚 Questions: {test?.questions?.length || 0}
+              <span style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: typography.sm,
+                backdropFilter: 'blur(10px)'
+              }}>
+                <FiFileText size={14} /> Marks: {test?.totalMarks || 100}
+              </span>
+              <span style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: typography.sm,
+                backdropFilter: 'blur(10px)'
+              }}>
+                <FiHash size={14} /> Questions: {test?.questions?.length || 0}
               </span>
             </div>
           </div>
           
-          <div className="header-actions">
-            <div className="action-group">
-              <button
-                onClick={refreshResults}
-                className="btn-action btn-refresh"
-              >
-                <FiRefreshCw />
-                <span>Refresh</span>
-              </button>
-              <button
-                onClick={exportToCSV}
-                className="btn-action btn-export"
-              >
-                <FiDownload />
-                <span>Export Data</span>
-              </button>
-            </div>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button
+              onClick={refreshResults}
+              style={createButtonStyle('outline')}
+            >
+              <FiRefreshCw size={16} />
+              <span>Refresh</span>
+            </button>
+            <button
+              onClick={exportToCSV}
+              style={createButtonStyle('secondary')}
+            >
+              <FiDownload size={16} />
+              <span>Export</span>
+            </button>
           </div>
         </div>
       </div>
 
       {/* Performance Overview */}
-      <div className="performance-overview">
-        <div className="overview-header">
-          <h2><FiBarChart2 /> Performance Overview</h2>
-          <div className="overview-stats">
-            <span className="stat-badge">
-              <FiUser /> {results.length} Students
+      <div style={cardStyle}>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center', 
+          marginBottom: '20px',
+          flexWrap: 'wrap',
+          gap: '12px'
+        }}>
+          <h2 style={{ 
+            margin: 0, 
+            color: colors.textPrimary, 
+            fontSize: typography.lg, 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '10px',
+            fontWeight: '600'
+          }}>
+            <FiBarChart2 size={18} /> Performance Overview
+          </h2>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <span style={{
+              backgroundColor: colors.gray100,
+              color: colors.primary,
+              padding: '6px 12px',
+              borderRadius: '6px',
+              fontSize: typography.sm,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              border: `1px solid ${colors.border}`
+            }}>
+              <FiUsers size={14} /> {results.length} Students
             </span>
-            <span className="stat-badge">
-              <FiPercent /> {test?.totalMarks || 100} Total Marks
+            <span style={{
+              backgroundColor: colors.gray100,
+              color: colors.primary,
+              padding: '6px 12px',
+              borderRadius: '6px',
+              fontSize: typography.sm,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              border: `1px solid ${colors.border}`
+            }}>
+              <FiPercent size={14} /> {test?.totalMarks || 100} Total Marks
             </span>
           </div>
         </div>
         
-        <div className="stats-cards">
-          <div className="stat-card average-score">
-            <div className="stat-icon">
+        <div style={{ 
+          display: 'grid', 
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', 
+          gap: '16px' 
+        }}>
+          {/* Average Score Card */}
+          <div style={statCardStyle('average')}>
+            <div style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: '10px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '20px',
+              color: colors.white,
+              backgroundColor: colors.primary
+            }}>
               <FiBarChart2 />
             </div>
-            <div className="stat-content">
-              <div className="stat-value">{stats.average}</div>
-              <div className="stat-label">Average Score</div>
-              <div className="stat-trend">
+            <div style={{ flex: 1 }}>
+              <div style={{ 
+                fontSize: typography['2xl'], 
+                fontWeight: '700', 
+                color: colors.textPrimary, 
+                lineHeight: '1', 
+                marginBottom: '2px' 
+              }}>
+                {stats.average}
+              </div>
+              <div style={{ fontSize: typography.sm, color: colors.textTertiary, marginBottom: '6px' }}>
+                Average Score
+              </div>
+              <div style={{ fontSize: typography.xs, fontWeight: '600' }}>
                 {parseFloat(stats.average) > (test?.totalMarks || 100) / 2 ? 
-                  <span className="trend-up"><FiTrendingUp /> Good</span> : 
-                  <span className="trend-down"><FiTrendingDown /> Needs Work</span>
+                  <span style={{ color: colors.success, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <FiTrendingUp size={12} /> Good
+                  </span> : 
+                  <span style={{ color: colors.danger, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <FiTrendingDown size={12} /> Needs Work
+                  </span>
                 }
               </div>
             </div>
           </div>
           
-          <div className="stat-card pass-rate">
-            <div className="stat-icon">
+          {/* Pass Rate Card */}
+          <div style={statCardStyle('pass')}>
+            <div style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: '10px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '20px',
+              color: colors.white,
+              backgroundColor: colors.success
+            }}>
               <FiPercent />
             </div>
-            <div className="stat-content">
-              <div className="stat-value">{stats.passRate}%</div>
-              <div className="stat-label">Pass Rate</div>
-              <div className="progress-bar">
+            <div style={{ flex: 1 }}>
+              <div style={{ 
+                fontSize: typography['2xl'], 
+                fontWeight: '700', 
+                color: colors.textPrimary, 
+                lineHeight: '1', 
+                marginBottom: '2px' 
+              }}>
+                {stats.passRate}%
+              </div>
+              <div style={{ fontSize: typography.sm, color: colors.textTertiary, marginBottom: '6px' }}>
+                Pass Rate
+              </div>
+              <div style={{ height: '4px', backgroundColor: colors.gray200, borderRadius: '2px', overflow: 'hidden', marginTop: '6px' }}>
                 <div 
-                  className="progress-fill" 
-                  style={{ width: `${stats.passRate}%` }}
+                  style={{ 
+                    height: '100%', 
+                    background: colors.gradientSuccess, 
+                    borderRadius: '2px', 
+                    transition: 'width 0.6s ease',
+                    width: `${stats.passRate}%`
+                  }}
                 ></div>
               </div>
             </div>
           </div>
           
-          <div className="stat-card high-score">
-            <div className="stat-icon">
+          {/* Highest Score Card */}
+          <div style={statCardStyle('high')}>
+            <div style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: '10px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '20px',
+              color: colors.white,
+              backgroundColor: colors.secondary
+            }}>
               <FiAward />
             </div>
-            <div className="stat-content">
-              <div className="stat-value">{stats.highest}</div>
-              <div className="stat-label">Highest Score</div>
-              <div className="score-comparison">
-                <span className="comparison-text">Class Best</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ 
+                fontSize: typography['2xl'], 
+                fontWeight: '700', 
+                color: colors.textPrimary, 
+                lineHeight: '1', 
+                marginBottom: '2px' 
+              }}>
+                {stats.highest}
+              </div>
+              <div style={{ fontSize: typography.sm, color: colors.textTertiary, marginBottom: '6px' }}>
+                Highest Score
+              </div>
+              <div style={{ fontSize: typography.xs, color: colors.textTertiary }}>
+                <span>Class Best</span>
               </div>
             </div>
           </div>
           
-          <div className="stat-card above-average">
-            <div className="stat-icon">
+          {/* Above Average Card */}
+          <div style={statCardStyle('above')}>
+            <div style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: '10px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '20px',
+              color: colors.white,
+              backgroundColor: colors.info
+            }}>
               <FiTrendingUp />
             </div>
-            <div className="stat-content">
-              <div className="stat-value">{stats.aboveAverage}</div>
-              <div className="stat-label">Above Average</div>
-              <div className="percentage-indicator">
+            <div style={{ flex: 1 }}>
+              <div style={{ 
+                fontSize: typography['2xl'], 
+                fontWeight: '700', 
+                color: colors.textPrimary, 
+                lineHeight: '1', 
+                marginBottom: '2px' 
+              }}>
+                {stats.aboveAverage}
+              </div>
+              <div style={{ fontSize: typography.sm, color: colors.textTertiary, marginBottom: '6px' }}>
+                Above Average
+              </div>
+              <div style={{ fontSize: typography.xs, color: colors.textTertiary }}>
                 {Math.round((stats.aboveAverage / stats.totalStudents) * 100)}% of class
               </div>
             </div>
@@ -499,45 +1115,134 @@ const TestResults = () => {
       </div>
 
       {/* Results Section */}
-      <div className="results-section">
-        <div className="section-header">
-          <h2><FiUser /> Student Results</h2>
-          <div className="section-controls">
-            <div className="search-box">
-              <FiSearch className="search-icon" />
+      <div style={cardStyle}>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center', 
+          marginBottom: '20px',
+          flexWrap: 'wrap',
+          gap: '12px'
+        }}>
+          <h2 style={{ 
+            margin: 0, 
+            color: colors.textPrimary, 
+            fontSize: typography.lg, 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '10px',
+            fontWeight: '600'
+          }}>
+            <FiUsers size={18} /> Student Results
+          </h2>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* Search Box */}
+            <div style={{ position: 'relative', width: '240px' }}>
+              <FiSearch style={{
+                position: 'absolute',
+                left: '12px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                color: colors.gray500,
+                fontSize: '16px'
+              }} />
               <input
                 type="text"
                 placeholder="Search students..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="search-input"
+                style={{
+                  width: '100%',
+                  padding: '10px 12px 10px 36px',
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: '8px',
+                  fontSize: typography.sm,
+                  outline: 'none',
+                  transition: 'all 0.2s ease',
+                  backgroundColor: colors.cardBackground,
+                  ':focus': {
+                    borderColor: colors.primary,
+                    backgroundColor: colors.white,
+                    boxShadow: `0 0 0 3px ${colors.primary}08`
+                  }
+                }}
               />
               {search && (
                 <button 
                   onClick={() => setSearch('')}
-                  className="clear-search"
+                  style={{
+                    position: 'absolute',
+                    right: '10px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    backgroundColor: colors.gray300,
+                    border: 'none',
+                    borderRadius: '50%',
+                    width: '18px',
+                    height: '18px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    fontSize: typography.xs,
+                    color: colors.gray600
+                  }}
                 >
                   ✕
                 </button>
               )}
             </div>
             
-            <div className="filters">
+            {/* Filters */}
+            <div style={{ display: 'flex', gap: '6px' }}>
               <button
-                className={`filter-btn ${activeFilter === 'all' ? 'active' : ''}`}
                 onClick={() => setActiveFilter('all')}
+                style={{
+                  padding: '6px 12px',
+                  border: `1px solid ${activeFilter === 'all' ? colors.primary : colors.border}`,
+                  background: activeFilter === 'all' ? colors.primary + '08' : colors.cardBackground,
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: typography.sm,
+                  fontWeight: '500',
+                  color: activeFilter === 'all' ? colors.primary : colors.textSecondary,
+                  transition: 'all 0.2s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
               >
-                All Students
+                <FiFilter size={12} /> All
               </button>
               <button
-                className={`filter-btn ${activeFilter === 'passing' ? 'active' : ''}`}
                 onClick={() => setActiveFilter('passing')}
+                style={{
+                  padding: '6px 12px',
+                  border: `1px solid ${activeFilter === 'passing' ? colors.success : colors.border}`,
+                  background: activeFilter === 'passing' ? colors.success + '08' : colors.cardBackground,
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: typography.sm,
+                  fontWeight: '500',
+                  color: activeFilter === 'passing' ? colors.success : colors.textSecondary,
+                  transition: 'all 0.2s ease'
+                }}
               >
                 Passing
               </button>
               <button
-                className={`filter-btn ${activeFilter === 'failing' ? 'active' : ''}`}
                 onClick={() => setActiveFilter('failing')}
+                style={{
+                  padding: '6px 12px',
+                  border: `1px solid ${activeFilter === 'failing' ? colors.danger : colors.border}`,
+                  background: activeFilter === 'failing' ? colors.danger + '08' : colors.cardBackground,
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: typography.sm,
+                  fontWeight: '500',
+                  color: activeFilter === 'failing' ? colors.danger : colors.textSecondary,
+                  transition: 'all 0.2s ease'
+                }}
               >
                 Needs Help
               </button>
@@ -546,45 +1251,100 @@ const TestResults = () => {
         </div>
 
         {/* Results Table */}
-        <div className="results-table">
-          <div className="table-header">
-            <div className="header-cell student-cell">
+        <div style={{ 
+          border: `1px solid ${colors.border}`, 
+          borderRadius: '10px', 
+          overflow: 'hidden', 
+          marginBottom: '20px' 
+        }}>
+          {/* Table Header */}
+          <div style={tableHeaderStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 8px' }}>
               <span>Student</span>
               <button 
-                className={`sort-btn ${sortField === 'name' ? 'active' : ''}`}
                 onClick={() => handleSort('name')}
+                style={{
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: sortField === 'name' ? colors.primary : colors.gray500,
+                  fontSize: typography.xs,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  backgroundColor: sortField === 'name' ? colors.primary + '08' : 'transparent',
+                  ':hover': {
+                    color: colors.primary,
+                    backgroundColor: colors.primary + '08'
+                  }
+                }}
               >
-                Name {sortField === 'name' && (sortOrder === 'asc' ? <FiArrowUp /> : <FiArrowDown />)}
+                Name {sortField === 'name' && (sortOrder === 'asc' ? <FiArrowUp size={10} /> : <FiArrowDown size={10} />)}
               </button>
             </div>
-            <div className="header-cell score-cell">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 8px' }}>
               <span>Score</span>
               <button 
-                className={`sort-btn ${sortField === 'score' ? 'active' : ''}`}
                 onClick={() => handleSort('score')}
+                style={{
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: sortField === 'score' ? colors.primary : colors.gray500,
+                  fontSize: typography.xs,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  backgroundColor: sortField === 'score' ? colors.primary + '08' : 'transparent',
+                  ':hover': {
+                    color: colors.primary,
+                    backgroundColor: colors.primary + '08'
+                  }
+                }}
               >
-                Score {sortField === 'score' && (sortOrder === 'asc' ? <FiArrowUp /> : <FiArrowDown />)}
+                Score {sortField === 'score' && (sortOrder === 'asc' ? <FiArrowUp size={10} /> : <FiArrowDown size={10} />)}
               </button>
             </div>
-            <div className="header-cell grade-cell">Grade</div>
-            <div className="header-cell submitted-cell">
+            <div style={{ padding: '0 8px' }}>Grade</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 8px' }}>
               <span>Submitted</span>
               <button 
-                className={`sort-btn ${sortField === 'submittedAt' ? 'active' : ''}`}
                 onClick={() => handleSort('submittedAt')}
+                style={{
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: sortField === 'submittedAt' ? colors.primary : colors.gray500,
+                  fontSize: typography.xs,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  backgroundColor: sortField === 'submittedAt' ? colors.primary + '08' : 'transparent',
+                  ':hover': {
+                    color: colors.primary,
+                    backgroundColor: colors.primary + '08'
+                  }
+                }}
               >
-                Date {sortField === 'submittedAt' && (sortOrder === 'asc' ? <FiArrowUp /> : <FiArrowDown />)}
+                Date {sortField === 'submittedAt' && (sortOrder === 'asc' ? <FiArrowUp size={10} /> : <FiArrowDown size={10} />)}
               </button>
             </div>
-            <div className="header-cell actions-cell">Actions</div>
+            <div style={{ padding: '0 8px' }}>Actions</div>
           </div>
 
-          <div className="table-body">
+          {/* Table Body */}
+          <div style={{ maxHeight: '520px', overflowY: 'auto' }}>
             {filteredResults.length === 0 ? (
-              <div className="no-results">
-                <div className="no-results-icon">📊</div>
-                <h3>No Results Found</h3>
-                <p>Try adjusting your search or filters</p>
+              <div style={{ padding: '48px 20px', textAlign: 'center', color: colors.gray500 }}>
+                <div style={{ fontSize: '40px', marginBottom: '12px', opacity: '0.5' }}>📊</div>
+                <h3 style={{ margin: '0 0 6px 0', color: colors.gray600, fontSize: typography.lg }}>No Results Found</h3>
+                <p style={{ fontSize: typography.sm }}>Try adjusting your search or filters</p>
               </div>
             ) : (
               filteredResults.map((result) => {
@@ -593,26 +1353,33 @@ const TestResults = () => {
                 const gradeLetter = getGradeLetter(percentage);
                 
                 return (
-                  <div key={result._id} className="result-row">
-                    <div className="row-main">
-                      <div className="cell student-cell">
-                        <div className="student-info">
-                          <div 
-                            className="student-avatar"
-                            style={{ backgroundColor: gradeColor }}
-                          >
+                  <div key={result._id} style={{
+                    borderBottom: `1px solid ${colors.borderLight}`,
+                    transition: 'background-color 0.2s ease',
+                    ':hover': {
+                      backgroundColor: colors.gray50
+                    },
+                    ':last-child': {
+                      borderBottom: 'none'
+                    }
+                  }}>
+                    <div style={tableRowStyle}>
+                      {/* Student Cell */}
+                      <div style={{ padding: '0 8px' }}>
+                        <div style={studentInfoStyle}>
+                          <div style={studentAvatarStyle(gradeColor)}>
                             {result.userId?.name?.[0]?.toUpperCase() || 
                              result.userId?.username?.[0]?.toUpperCase() || 'S'}
                           </div>
-                          <div className="student-details">
-                            <div className="student-name">
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: '600', color: colors.textPrimary, marginBottom: '2px', fontSize: typography.base }}>
                               {result.userId?.name || result.userId?.username}
                             </div>
-                            <div className="student-meta">
+                            <div style={{ display: 'flex', gap: '12px', fontSize: typography.xs, color: colors.textTertiary }}>
                               <span className="student-id">
                                 {result.userId?.studentId || 'ID: N/A'}
                               </span>
-                              <span className="student-performance">
+                              <span className="student-performance" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                                 {getPerformanceIcon(percentage)}
                                 {percentage >= 70 ? 'Good' : percentage >= 40 ? 'Average' : 'Needs Help'}
                               </span>
@@ -621,24 +1388,54 @@ const TestResults = () => {
                         </div>
                       </div>
                       
-                      <div className="cell score-cell">
+                      {/* Score Cell */}
+                      <div style={{ padding: '0 8px' }}>
                         {editingResultId === result._id ? (
-                          <div className="edit-score-container">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <input
                               type="number"
                               value={editScore}
                               onChange={(e) => setEditScore(e.target.value)}
-                              className="score-edit-input"
+                              style={{
+                                width: '70px',
+                                padding: '6px 10px',
+                                border: `1px solid ${colors.primary}`,
+                                borderRadius: '6px',
+                                fontSize: typography.sm,
+                                fontWeight: '600',
+                                outline: 'none',
+                                textAlign: 'center'
+                              }}
                               min="0"
                               max={test?.totalMarks || 100}
                               step="0.5"
                             />
-                            <span className="score-divider">/ {test?.totalMarks || 100}</span>
-                            <div className="edit-actions">
+                            <span style={{ color: colors.textTertiary, fontWeight: '500', fontSize: typography.sm }}>
+                              / {test?.totalMarks || 100}
+                            </span>
+                            <div style={{ display: 'flex', gap: '4px' }}>
                               <button
                                 onClick={() => handleSaveScore(result._id)}
                                 disabled={editing}
-                                className="btn-save"
+                                style={{
+                                  width: '28px',
+                                  height: '28px',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  cursor: editing ? 'not-allowed' : 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: typography.sm,
+                                  transition: 'all 0.2s ease',
+                                  backgroundColor: colors.success,
+                                  color: colors.white,
+                                  opacity: editing ? 0.6 : 1,
+                                  ':hover': editing ? {} : {
+                                    transform: 'translateY(-1px)',
+                                    boxShadow: `0 2px 6px ${colors.success}40`
+                                  }
+                                }}
                               >
                                 ✓
                               </button>
@@ -647,42 +1444,57 @@ const TestResults = () => {
                                   setEditingResultId(null);
                                   setEditScore('');
                                 }}
-                                className="btn-cancel"
+                                style={{
+                                  width: '28px',
+                                  height: '28px',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: typography.sm,
+                                  transition: 'all 0.2s ease',
+                                  backgroundColor: colors.danger,
+                                  color: colors.white,
+                                  ':hover': {
+                                    transform: 'translateY(-1px)',
+                                    boxShadow: `0 2px 6px ${colors.danger}40`
+                                  }
+                                }}
                               >
                                 ✕
                               </button>
                             </div>
                           </div>
                         ) : (
-                          <div className="score-display">
-                            <div className="score-value" style={{ color: gradeColor }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <div style={{ fontSize: typography.lg, fontWeight: '700', color: gradeColor }}>
                               {result.score}
-                              <span className="score-max"> / {test?.totalMarks || 100}</span>
+                              <span style={{ fontSize: typography.sm, fontWeight: '500', color: colors.textTertiary }}>
+                                {' '}/ {test?.totalMarks || 100}
+                              </span>
                             </div>
-                            <div className="score-percentage">
+                            <div style={{ fontSize: typography.xs, color: colors.textTertiary }}>
                               {percentage.toFixed(1)}%
                             </div>
                           </div>
                         )}
                       </div>
                       
-                      <div className="cell grade-cell">
-                        <div 
-                          className="grade-badge"
-                          style={{ 
-                            backgroundColor: gradeColor,
-                            color: percentage >= 60 ? 'white' : '#333'
-                          }}
-                        >
+                      {/* Grade Cell */}
+                      <div style={{ padding: '0 8px' }}>
+                        <div style={gradeBadgeStyle(percentage)}>
                           {gradeLetter}
                         </div>
                       </div>
                       
-                      <div className="cell submitted-cell">
-                        <div className="date-display">
+                      {/* Submitted Cell */}
+                      <div style={{ padding: '0 8px' }}>
+                        <div style={{ fontWeight: '600', color: colors.textPrimary, marginBottom: '2px', fontSize: typography.sm }}>
                           {new Date(result.submittedAt).toLocaleDateString()}
                         </div>
-                        <div className="time-display">
+                        <div style={{ fontSize: typography.xs, color: colors.textTertiary }}>
                           {new Date(result.submittedAt).toLocaleTimeString([], { 
                             hour: '2-digit', 
                             minute: '2-digit' 
@@ -690,14 +1502,34 @@ const TestResults = () => {
                         </div>
                       </div>
                       
-                      <div className="cell actions-cell">
-                        <div className="action-buttons">
+                      {/* Actions Cell */}
+                      <div style={{ padding: '0 8px' }}>
+                        <div style={{ display: 'flex', gap: '6px' }}>
                           <button
                             onClick={() => toggleDetails(result._id)}
-                            className="btn-view"
+                            style={{
+                              backgroundColor: colors.primary,
+                              color: colors.white,
+                              border: 'none',
+                              padding: '6px 12px',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              fontSize: typography.sm,
+                              fontWeight: '500',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              transition: 'all 0.2s ease',
+                              ':hover': {
+                                backgroundColor: colors.primaryDark,
+                                transform: 'translateY(-1px)',
+                                boxShadow: `0 2px 8px ${colors.primary}20`
+                              }
+                            }}
                           >
-                            <FiEye /> View
+                            <FiEye size={14} /> View
                           </button>
+                          
                           {(user.role === 'admin' || user.role === 'super_admin') && (
                             editingResultId !== result._id ? (
                               <button
@@ -705,32 +1537,91 @@ const TestResults = () => {
                                   setEditingResultId(result._id);
                                   setEditScore(result.score.toString());
                                 }}
-                                className="btn-edit"
+                                style={{
+                                  backgroundColor: colors.warning,
+                                  color: colors.white,
+                                  border: 'none',
+                                  width: '36px',
+                                  height: '36px',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  transition: 'all 0.2s ease',
+                                  ':hover': {
+                                    backgroundColor: '#e0a800',
+                                    transform: 'translateY(-1px)',
+                                    boxShadow: `0 2px 8px ${colors.warning}20`
+                                  }
+                                }}
                               >
-                                <FiEdit />
+                                <FiEdit size={14} />
                               </button>
                             ) : (
-                              <div className="editing-indicator">Editing...</div>
+                              <div style={{ 
+                                fontSize: typography.xs, 
+                                color: colors.warning, 
+                                fontWeight: '500',
+                                animation: 'pulse 1.5s infinite',
+                                display: 'flex',
+                                alignItems: 'center',
+                                height: '36px'
+                              }}>
+                                Editing...
+                              </div>
                             )
                           )}
                         </div>
                       </div>
                     </div>
                     
+                    {/* Expanded Details */}
                     {expandedResult === result._id && (
-                      <div className="row-expanded">
-                        <div className="answers-section">
-                          <div className="answers-header">
-                            <h4>
-                              <FiEye /> Detailed Answers - {result.userId?.name || result.userId?.username}
-                              <span className="answers-score">
+                      <div style={{
+                        backgroundColor: colors.gray50,
+                        borderTop: `1px solid ${colors.border}`,
+                        animation: 'slideDown 0.2s ease'
+                      }}>
+                        <div style={{ padding: '24px' }}>
+                          <div style={{ 
+                            display: 'flex', 
+                            justifyContent: 'space-between', 
+                            alignItems: 'center', 
+                            marginBottom: '20px',
+                            flexWrap: 'wrap',
+                            gap: '12px'
+                          }}>
+                            <h4 style={{ 
+                              margin: 0, 
+                              color: colors.textPrimary, 
+                              fontSize: typography.base, 
+                              display: 'flex', 
+                              alignItems: 'center', 
+                              gap: '8px',
+                              fontWeight: '600'
+                            }}>
+                              <FiEye size={16} /> Detailed Answers - {result.userId?.name || result.userId?.username}
+                              <span style={{
+                                fontSize: typography.xs,
+                                color: colors.primary,
+                                backgroundColor: colors.primary + '08',
+                                padding: '4px 8px',
+                                borderRadius: '4px',
+                                fontWeight: '600',
+                                border: `1px solid ${colors.primary}20`
+                              }}>
                                 Score: {result.score}/{test?.totalMarks || 100} ({percentage.toFixed(1)}%)
                               </span>
                             </h4>
                           </div>
                           
                           {result.answers && typeof result.answers === 'object' && (
-                            <div className="answers-grid">
+                            <div style={{ 
+                              display: 'grid', 
+                              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', 
+                              gap: '16px' 
+                            }}>
                               {Object.entries(result.answers).map(([questionId, selectedAnswer], index) => {
                                 const question = test?.questions?.find(q => q._id?.toString() === questionId);
                                 const isCorrect = selectedAnswer === question?.correctAnswer;
@@ -738,36 +1629,84 @@ const TestResults = () => {
                                 return (
                                   <div 
                                     key={index}
-                                    className={`answer-card ${isCorrect ? 'correct' : 'incorrect'}`}
+                                    style={answerCardStyle(isCorrect)}
                                   >
-                                    <div className="answer-header">
-                                      <div className="question-info">
-                                        <span className="question-number">Q{index + 1}</span>
-                                        <span className={`answer-status ${isCorrect ? 'correct' : 'incorrect'}`}>
+                                    <div style={{ 
+                                      display: 'flex', 
+                                      justifyContent: 'space-between', 
+                                      alignItems: 'center', 
+                                      marginBottom: '12px' 
+                                    }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <span style={{
+                                          backgroundColor: colors.primary,
+                                          color: colors.white,
+                                          width: '28px',
+                                          height: '28px',
+                                          borderRadius: '6px',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          fontWeight: '600',
+                                          fontSize: typography.sm
+                                        }}>
+                                          Q{index + 1}
+                                        </span>
+                                        <span style={{
+                                          fontSize: typography.xs,
+                                          fontWeight: '600',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: '4px',
+                                          color: isCorrect ? colors.success : colors.danger
+                                        }}>
                                           {isCorrect ? (
-                                            <><FiCheckCircle /> Correct</>
+                                            <><FiCheckCircle size={12} /> Correct</>
                                           ) : (
-                                            <><FiXCircle /> Incorrect</>
+                                            <><FiXCircle size={12} /> Incorrect</>
                                           )}
                                         </span>
                                       </div>
-                                      <div className="question-marks">
-                                        <span className="marks-text">1 Point</span>
+                                      <div style={{ 
+                                        fontSize: typography.xs, 
+                                        color: colors.textTertiary, 
+                                        backgroundColor: colors.gray100, 
+                                        padding: '2px 6px', 
+                                        borderRadius: '4px' 
+                                      }}>
+                                        1 Point
                                       </div>
                                     </div>
-                                    <div className="question-text">
+                                    <div style={{ 
+                                      margin: '0 0 16px 0', 
+                                      color: colors.textPrimary, 
+                                      lineHeight: '1.5', 
+                                      fontSize: typography.sm 
+                                    }}>
                                       {question?.text || 'Question text not available'}
                                     </div>
-                                    <div className="answer-comparison">
-                                      <div className="comparison-row">
-                                        <span className="label">Student's Answer:</span>
-                                        <span className={`value ${isCorrect ? 'correct' : 'incorrect'}`}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <span style={{ fontSize: typography.xs, color: colors.textTertiary, fontWeight: '500' }}>
+                                          Student's Answer:
+                                        </span>
+                                        <span style={{
+                                          fontSize: typography.sm,
+                                          fontWeight: '600',
+                                          color: isCorrect ? colors.success : colors.danger
+                                        }}>
                                           {selectedAnswer || 'Not answered'}
                                         </span>
                                       </div>
-                                      <div className="comparison-row">
-                                        <span className="label">Correct Answer:</span>
-                                        <span className="value correct">
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <span style={{ fontSize: typography.xs, color: colors.textTertiary, fontWeight: '500' }}>
+                                          Correct Answer:
+                                        </span>
+                                        <span style={{
+                                          fontSize: typography.sm,
+                                          fontWeight: '600',
+                                          color: colors.success
+                                        }}>
                                           {question?.correctAnswer || 'N/A'}
                                         </span>
                                       </div>
@@ -788,1103 +1727,89 @@ const TestResults = () => {
         </div>
         
         {/* Footer Stats */}
-        <div className="table-footer">
-          <div className="footer-stats">
-            <div className="footer-stat">
-              <span className="stat-label">Showing:</span>
-              <span className="stat-value">{filteredResults.length} of {results.length} students</span>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center', 
+          padding: '16px 0',
+          borderTop: `1px solid ${colors.border}`, 
+          marginTop: '20px',
+          flexWrap: 'wrap',
+          gap: '16px'
+        }}>
+          <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <span style={{ fontSize: typography.xs, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Showing:
+              </span>
+              <span style={{ fontSize: typography.base, fontWeight: '600', color: colors.primary }}>
+                {filteredResults.length} of {results.length} students
+              </span>
             </div>
-            <div className="footer-stat">
-              <span className="stat-label">Class Average:</span>
-              <span className="stat-value">{stats.average} points</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <span style={{ fontSize: typography.xs, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Class Average:
+              </span>
+              <span style={{ fontSize: typography.base, fontWeight: '600', color: colors.primary }}>
+                {stats.average} points
+              </span>
             </div>
-            <div className="footer-stat">
-              <span className="stat-label">Success Rate:</span>
-              <span className="stat-value">{stats.passRate}%</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <span style={{ fontSize: typography.xs, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Success Rate:
+              </span>
+              <span style={{ fontSize: typography.base, fontWeight: '600', color: colors.primary }}>
+                {stats.passRate}%
+              </span>
             </div>
           </div>
-          <div className="footer-actions">
+          <div>
             <button
               onClick={exportToCSV}
-              className="btn-footer"
+              style={createButtonStyle('outline')}
             >
-              <FiDownload /> Export Full Report
+              <FiDownload size={16} /> Export Report
             </button>
           </div>
         </div>
       </div>
 
-      <style jsx>{`
-        .test-results {
-          background: #f8f9fa;
-          min-height: 100vh;
-          padding: 20px;
-          font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-        }
-
-        /* Navigation Bar */
-        .nav-bar {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 16px 0;
-          margin-bottom: 24px;
-        }
-
-        .nav-left {
-          display: flex;
-          align-items: center;
-          gap: 24px;
-        }
-
-        .nav-back {
-          background: #4B5320;
-          color: white;
-          border: none;
-          padding: 10px 20px;
-          border-radius: 8px;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-weight: 500;
-          transition: all 0.3s ease;
-        }
-
-        .nav-back:hover {
-          background: #3a441a;
-          transform: translateY(-1px);
-          box-shadow: 0 4px 12px rgba(75, 83, 32, 0.2);
-        }
-
-        .breadcrumb {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          color: #666;
-          font-size: 14px;
-        }
-
-        .breadcrumb .current {
-          color: #4B5320;
-          font-weight: 600;
-        }
-
-        .nav-right .test-info-badge {
-          background: rgba(144, 238, 144, 0.2);
-          color: #4B5320;
-          padding: 8px 16px;
-          border-radius: 20px;
-          font-size: 14px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          border: 1px solid rgba(144, 238, 144, 0.3);
-        }
-
-        /* Test Header */
-        .test-header {
-          background: linear-gradient(135deg, #4B5320 0%, #3a441a 100%);
-          border-radius: 16px;
-          padding: 32px;
-          margin-bottom: 24px;
-          color: white;
-          box-shadow: 0 8px 32px rgba(75, 83, 32, 0.15);
-        }
-
-        .test-header-content {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          max-width: 1400px;
-          margin: 0 auto;
-        }
-
-        .test-title-section h1 {
-          margin: 0 0 16px 0;
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-
-        .test-subject {
-          font-size: 14px;
-          opacity: 0.9;
-          font-weight: 500;
-          text-transform: uppercase;
-          letter-spacing: 1px;
-        }
-
-        .test-title {
-          font-size: 32px;
-          font-weight: 700;
-          line-height: 1.2;
-        }
-
-        .test-details {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 20px;
-          margin-top: 16px;
-        }
-
-        .detail-item {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          background: rgba(255, 255, 255, 0.1);
-          padding: 8px 16px;
-          border-radius: 20px;
-          font-size: 14px;
-          backdrop-filter: blur(10px);
-        }
-
-        .header-actions {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-        }
-
-        .action-group {
-          display: flex;
-          gap: 12px;
-        }
-
-        .btn-action {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 12px 20px;
-          border: none;
-          border-radius: 10px;
-          cursor: pointer;
-          font-weight: 600;
-          transition: all 0.3s ease;
-          color: #4B5320;
-        }
-
-        .btn-refresh {
-          background: #90EE90;
-        }
-
-        .btn-export {
-          background: #FFA500;
-          color: #333;
-        }
-
-        .btn-action:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
-        }
-
-        /* Performance Overview */
-        .performance-overview {
-          background: white;
-          border-radius: 16px;
-          padding: 24px;
-          margin-bottom: 24px;
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-        }
-
-        .overview-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 24px;
-        }
-
-        .overview-header h2 {
-          margin: 0;
-          color: #333;
-          font-size: 20px;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-
-        .overview-stats {
-          display: flex;
-          gap: 12px;
-        }
-
-        .stat-badge {
-          background: #f0f9ff;
-          color: #4B5320;
-          padding: 8px 16px;
-          border-radius: 20px;
-          font-size: 14px;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          border: 1px solid #e0f0e0;
-        }
-
-        .stats-cards {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-          gap: 20px;
-        }
-
-        .stat-card {
-          background: #f9f9f9;
-          border-radius: 12px;
-          padding: 20px;
-          display: flex;
-          align-items: center;
-          gap: 16px;
-          transition: all 0.3s ease;
-        }
-
-        .stat-card:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
-        }
-
-        .stat-card.average-score {
-          border-left: 4px solid #4B5320;
-        }
-
-        .stat-card.pass-rate {
-          border-left: 4px solid #90EE90;
-        }
-
-        .stat-card.high-score {
-          border-left: 4px solid #FFA500;
-        }
-
-        .stat-card.above-average {
-          border-left: 4px solid #3a441a;
-        }
-
-        .stat-icon {
-          width: 56px;
-          height: 56px;
-          border-radius: 12px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 24px;
-          color: white;
-        }
-
-        .average-score .stat-icon {
-          background: #4B5320;
-        }
-
-        .pass-rate .stat-icon {
-          background: #90EE90;
-          color: #333;
-        }
-
-        .high-score .stat-icon {
-          background: #FFA500;
-          color: #333;
-        }
-
-        .above-average .stat-icon {
-          background: #3a441a;
-        }
-
-        .stat-content {
-          flex: 1;
-        }
-
-        .stat-value {
-          font-size: 32px;
-          font-weight: 700;
-          color: #333;
-          line-height: 1;
-          margin-bottom: 4px;
-        }
-
-        .stat-label {
-          font-size: 14px;
-          color: #666;
-          margin-bottom: 8px;
-        }
-
-        .stat-trend {
-          font-size: 12px;
-          font-weight: 600;
-        }
-
-        .trend-up {
-          color: #4B5320;
-          display: flex;
-          align-items: center;
-          gap: 4px;
-        }
-
-        .trend-down {
-          color: #ff6b6b;
-          display: flex;
-          align-items: center;
-          gap: 4px;
-        }
-
-        .progress-bar {
-          height: 6px;
-          background: #e0e0e0;
-          border-radius: 3px;
-          overflow: hidden;
-          margin-top: 8px;
-        }
-
-        .progress-fill {
-          height: 100%;
-          background: linear-gradient(90deg, #90EE90, #4B5320);
-          border-radius: 3px;
-          transition: width 0.6s ease;
-        }
-
-        .score-comparison,
-        .percentage-indicator {
-          font-size: 12px;
-          color: #666;
-          margin-top: 4px;
-        }
-
-        /* Results Section */
-        .results-section {
-          background: white;
-          border-radius: 16px;
-          padding: 24px;
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-        }
-
-        .section-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 24px;
-          flex-wrap: wrap;
-          gap: 16px;
-        }
-
-        .section-header h2 {
-          margin: 0;
-          color: #333;
-          font-size: 20px;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-
-        .section-controls {
-          display: flex;
-          gap: 16px;
-          align-items: center;
-          flex-wrap: wrap;
-        }
-
-        .search-box {
-          position: relative;
-          width: 300px;
-        }
-
-        .search-icon {
-          position: absolute;
-          left: 16px;
-          top: 50%;
-          transform: translateY(-50%);
-          color: #999;
-        }
-
-        .search-input {
-          width: 100%;
-          padding: 12px 16px 12px 48px;
-          border: 2px solid #e0e0e0;
-          border-radius: 10px;
-          font-size: 14px;
-          outline: none;
-          transition: all 0.3s ease;
-          background: #f8f9fa;
-        }
-
-        .search-input:focus {
-          border-color: #4B5320;
-          background: white;
-          box-shadow: 0 0 0 3px rgba(75, 83, 32, 0.1);
-        }
-
-        .clear-search {
-          position: absolute;
-          right: 12px;
-          top: 50%;
-          transform: translateY(-50%);
-          background: #ddd;
-          border: none;
-          border-radius: 50%;
-          width: 20px;
-          height: 20px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          font-size: 12px;
-          color: #666;
-        }
-
-        .filters {
-          display: flex;
-          gap: 8px;
-        }
-
-        .filter-btn {
-          padding: 8px 16px;
-          border: 2px solid #e0e0e0;
-          background: white;
-          border-radius: 20px;
-          cursor: pointer;
-          font-size: 14px;
-          font-weight: 500;
-          color: #666;
-          transition: all 0.3s ease;
-        }
-
-        .filter-btn.active {
-          background: #4B5320;
-          color: white;
-          border-color: #4B5320;
-        }
-
-        .filter-btn:hover:not(.active) {
-          border-color: #4B5320;
-          color: #4B5320;
-        }
-
-        /* Results Table */
-        .results-table {
-          border: 1px solid #e0e0e0;
-          border-radius: 12px;
-          overflow: hidden;
-          margin-bottom: 24px;
-        }
-
-        .table-header {
-          display: grid;
-          grid-template-columns: 2fr 1.5fr 1fr 1fr 120px;
-          background: #f8f9fa;
-          padding: 16px 24px;
-          border-bottom: 1px solid #e0e0e0;
-          font-weight: 600;
-          color: #4B5320;
-          font-size: 14px;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-        }
-
-        .header-cell {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 0 8px;
-        }
-
-        .sort-btn {
-          background: transparent;
-          border: none;
-          cursor: pointer;
-          color: #999;
-          font-size: 12px;
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          padding: 4px 8px;
-          border-radius: 4px;
-        }
-
-        .sort-btn.active {
-          color: #4B5320;
-          background: rgba(75, 83, 32, 0.1);
-        }
-
-        .sort-btn:hover {
-          color: #4B5320;
-          background: rgba(75, 83, 32, 0.05);
-        }
-
-        .table-body {
-          max-height: 600px;
-          overflow-y: auto;
-        }
-
-        .no-results {
-          padding: 60px 20px;
-          text-align: center;
-          color: #999;
-        }
-
-        .no-results-icon {
-          font-size: 48px;
-          margin-bottom: 16px;
-          opacity: 0.5;
-        }
-
-        .no-results h3 {
-          margin: 0 0 8px 0;
-          color: #666;
-        }
-
-        .result-row {
-          border-bottom: 1px solid #f0f0f0;
-          transition: background-color 0.3s ease;
-        }
-
-        .result-row:hover {
-          background-color: #f9f9f9;
-        }
-
-        .result-row:last-child {
-          border-bottom: none;
-        }
-
-        .row-main {
-          display: grid;
-          grid-template-columns: 2fr 1.5fr 1fr 1fr 120px;
-          padding: 20px 24px;
-          align-items: center;
-        }
-
-        .student-cell {
-          padding: 0 8px;
-        }
-
-        .student-info {
-          display: flex;
-          align-items: center;
-          gap: 16px;
-        }
-
-        .student-avatar {
-          width: 48px;
-          height: 48px;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: 600;
-          font-size: 18px;
-          color: white;
-          flex-shrink: 0;
-        }
-
-        .student-details {
-          flex: 1;
-        }
-
-        .student-name {
-          font-weight: 600;
-          color: #333;
-          margin-bottom: 4px;
-          font-size: 16px;
-        }
-
-        .student-meta {
-          display: flex;
-          gap: 16px;
-          font-size: 12px;
-          color: #999;
-        }
-
-        .student-performance {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-        }
-
-        .score-cell {
-          padding: 0 8px;
-        }
-
-        .edit-score-container {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-
-        .score-edit-input {
-          width: 80px;
-          padding: 8px 12px;
-          border: 2px solid #4B5320;
-          border-radius: 6px;
-          font-size: 14px;
-          font-weight: 600;
-          outline: none;
-          text-align: center;
-        }
-
-        .score-divider {
-          color: #666;
-          font-weight: 500;
-        }
-
-        .edit-actions {
-          display: flex;
-          gap: 4px;
-        }
-
-        .btn-save,
-        .btn-cancel {
-          width: 32px;
-          height: 32px;
-          border: none;
-          border-radius: 6px;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 14px;
-          transition: all 0.3s ease;
-        }
-
-        .btn-save {
-          background: #90EE90;
-          color: #333;
-        }
-
-        .btn-cancel {
-          background: #ffcccc;
-          color: #ff6b6b;
-        }
-
-        .btn-save:hover,
-        .btn-cancel:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-        }
-
-        .score-display {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-
-        .score-value {
-          font-size: 20px;
-          font-weight: 700;
-        }
-
-        .score-max {
-          font-size: 14px;
-          font-weight: 500;
-          color: #999;
-        }
-
-        .score-percentage {
-          font-size: 12px;
-          color: #666;
-        }
-
-        .grade-cell {
-          padding: 0 8px;
-        }
-
-        .grade-badge {
-          width: 40px;
-          height: 40px;
-          border-radius: 10px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: 700;
-          font-size: 16px;
-          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-        }
-
-        .submitted-cell {
-          padding: 0 8px;
-        }
-
-        .date-display {
-          font-weight: 600;
-          color: #333;
-          margin-bottom: 4px;
-        }
-
-        .time-display {
-          font-size: 12px;
-          color: #999;
-        }
-
-        .actions-cell {
-          padding: 0 8px;
-        }
-
-        .action-buttons {
-          display: flex;
-          gap: 8px;
-        }
-
-        .btn-view {
-          background: #4B5320;
-          color: white;
-          border: none;
-          padding: 8px 16px;
-          border-radius: 8px;
-          cursor: pointer;
-          font-size: 14px;
-          font-weight: 500;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          transition: all 0.3s ease;
-        }
-
-        .btn-view:hover {
-          background: #3a441a;
-          transform: translateY(-1px);
-          box-shadow: 0 4px 12px rgba(75, 83, 32, 0.2);
-        }
-
-        .btn-edit {
-          background: #FFA500;
-          color: white;
-          border: none;
-          width: 40px;
-          height: 40px;
-          border-radius: 8px;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: all 0.3s ease;
-        }
-
-        .btn-edit:hover {
-          background: #e69500;
-          transform: translateY(-1px);
-          box-shadow: 0 4px 12px rgba(255, 165, 0, 0.2);
-        }
-
-        .editing-indicator {
-          font-size: 12px;
-          color: #FFA500;
-          font-weight: 500;
-          animation: pulse 1.5s infinite;
-        }
-
+      {/* Global CSS Animation */}
+      <style jsx global>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        
+        @keyframes slideDown {
+          from { opacity: 0; transform: translateY(-8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
         }
-
-        .row-expanded {
-          background: #f9f9f9;
-          border-top: 1px solid #e0e0e0;
-          animation: slideDown 0.3s ease;
+        
+        /* Custom scrollbar */
+        div[style*="max-height"]::-webkit-scrollbar {
+          width: 6px;
         }
-
-        @keyframes slideDown {
-          from { opacity: 0; transform: translateY(-10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-
-        .answers-section {
-          padding: 32px;
-        }
-
-        .answers-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 24px;
-        }
-
-        .answers-header h4 {
-          margin: 0;
-          color: #333;
-          font-size: 18px;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
-        .answers-score {
-          font-size: 14px;
-          color: #4B5320;
-          background: rgba(144, 238, 144, 0.2);
-          padding: 6px 12px;
-          border-radius: 20px;
-          font-weight: 600;
-        }
-
-        .answers-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-          gap: 20px;
-        }
-
-        .answer-card {
-          background: white;
-          border-radius: 12px;
-          padding: 20px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-          border: 2px solid;
-          transition: all 0.3s ease;
-        }
-
-        .answer-card:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-        }
-
-        .answer-card.correct {
-          border-color: #90EE90;
-          background: linear-gradient(135deg, rgba(144, 238, 144, 0.05) 0%, rgba(144, 238, 144, 0.1) 100%);
-        }
-
-        .answer-card.incorrect {
-          border-color: #ffcccc;
-          background: linear-gradient(135deg, rgba(255, 204, 204, 0.05) 0%, rgba(255, 204, 204, 0.1) 100%);
-        }
-
-        .answer-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 16px;
-        }
-
-        .question-info {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
-        .question-number {
-          background: #4B5320;
-          color: white;
-          width: 32px;
-          height: 32px;
-          border-radius: 8px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: 600;
-          font-size: 14px;
-        }
-
-        .answer-status {
-          font-size: 12px;
-          font-weight: 600;
-          display: flex;
-          align-items: center;
-          gap: 4px;
-        }
-
-        .answer-status.correct {
-          color: #4B5320;
-        }
-
-        .answer-status.incorrect {
-          color: #ff6b6b;
-        }
-
-        .question-marks .marks-text {
-          font-size: 12px;
-          color: #999;
-          background: #f0f0f0;
-          padding: 4px 8px;
-          border-radius: 4px;
-        }
-
-        .question-text {
-          margin: 0 0 20px 0;
-          color: #333;
-          line-height: 1.6;
-          font-size: 14px;
-        }
-
-        .answer-comparison {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-        }
-
-        .comparison-row {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-
-        .comparison-row .label {
-          font-size: 12px;
-          color: #666;
-          font-weight: 500;
-        }
-
-        .comparison-row .value {
-          font-size: 14px;
-          font-weight: 600;
-        }
-
-        .value.correct {
-          color: #4B5320;
-        }
-
-        .value.incorrect {
-          color: #ff6b6b;
-        }
-
-        /* Table Footer */
-        .table-footer {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 20px 0;
-          border-top: 1px solid #e0e0e0;
-          margin-top: 24px;
-        }
-
-        .footer-stats {
-          display: flex;
-          gap: 32px;
-        }
-
-        .footer-stat {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-
-        .stat-label {
-          font-size: 12px;
-          color: #999;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-        }
-
-        .stat-value {
-          font-size: 16px;
-          font-weight: 600;
-          color: #4B5320;
-        }
-
-        .btn-footer {
-          background: #4B5320;
-          color: white;
-          border: none;
-          padding: 12px 24px;
+        
+        div[style*="max-height"]::-webkit-scrollbar-track {
+          background: ${colors.gray100};
           border-radius: 10px;
-          cursor: pointer;
-          font-weight: 600;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          transition: all 0.3s ease;
         }
-
-        .btn-footer:hover {
-          background: #3a441a;
-          transform: translateY(-2px);
-          box-shadow: 0 6px 20px rgba(75, 83, 32, 0.2);
+        
+        div[style*="max-height"]::-webkit-scrollbar-thumb {
+          background: ${colors.gray400};
+          border-radius: 10px;
         }
-
-        /* Loading State */
-        .loading-container {
-          min-height: 100vh;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        
+        div[style*="max-height"]::-webkit-scrollbar-thumb:hover {
+          background: ${colors.gray500};
         }
-
-        .spinner {
-          width: 60px;
-          height: 60px;
-          border: 4px solid rgba(144, 238, 144, 0.3);
-          border-top: 4px solid #4B5320;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-          margin-bottom: 24px;
-        }
-
-        .loading-text {
-          font-size: 18px;
-          font-weight: 600;
-          color: #4B5320;
-          margin: 0 0 8px 0;
-        }
-
-        .loading-subtext {
-          font-size: 14px;
-          color: #666;
-          opacity: 0.8;
-        }
-
-        /* Error State */
-        .error-container {
-          min-height: 100vh;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-        }
-
-        .error-card {
-          background: white;
-          padding: 40px;
-          border-radius: 16px;
-          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-          text-align: center;
-          max-width: 500px;
-          border: 1px solid #ffcccc;
-        }
-
-        .error-icon {
-          font-size: 48px;
-          margin-bottom: 20px;
-        }
-
-        .error-card h3 {
-          color: #ff6b6b;
-          margin: 0 0 12px 0;
-          font-size: 20px;
-        }
-
-        .error-message {
-          color: #666;
-          margin: 0 0 24px 0;
-          line-height: 1.6;
-        }
-
-        .error-actions {
-          display: flex;
-          gap: 12px;
-          justify-content: center;
-        }
-
-        .btn-back,
-        .btn-retry {
-          padding: 10px 20px;
-          border: none;
-          border-radius: 8px;
-          cursor: pointer;
-          font-weight: 600;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          transition: all 0.3s ease;
-        }
-
-        .btn-back {
-          background: #4B5320;
-          color: white;
-        }
-
-        .btn-retry {
-          background: #FFA500;
-          color: #333;
-        }
-
-        .btn-back:hover,
-        .btn-retry:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        }
-
+        
         /* Responsive Design */
         @media (max-width: 1200px) {
           .stats-cards {
@@ -1896,17 +1821,17 @@ const TestResults = () => {
             grid-template-columns: 2fr 1fr 80px 1fr 120px;
           }
         }
-
+        
         @media (max-width: 992px) {
           .test-header-content {
             flex-direction: column;
-            gap: 20px;
+            gap: 16px;
           }
           
           .overview-header {
             flex-direction: column;
             align-items: flex-start;
-            gap: 16px;
+            gap: 12px;
           }
           
           .section-header {
@@ -1926,18 +1851,18 @@ const TestResults = () => {
             grid-template-columns: 1fr;
           }
         }
-
+        
         @media (max-width: 768px) {
           .nav-bar {
             flex-direction: column;
             align-items: flex-start;
-            gap: 16px;
+            gap: 12px;
           }
           
           .nav-left {
             flex-direction: column;
             align-items: flex-start;
-            gap: 12px;
+            gap: 10px;
           }
           
           .stats-cards {
@@ -1948,7 +1873,7 @@ const TestResults = () => {
           .row-main {
             display: flex;
             flex-direction: column;
-            gap: 16px;
+            gap: 12px;
             align-items: stretch;
           }
           
@@ -1959,25 +1884,25 @@ const TestResults = () => {
           .filters {
             width: 100%;
             overflow-x: auto;
-            padding-bottom: 8px;
+            padding-bottom: 6px;
           }
           
           .table-footer {
             flex-direction: column;
-            gap: 20px;
+            gap: 16px;
             align-items: flex-start;
           }
           
           .footer-stats {
             width: 100%;
             flex-direction: column;
-            gap: 16px;
+            gap: 12px;
           }
         }
-
+        
         @media (max-width: 480px) {
           .test-results {
-            padding: 12px;
+            padding: 16px;
           }
           
           .test-header {
@@ -1985,12 +1910,12 @@ const TestResults = () => {
           }
           
           .test-title {
-            font-size: 24px;
+            font-size: 20px;
           }
           
           .test-details {
             flex-direction: column;
-            gap: 8px;
+            gap: 6px;
           }
           
           .action-group {

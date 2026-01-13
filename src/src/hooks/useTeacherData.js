@@ -269,7 +269,7 @@ const useTeacherData = () => {
           // Only keep tests with results
           const validAnalytics = fallbackAnalytics.filter(a => a.totalStudents > 0);
           
-          console.log('✅ Fallback analytics created:', {
+          console.log('null', {
             count: validAnalytics.length,
             sample: validAnalytics[0]
           });

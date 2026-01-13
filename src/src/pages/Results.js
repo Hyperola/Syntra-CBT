@@ -1,11 +1,11 @@
-// pages/results.js
+// pages/results.js for superadmins //
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import axios from 'axios';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useResultEditing } from '../hooks/useResultEditing';
 import ResultScoreEditor from '../components/ResultScoreEditor';
-import { FiEdit, FiEye, FiTrash2, FiX, FiChevronLeft, FiChevronRight, FiDownload, FiFilter, FiSearch, FiBarChart2, FiUsers } from 'react-icons/fi';
+import { FiEdit, FiEye, FiTrash2, FiX, FiChevronLeft, FiChevronRight, FiDownload, FiFilter, FiSearch, FiBarChart2, FiUsers, FiBook, FiCalendar, FiClock, FiCheckCircle, FiXCircle, FiPercent } from 'react-icons/fi';
 
 const Results = () => {
   const { user } = useContext(AuthContext);
@@ -35,6 +35,126 @@ const Results = () => {
     saveScore
   } = useResultEditing();
 
+  // Helper function to extract user's full name safely
+  const getUserFullName = (result) => {
+    try {
+      // Check different possible data structures
+      if (result.userId) {
+        // If userId is a populated object
+        if (typeof result.userId === 'object' && result.userId !== null) {
+          const name = result.userId.name || '';
+          const surname = result.userId.surname || '';
+          const firstName = result.userId.firstName || '';
+          const lastName = result.userId.lastName || '';
+          const username = result.userId.username || '';
+          
+          // Try different combinations
+          if (name && surname) return `${name} ${surname}`;
+          if (firstName && lastName) return `${firstName} ${lastName}`;
+          if (firstName && surname) return `${firstName} ${surname}`;
+          if (name) return name;
+          if (firstName) return firstName;
+          if (username) return username;
+        }
+        // If userId is just an ID string, check if we have student info in other fields
+        else if (typeof result.userId === 'string') {
+          // Check if there's any student info in the result
+          if (result.studentName) return result.studentName;
+          if (result.student) {
+            if (typeof result.student === 'object') {
+              return `${result.student.firstName || ''} ${result.student.lastName || ''}`.trim() || 
+                     result.student.username || 
+                     'Unknown Student';
+            }
+          }
+          return 'Loading...';
+        }
+      }
+      
+      // Fallback: Check if result has student info directly
+      if (result.studentName) return result.studentName;
+      if (result.student) {
+        if (typeof result.student === 'object') {
+          return `${result.student.firstName || ''} ${result.student.lastName || ''}`.trim() || 
+                 result.student.username || 
+                 'Unknown Student';
+        }
+      }
+      
+      return 'Unknown Student';
+    } catch (error) {
+      console.error('Error getting user name:', error);
+      return 'Unknown Student';
+    }
+  };
+
+  // Helper function to get student ID safely
+  const getStudentId = (result) => {
+    try {
+      if (result.userId) {
+        if (typeof result.userId === 'object' && result.userId !== null) {
+          return result.userId.studentId || result.userId.username || 'N/A';
+        }
+      }
+      
+      // Fallback: Check result directly
+      if (result.studentId) return result.studentId;
+      if (result.student) {
+        if (typeof result.student === 'object') {
+          return result.student.studentId || result.student.username || 'N/A';
+        }
+      }
+      
+      return 'N/A';
+    } catch (error) {
+      return 'N/A';
+    }
+  };
+
+  // Helper function to calculate percentage
+  const calculatePercentage = (result) => {
+    try {
+      if (result.percentage !== undefined) {
+        return Math.round(result.percentage);
+      }
+      
+      const totalMarks = result.totalMarks || test?.totalMarks || 100;
+      if (totalMarks > 0 && result.score !== undefined) {
+        return Math.round((result.score / totalMarks) * 100);
+      }
+      
+      return 0;
+    } catch (error) {
+      return 0;
+    }
+  };
+
+  // Helper function to get class name from test
+  const getClassName = () => {
+    if (!test) return 'N/A';
+    
+    if (test.class) {
+      if (typeof test.class === 'object' && test.class.name) {
+        return test.class.name;
+      } else if (typeof test.class === 'string') {
+        return test.class;
+      }
+    }
+    return 'N/A';
+  };
+
+  // Helper function to get subject name from test
+  const getSubjectName = () => {
+    if (!test) return 'N/A';
+    return test.subject || 'N/A';
+  };
+
+  // Helper function to get total questions
+  const getTotalQuestions = () => {
+    if (!test) return 'N/A';
+    return test.questions?.length || test.questionCount || 'N/A';
+  };
+
   useEffect(() => {
     const fetchResults = async () => {
       const token = localStorage.getItem('token');
@@ -45,23 +165,55 @@ const Results = () => {
       }
 
       try {
-        const [testRes, resultsRes] = await Promise.all([
-          axios.get(`http://localhost:5000/api/tests/${testId}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-          axios.get(`http://localhost:5000/api/results/test/${testId}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-        ]);
+        console.log('Fetching test and results for test ID:', testId);
         
-        console.log('Results - Fetched test:', testRes.data);
-        console.log('Results - Fetched results:', resultsRes.data);
+        // Fetch test details
+        const testRes = await axios.get(`http://localhost:5000/api/tests/${testId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
         
-        setTest(testRes.data);
+        console.log('Test response:', testRes.data);
+        setTest(testRes.data.test || testRes.data);
+        
+        // Fetch results for this test
+        const resultsRes = await axios.get(`http://localhost:5000/api/results/test/${testId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        
+        console.log('Results response:', resultsRes.data);
         
         // Handle the response structure properly
         const resultsData = resultsRes.data.results || resultsRes.data || [];
-        setResults(resultsData);
+        console.log('Processed results data:', resultsData);
+        
+        // If results don't have populated user info, try to fetch student details
+        if (resultsData.length > 0 && (!resultsData[0].userId || typeof resultsData[0].userId === 'string')) {
+          console.log('Results need user population, fetching student details...');
+          const populatedResults = await Promise.all(
+            resultsData.map(async (result) => {
+              try {
+                // Fetch student details for each result
+                if (result.userId && typeof result.userId === 'string') {
+                  const studentRes = await axios.get(`http://localhost:5000/api/users/${result.userId}`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                  });
+                  return {
+                    ...result,
+                    userId: studentRes.data.user || studentRes.data,
+                    student: studentRes.data.user || studentRes.data
+                  };
+                }
+                return result;
+              } catch (error) {
+                console.error('Error fetching student details:', error);
+                return result;
+              }
+            })
+          );
+          setResults(populatedResults);
+        } else {
+          setResults(resultsData);
+        }
         
         setLoading(false);
       } catch (error) {
@@ -101,10 +253,15 @@ const Results = () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       
+      console.log('Detailed result:', detailRes.data);
+      
       setSelectedResult({ 
         ...result, 
         questionAnalysis: detailRes.data.questionAnalysis || [],
-        detailedData: detailRes.data 
+        detailedData: detailRes.data,
+        // Ensure user info is included
+        userId: result.userId || detailRes.data.result?.student,
+        student: result.student || detailRes.data.result?.student
       });
     } catch (err) {
       console.error('Error fetching result details:', err);
@@ -145,8 +302,8 @@ const Results = () => {
 
   // Filter and sort results
   const filteredResults = results.filter(result => {
-    const studentName = result.userId?.name ? `${result.userId.name} ${result.userId.surname || ''}`.toLowerCase() : '';
-    const studentId = result.userId?.studentId?.toLowerCase() || '';
+    const studentName = getUserFullName(result).toLowerCase();
+    const studentId = getStudentId(result).toLowerCase();
     return (
       studentName.includes(searchTerm.toLowerCase()) ||
       studentId.includes(searchTerm.toLowerCase())
@@ -155,17 +312,23 @@ const Results = () => {
 
   const sortedResults = [...filteredResults].sort((a, b) => {
     if (sortConfig.key === 'name') {
-      const nameA = a.userId?.name ? `${a.userId.name} ${a.userId.surname || ''}`.toLowerCase() : '';
-      const nameB = b.userId?.name ? `${b.userId.name} ${b.userId.surname || ''}`.toLowerCase() : '';
+      const nameA = getUserFullName(a).toLowerCase();
+      const nameB = getUserFullName(b).toLowerCase();
       return sortConfig.direction === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
     }
     
+    if (sortConfig.key === 'percentage') {
+      const percentageA = calculatePercentage(a);
+      const percentageB = calculatePercentage(b);
+      return sortConfig.direction === 'asc' ? percentageA - percentageB : percentageB - percentageA;
+    }
+    
     const aVal = sortConfig.key === 'score' ? a.score : 
-                 sortConfig.key === 'percentage' ? a.percentage : 
+                 sortConfig.key === 'grade' ? (a.grade || 'Z') : 
                  sortConfig.key === 'submittedAt' ? new Date(a.submittedAt) : 
                  a[sortConfig.key];
     const bVal = sortConfig.key === 'score' ? b.score : 
-                 sortConfig.key === 'percentage' ? b.percentage : 
+                 sortConfig.key === 'grade' ? (b.grade || 'Z') : 
                  sortConfig.key === 'submittedAt' ? new Date(b.submittedAt) : 
                  b[sortConfig.key];
     
@@ -179,15 +342,19 @@ const Results = () => {
     if (sortedResults.length === 0) return null;
     
     const scores = sortedResults.map(r => r.score);
-    const percentages = sortedResults.map(r => r.percentage || 0);
+    const totalMarks = test?.totalMarks || 100;
+    const passingMarks = test?.passingMarks || totalMarks * 0.4;
+    const percentages = sortedResults.map(r => calculatePercentage(r));
     
     return {
-      averageScore: scores.reduce((a, b) => a + b, 0) / scores.length,
-      averagePercentage: percentages.reduce((a, b) => a + b, 0) / percentages.length,
+      averageScore: (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1),
+      averagePercentage: (percentages.reduce((a, b) => a + b, 0) / percentages.length).toFixed(1),
       highestScore: Math.max(...scores),
       lowestScore: Math.min(...scores),
+      highestPercentage: Math.max(...percentages),
+      lowestPercentage: Math.min(...percentages),
       totalStudents: sortedResults.length,
-      passCount: sortedResults.filter(r => (r.percentage || 0) >= 50).length
+      passCount: sortedResults.filter(r => r.score >= passingMarks).length
     };
   };
 
@@ -201,7 +368,8 @@ const Results = () => {
 
   // Get grade color
   const getGradeColor = (grade) => {
-    switch(grade?.toUpperCase()) {
+    if (!grade) return '#6c757d';
+    switch(grade.toUpperCase()) {
       case 'A': return '#28a745';
       case 'B': return '#20c997';
       case 'C': return '#ffc107';
@@ -210,6 +378,15 @@ const Results = () => {
       case 'F': return '#dc3545';
       default: return '#6c757d';
     }
+  };
+
+  // Get percentage color based on value
+  const getPercentageColor = (percentage) => {
+    if (percentage >= 80) return '#28a745'; // Green for excellent
+    if (percentage >= 60) return '#20c997'; // Teal for good
+    if (percentage >= 50) return '#ffc107'; // Yellow for average
+    if (percentage >= 40) return '#fd7e14'; // Orange for below average
+    return '#dc3545'; // Red for fail
   };
 
   if (!user || !['admin', 'teacher', 'super_admin'].includes(user.role)) {
@@ -347,8 +524,8 @@ const Results = () => {
                 gap: '8px',
                 transition: 'all 0.2s'
               }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8f9fa'}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'white'}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f8f9fa'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'white'; }}
             >
               <FiChevronLeft /> Back
             </button>
@@ -368,8 +545,8 @@ const Results = () => {
                 gap: '8px',
                 transition: 'all 0.2s'
               }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#3a431a'}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#4B5320'}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#3a431a'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#4B5320'; }}
             >
               <FiDownload /> Export
             </button>
@@ -407,7 +584,7 @@ const Results = () => {
           </div>
         )}
 
-        {/* Test Info Card */}
+        {/* Test Info Card - UPDATED WITH ALL DETAILS */}
         <div style={{
           backgroundColor: 'white',
           padding: '24px',
@@ -417,52 +594,210 @@ const Results = () => {
           border: '1px solid #e9ecef'
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
-            <div>
+            <div style={{ flex: 1 }}>
               <h2 style={{ 
                 fontSize: '22px', 
                 color: '#4B5320', 
                 fontFamily: 'sans-serif', 
-                margin: '0 0 12px 0',
+                margin: '0 0 16px 0',
                 fontWeight: '600'
               }}>
-                {test.title}
+                {test.title || 'Test Details'}
               </h2>
+              
+              {/* Test Details Grid */}
               <div style={{ 
-                display: 'flex', 
-                flexWrap: 'wrap', 
+                display: 'grid', 
+                gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', 
                 gap: '20px',
-                fontSize: '14px',
-                color: '#495057'
+                marginBottom: '16px'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <FiUsers style={{ color: '#6c757d' }} />
-                  <strong>Subject:</strong> {test.subject}
+                {/* Subject */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                  <div style={{
+                    width: '36px',
+                    height: '36px',
+                    backgroundColor: 'rgba(75, 83, 32, 0.1)',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0
+                  }}>
+                    <FiBook style={{ color: '#4B5320', fontSize: '18px' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '2px' }}>Subject</div>
+                    <div style={{ fontSize: '15px', fontWeight: '500', color: '#212529' }}>
+                      {getSubjectName()}
+                    </div>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <strong>Class:</strong> {test.class?.name || test.class}
+                
+                {/* Class */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                  <div style={{
+                    width: '36px',
+                    height: '36px',
+                    backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0
+                  }}>
+                    <FiUsers style={{ color: '#2196F3', fontSize: '18px' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '2px' }}>Class</div>
+                    <div style={{ fontSize: '15px', fontWeight: '500', color: '#212529' }}>
+                      {getClassName()}
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <strong>Session:</strong> {test.session}
+                
+                {/* Session & Term */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                  <div style={{
+                    width: '36px',
+                    height: '36px',
+                    backgroundColor: 'rgba(156, 39, 176, 0.1)',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0
+                  }}>
+                    <FiCalendar style={{ color: '#9C27B0', fontSize: '18px' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '2px' }}>Session & Term</div>
+                    <div style={{ fontSize: '15px', fontWeight: '500', color: '#212529' }}>
+                      {test.session || 'N/A'} • {test.term || 'N/A'}
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <strong>Term:</strong> {test.term}
+                
+                {/* Total Questions & Marks */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                  <div style={{
+                    width: '36px',
+                    height: '36px',
+                    backgroundColor: 'rgba(255, 193, 7, 0.1)',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0
+                  }}>
+                    <FiBarChart2 style={{ color: '#FFC107', fontSize: '18px' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '2px' }}>Questions & Marks</div>
+                    <div style={{ fontSize: '15px', fontWeight: '500', color: '#212529' }}>
+                      {getTotalQuestions()} Questions • {test.totalMarks || 'N/A'} Total Marks
+                    </div>
+                    {test.passingMarks && (
+                      <div style={{ fontSize: '13px', color: '#28a745', marginTop: '2px' }}>
+                        Passing: {test.passingMarks} marks
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div>
-                  <strong>Total Questions:</strong> {test.questions?.length || test.questionCount || 'N/A'}
+                
+                {/* Duration */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                  <div style={{
+                    width: '36px',
+                    height: '36px',
+                    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0
+                  }}>
+                    <FiClock style={{ color: '#4CAF50', fontSize: '18px' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '2px' }}>Duration</div>
+                    <div style={{ fontSize: '15px', fontWeight: '500', color: '#212529' }}>
+                      {test.duration ? `${test.duration} minutes` : 'N/A'}
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <strong>Total Marks:</strong> {test.totalMarks || 'N/A'}
+                
+                {/* Test Status */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                  <div style={{
+                    width: '36px',
+                    height: '36px',
+                    backgroundColor: test.status === 'completed' ? 'rgba(40, 167, 69, 0.1)' : 
+                                   test.status === 'active' ? 'rgba(13, 110, 253, 0.1)' :
+                                   'rgba(108, 117, 125, 0.1)',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0
+                  }}>
+                    {test.status === 'completed' ? (
+                      <FiCheckCircle style={{ color: '#28a745', fontSize: '18px' }} />
+                    ) : test.status === 'active' ? (
+                      <FiClock style={{ color: '#0d6efd', fontSize: '18px' }} />
+                    ) : (
+                      <FiXCircle style={{ color: '#6c757d', fontSize: '18px' }} />
+                    )}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '2px' }}>Status</div>
+                    <div style={{ 
+                      fontSize: '15px', 
+                      fontWeight: '500', 
+                      color: test.status === 'completed' ? '#28a745' : 
+                             test.status === 'active' ? '#0d6efd' : '#6c757d'
+                    }}>
+                      {test.status ? test.status.charAt(0).toUpperCase() + test.status.slice(1) : 'N/A'}
+                    </div>
+                  </div>
                 </div>
               </div>
+              
+              {/* Test Instructions (if available) */}
+              {test.instructions && (
+                <div style={{ 
+                  backgroundColor: '#f8f9fa', 
+                  padding: '12px 16px', 
+                  borderRadius: '8px',
+                  marginTop: '12px',
+                  borderLeft: '3px solid #4B5320'
+                }}>
+                  <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '6px' }}>Test Instructions</div>
+                  <div style={{ fontSize: '14px', color: '#495057' }}>
+                    {test.instructions}
+                  </div>
+                </div>
+              )}
             </div>
+            
+            {/* Test ID Badge */}
             <div style={{
               backgroundColor: '#f8f9fa',
               padding: '12px 16px',
               borderRadius: '6px',
-              border: '1px solid #e9ecef'
+              border: '1px solid #e9ecef',
+              alignSelf: 'flex-start'
             }}>
               <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '4px' }}>Test ID</div>
-              <div style={{ fontFamily: 'monospace', color: '#4B5320' }}>{testId.slice(0, 8)}...</div>
+              <div style={{ 
+                fontFamily: 'monospace', 
+                color: '#4B5320',
+                fontSize: '13px',
+                wordBreak: 'break-all',
+                maxWidth: '150px'
+              }}>
+                {testId.slice(0, 12)}...
+              </div>
             </div>
           </div>
         </div>
@@ -521,7 +856,10 @@ const Results = () => {
                 <div style={{ fontSize: '12px', color: '#6c757d' }}>Average Score</div>
               </div>
               <div style={{ fontSize: '28px', fontWeight: '600', color: '#28a745' }}>
-                {stats.averageScore.toFixed(1)}
+                {stats.averageScore}
+              </div>
+              <div style={{ fontSize: '12px', color: '#6c757d', marginTop: '4px' }}>
+                out of {test.totalMarks || 100}
               </div>
             </div>
 
@@ -542,12 +880,12 @@ const Results = () => {
                   alignItems: 'center',
                   justifyContent: 'center'
                 }}>
-                  <FiBarChart2 style={{ color: '#007bff', fontSize: '20px' }} />
+                  <FiPercent style={{ color: '#007bff', fontSize: '20px' }} />
                 </div>
                 <div style={{ fontSize: '12px', color: '#6c757d' }}>Average %</div>
               </div>
               <div style={{ fontSize: '28px', fontWeight: '600', color: '#007bff' }}>
-                {stats.averagePercentage.toFixed(1)}%
+                {stats.averagePercentage}%
               </div>
             </div>
 
@@ -574,6 +912,9 @@ const Results = () => {
               </div>
               <div style={{ fontSize: '28px', fontWeight: '600', color: '#D4A017' }}>
                 {((stats.passCount / stats.totalStudents) * 100).toFixed(1)}%
+              </div>
+              <div style={{ fontSize: '12px', color: '#6c757d', marginTop: '4px' }}>
+                {stats.passCount} of {stats.totalStudents} passed
               </div>
             </div>
           </div>
@@ -637,8 +978,8 @@ const Results = () => {
                     outline: 'none',
                     transition: 'border-color 0.2s'
                   }}
-                  onFocus={(e) => e.currentTarget.style.borderColor = '#4B5320'}
-                  onBlur={(e) => e.currentTarget.style.borderColor = '#dee2e6'}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = '#4B5320'; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = '#dee2e6'; }}
                 />
               </div>
               
@@ -708,19 +1049,41 @@ const Results = () => {
                           borderBottom: '1px solid #34495e',
                           cursor: 'pointer',
                           position: 'relative',
-                          minWidth: '150px'
+                          minWidth: '180px'
                         }}
                         onClick={() => handleSort('name')}
                       >
-                        Student
-                        {sortConfig.key === 'name' && (
-                          <span style={{ 
-                            marginLeft: '6px',
-                            fontSize: '12px'
-                          }}>
-                            {sortConfig.direction === 'asc' ? '↑' : '↓'}
-                          </span>
-                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          Student
+                          {sortConfig.key === 'name' && (
+                            <span style={{ fontSize: '12px' }}>
+                              {sortConfig.direction === 'asc' ? '↑' : '↓'}
+                            </span>
+                          )}
+                        </div>
+                      </th>
+                      <th 
+                        style={{ 
+                          padding: '16px 12px', 
+                          textAlign: 'left', 
+                          color: 'white',
+                          fontWeight: '600',
+                          fontSize: '14px',
+                          borderBottom: '1px solid #34495e',
+                          cursor: 'pointer',
+                          position: 'relative',
+                          minWidth: '120px'
+                        }}
+                        onClick={() => handleSort('score')}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          Score
+                          {sortConfig.key === 'score' && (
+                            <span style={{ fontSize: '12px' }}>
+                              {sortConfig.direction === 'asc' ? '↑' : '↓'}
+                            </span>
+                          )}
+                        </div>
                       </th>
                       <th 
                         style={{ 
@@ -734,41 +1097,17 @@ const Results = () => {
                           position: 'relative',
                           minWidth: '100px'
                         }}
-                        onClick={() => handleSort('score')}
-                      >
-                        Score
-                        {sortConfig.key === 'score' && (
-                          <span style={{ 
-                            marginLeft: '6px',
-                            fontSize: '12px'
-                          }}>
-                            {sortConfig.direction === 'asc' ? '↑' : '↓'}
-                          </span>
-                        )}
-                      </th>
-                      <th 
-                        style={{ 
-                          padding: '16px 12px', 
-                          textAlign: 'left', 
-                          color: 'white',
-                          fontWeight: '600',
-                          fontSize: '14px',
-                          borderBottom: '1px solid #34495e',
-                          cursor: 'pointer',
-                          position: 'relative',
-                          minWidth: '80px'
-                        }}
                         onClick={() => handleSort('percentage')}
                       >
-                        %
-                        {sortConfig.key === 'percentage' && (
-                          <span style={{ 
-                            marginLeft: '6px',
-                            fontSize: '12px'
-                          }}>
-                            {sortConfig.direction === 'asc' ? '↑' : '↓'}
-                          </span>
-                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <FiPercent style={{ fontSize: '12px' }} />
+                          Percentage
+                          {sortConfig.key === 'percentage' && (
+                            <span style={{ fontSize: '12px' }}>
+                              {sortConfig.direction === 'asc' ? '↑' : '↓'}
+                            </span>
+                          )}
+                        </div>
                       </th>
                       <th 
                         style={{ 
@@ -784,15 +1123,14 @@ const Results = () => {
                         }}
                         onClick={() => handleSort('grade')}
                       >
-                        Grade
-                        {sortConfig.key === 'grade' && (
-                          <span style={{ 
-                            marginLeft: '6px',
-                            fontSize: '12px'
-                          }}>
-                            {sortConfig.direction === 'asc' ? '↑' : '↓'}
-                          </span>
-                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          Grade
+                          {sortConfig.key === 'grade' && (
+                            <span style={{ fontSize: '12px' }}>
+                              {sortConfig.direction === 'asc' ? '↑' : '↓'}
+                            </span>
+                          )}
+                        </div>
                       </th>
                       <th 
                         style={{ 
@@ -804,19 +1142,18 @@ const Results = () => {
                           borderBottom: '1px solid #34495e',
                           cursor: 'pointer',
                           position: 'relative',
-                          minWidth: '120px'
+                          minWidth: '140px'
                         }}
                         onClick={() => handleSort('submittedAt')}
                       >
-                        Submitted
-                        {sortConfig.key === 'submittedAt' && (
-                          <span style={{ 
-                            marginLeft: '6px',
-                            fontSize: '12px'
-                          }}>
-                            {sortConfig.direction === 'asc' ? '↑' : '↓'}
-                          </span>
-                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          Submitted
+                          {sortConfig.key === 'submittedAt' && (
+                            <span style={{ fontSize: '12px' }}>
+                              {sortConfig.direction === 'asc' ? '↑' : '↓'}
+                            </span>
+                          )}
+                        </div>
                       </th>
                       <th style={{ 
                         padding: '16px 12px', 
@@ -825,149 +1162,138 @@ const Results = () => {
                         fontWeight: '600',
                         fontSize: '14px',
                         borderBottom: '1px solid #34495e',
-                        minWidth: '150px'
+                        minWidth: '160px'
                       }}>
                         Actions
                       </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {currentResults.map((result) => (
-                      <tr 
-                        key={result._id} 
-                        style={{ 
-                          borderBottom: '1px solid #e9ecef',
-                          transition: 'background-color 0.2s'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8f9fa'}
-                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'white'}
-                      >
-                        <td style={{ padding: '16px 12px', fontSize: '14px' }}>
-                          <div>
-                            <div style={{ fontWeight: '500', color: '#212529', marginBottom: '4px' }}>
-                              {result.userId?.name ? `${result.userId.name} ${result.userId.surname || ''}` : 'Unknown'}
-                            </div>
-                            {result.userId?.studentId && (
-                              <div style={{ fontSize: '12px', color: '#6c757d' }}>
-                                ID: {result.userId.studentId}
+                    {currentResults.map((result) => {
+                      const percentage = calculatePercentage(result);
+                      const totalMarks = result.totalMarks || test?.totalMarks || 100;
+                      
+                      return (
+                        <tr 
+                          key={result._id} 
+                          style={{ 
+                            borderBottom: '1px solid #e9ecef',
+                            transition: 'background-color 0.2s'
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f8f9fa'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'white'; }}
+                        >
+                          <td style={{ padding: '16px 12px', fontSize: '14px' }}>
+                            <div>
+                              <div style={{ fontWeight: '500', color: '#212529', marginBottom: '4px' }}>
+                                {getUserFullName(result)}
                               </div>
-                            )}
-                          </div>
-                        </td>
-                        <td style={{ padding: '16px 12px', fontSize: '14px' }}>
-                          <ResultScoreEditor
-                            result={result}
-                            editingResultId={editingResultId}
-                            editScore={editScore}
-                            setEditScore={setEditScore}
-                            loading={editingLoading}
-                            onSave={handleSaveScore}
-                            onCancel={cancelEditing}
-                            maxScore={test.totalMarks || result.totalMarks || 100}
-                            canEdit={user.role === 'super_admin' || user.role === 'admin' || (user.role === 'teacher' && test.createdBy === user.id)}
-                          />
-                        </td>
-                        <td style={{ padding: '16px 12px', fontSize: '14px', fontWeight: '500' }}>
-                          {result.percentage || (result.score && result.totalMarks ? Math.round((result.score / result.totalMarks) * 100) : 0)}%
-                        </td>
-                        <td style={{ padding: '16px 12px', fontSize: '14px' }}>
-                          <span style={{
-                            display: 'inline-block',
-                            padding: '4px 12px',
-                            borderRadius: '20px',
-                            backgroundColor: getGradeColor(result.grade) + '20',
-                            color: getGradeColor(result.grade),
-                            fontWeight: '600',
-                            fontSize: '12px',
-                            border: `1px solid ${getGradeColor(result.grade)}40`
-                          }}>
-                            {result.grade || 'N/A'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '16px 12px', fontSize: '14px' }}>
-                          <div style={{ color: '#212529' }}>
-                            {new Date(result.submittedAt).toLocaleDateString()}
-                          </div>
-                          <div style={{ fontSize: '12px', color: '#6c757d' }}>
-                            {new Date(result.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </div>
-                        </td>
-                        <td style={{ padding: '16px 12px', fontSize: '14px' }}>
-                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                            <button
-                              onClick={() => handleViewAnswers(result)}
-                              style={{ 
-                                padding: '8px 12px', 
-                                backgroundColor: '#f8f9fa', 
-                                color: '#007bff', 
-                                border: '1px solid #dee2e6', 
-                                borderRadius: '6px', 
-                                fontSize: '12px', 
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '6px',
-                                fontWeight: '500',
-                                transition: 'all 0.2s'
-                              }}
-                              onMouseEnter={(e) => {
-                                e.currentTarget.style.backgroundColor = '#007bff';
-                                e.currentTarget.style.color = 'white';
-                                e.currentTarget.style.borderColor = '#007bff';
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.backgroundColor = '#f8f9fa';
-                                e.currentTarget.style.color = '#007bff';
-                                e.currentTarget.style.borderColor = '#dee2e6';
-                              }}
-                            >
-                              <FiEye /> View
-                            </button>
-                            
-                            {(user.role === 'super_admin' || user.role === 'admin' || (user.role === 'teacher' && test.createdBy === user.id)) && (
-                              <>
-                                <button
-                                  onClick={() => startEditing(result)}
-                                  style={{ 
-                                    padding: '8px 12px', 
-                                    backgroundColor: editingResultId === result._id ? '#D4A017' : '#f8f9fa', 
-                                    color: editingResultId === result._id ? 'white' : '#D4A017', 
-                                    border: '1px solid #dee2e6', 
-                                    borderRadius: '6px', 
-                                    fontSize: '12px', 
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '6px',
-                                    fontWeight: '500',
-                                    transition: 'all 0.2s'
-                                  }}
-                                  onMouseEnter={(e) => {
-                                    if (editingResultId !== result._id) {
-                                      e.currentTarget.style.backgroundColor = '#D4A017';
-                                      e.currentTarget.style.color = 'white';
-                                      e.currentTarget.style.borderColor = '#D4A017';
-                                    }
-                                  }}
-                                  onMouseLeave={(e) => {
-                                    if (editingResultId !== result._id) {
-                                      e.currentTarget.style.backgroundColor = '#f8f9fa';
-                                      e.currentTarget.style.color = '#D4A017';
-                                      e.currentTarget.style.borderColor = '#dee2e6';
-                                    }
-                                  }}
-                                  disabled={editingResultId === result._id}
-                                >
-                                  <FiEdit /> Edit
-                                </button>
-                                
-                                {(user.role === 'super_admin' || user.role === 'admin') && (
+                              <div style={{ fontSize: '12px', color: '#6c757d' }}>
+                                ID: {getStudentId(result)}
+                              </div>
+                            </div>
+                          </td>
+                          <td style={{ padding: '16px 12px', fontSize: '14px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <ResultScoreEditor
+                                result={result}
+                                editingResultId={editingResultId}
+                                editScore={editScore}
+                                setEditScore={setEditScore}
+                                loading={editingLoading}
+                                onSave={handleSaveScore}
+                                onCancel={cancelEditing}
+                                maxScore={totalMarks}
+                                canEdit={user.role === 'super_admin' || user.role === 'admin' || (user.role === 'teacher' && test.createdBy === user.id)}
+                              />
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#6c757d', marginTop: '4px' }}>
+                              out of {totalMarks}
+                            </div>
+                          </td>
+                          <td style={{ padding: '16px 12px', fontSize: '14px' }}>
+                            <div style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '6px 12px',
+                              borderRadius: '20px',
+                              backgroundColor: getPercentageColor(percentage) + '20',
+                              color: getPercentageColor(percentage),
+                              fontWeight: '600',
+                              fontSize: '14px',
+                              border: `1px solid ${getPercentageColor(percentage)}40`,
+                              minWidth: '60px',
+                              justifyContent: 'center'
+                            }}>
+                              <FiPercent style={{ fontSize: '12px' }} />
+                              {percentage}%
+                            </div>
+                          </td>
+                          <td style={{ padding: '16px 12px', fontSize: '14px' }}>
+                            <span style={{
+                              display: 'inline-block',
+                              padding: '6px 12px',
+                              borderRadius: '20px',
+                              backgroundColor: getGradeColor(result.grade) + '20',
+                              color: getGradeColor(result.grade),
+                              fontWeight: '600',
+                              fontSize: '12px',
+                              border: `1px solid ${getGradeColor(result.grade)}40`,
+                              minWidth: '40px',
+                              textAlign: 'center'
+                            }}>
+                              {result.grade || 'N/A'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '16px 12px', fontSize: '14px' }}>
+                            <div style={{ color: '#212529' }}>
+                              {new Date(result.submittedAt).toLocaleDateString()}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#6c757d' }}>
+                              {new Date(result.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </div>
+                          </td>
+                          <td style={{ padding: '16px 12px', fontSize: '14px' }}>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                              <button
+                                onClick={() => handleViewAnswers(result)}
+                                style={{ 
+                                  padding: '8px 12px', 
+                                  backgroundColor: '#f8f9fa', 
+                                  color: '#007bff', 
+                                  border: '1px solid #dee2e6', 
+                                  borderRadius: '6px', 
+                                  fontSize: '12px', 
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  fontWeight: '500',
+                                  transition: 'all 0.2s'
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.backgroundColor = '#007bff';
+                                  e.currentTarget.style.color = 'white';
+                                  e.currentTarget.style.borderColor = '#007bff';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.backgroundColor = '#f8f9fa';
+                                  e.currentTarget.style.color = '#007bff';
+                                  e.currentTarget.style.borderColor = '#dee2e6';
+                                }}
+                              >
+                                <FiEye /> View
+                              </button>
+                              
+                              {(user.role === 'super_admin' || user.role === 'admin' || (user.role === 'teacher' && test.createdBy === user.id)) && (
+                                <>
                                   <button
-                                    onClick={() => handleDeleteResult(result._id)}
+                                    onClick={() => startEditing(result)}
                                     style={{ 
                                       padding: '8px 12px', 
-                                      backgroundColor: '#f8f9fa', 
-                                      color: '#dc3545', 
+                                      backgroundColor: editingResultId === result._id ? '#D4A017' : '#f8f9fa', 
+                                      color: editingResultId === result._id ? 'white' : '#D4A017', 
                                       border: '1px solid #dee2e6', 
                                       borderRadius: '6px', 
                                       fontSize: '12px', 
@@ -979,25 +1305,62 @@ const Results = () => {
                                       transition: 'all 0.2s'
                                     }}
                                     onMouseEnter={(e) => {
-                                      e.currentTarget.style.backgroundColor = '#dc3545';
-                                      e.currentTarget.style.color = 'white';
-                                      e.currentTarget.style.borderColor = '#dc3545';
+                                      if (editingResultId !== result._id) {
+                                        e.currentTarget.style.backgroundColor = '#D4A017';
+                                        e.currentTarget.style.color = 'white';
+                                        e.currentTarget.style.borderColor = '#D4A017';
+                                      }
                                     }}
                                     onMouseLeave={(e) => {
-                                      e.currentTarget.style.backgroundColor = '#f8f9fa';
-                                      e.currentTarget.style.color = '#dc3545';
-                                      e.currentTarget.style.borderColor = '#dee2e6';
+                                      if (editingResultId !== result._id) {
+                                        e.currentTarget.style.backgroundColor = '#f8f9fa';
+                                        e.currentTarget.style.color = '#D4A017';
+                                        e.currentTarget.style.borderColor = '#dee2e6';
+                                      }
                                     }}
+                                    disabled={editingResultId === result._id}
                                   >
-                                    <FiTrash2 /> Delete
+                                    <FiEdit /> Edit
                                   </button>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                                  
+                                  {(user.role === 'super_admin' || user.role === 'admin') && (
+                                    <button
+                                      onClick={() => handleDeleteResult(result._id)}
+                                      style={{ 
+                                        padding: '8px 12px', 
+                                        backgroundColor: '#f8f9fa', 
+                                        color: '#dc3545', 
+                                        border: '1px solid #dee2e6', 
+                                        borderRadius: '6px', 
+                                        fontSize: '12px', 
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '6px',
+                                        fontWeight: '500',
+                                        transition: 'all 0.2s'
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        e.currentTarget.style.backgroundColor = '#dc3545';
+                                        e.currentTarget.style.color = 'white';
+                                        e.currentTarget.style.borderColor = '#dc3545';
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.currentTarget.style.backgroundColor = '#f8f9fa';
+                                        e.currentTarget.style.color = '#dc3545';
+                                        e.currentTarget.style.borderColor = '#dee2e6';
+                                      }}
+                                    >
+                                      <FiTrash2 /> Delete
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1168,10 +1531,10 @@ const Results = () => {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <div>
                   <h3 style={{ fontSize: '20px', color: '#4B5320', fontFamily: 'sans-serif', margin: '0 0 4px 0' }}>
-                    {selectedResult.userId?.name ? `${selectedResult.userId.name} ${selectedResult.userId.surname || ''}` : 'Unknown'}
+                    {getUserFullName(selectedResult)}
                   </h3>
                   <p style={{ margin: 0, color: '#6c757d', fontSize: '14px' }}>
-                    Student ID: {selectedResult.userId?.studentId || 'N/A'}
+                    Student ID: {getStudentId(selectedResult)} • Test: {test.title}
                   </p>
                 </div>
                 <button
@@ -1188,8 +1551,8 @@ const Results = () => {
                     alignItems: 'center',
                     justifyContent: 'center'
                   }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8f9fa'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f8f9fa'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
                 >
                   <FiX />
                 </button>
@@ -1205,13 +1568,17 @@ const Results = () => {
                 <div style={{ padding: '16px', backgroundColor: '#f8f9fa', borderRadius: '8px' }}>
                   <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '4px' }}>Score</div>
                   <div style={{ fontSize: '20px', fontWeight: '600', color: '#4B5320' }}>
-                    {selectedResult.score} / {selectedResult.totalMarks}
+                    {selectedResult.score} / {selectedResult.totalMarks || test.totalMarks || 100}
                   </div>
                 </div>
                 <div style={{ padding: '16px', backgroundColor: '#f8f9fa', borderRadius: '8px' }}>
                   <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '4px' }}>Percentage</div>
-                  <div style={{ fontSize: '20px', fontWeight: '600', color: '#007bff' }}>
-                    {selectedResult.percentage}%
+                  <div style={{ 
+                    fontSize: '20px', 
+                    fontWeight: '600', 
+                    color: getPercentageColor(calculatePercentage(selectedResult))
+                  }}>
+                    {calculatePercentage(selectedResult)}%
                   </div>
                 </div>
                 <div style={{ padding: '16px', backgroundColor: '#f8f9fa', borderRadius: '8px' }}>
@@ -1239,9 +1606,11 @@ const Results = () => {
                     margin: '0 0 16px 0', 
                     color: '#4B5320', 
                     fontSize: '16px',
-                    fontWeight: '600'
+                    fontWeight: '600',
+                    paddingBottom: '8px',
+                    borderBottom: '2px solid #e9ecef'
                   }}>
-                    Question Analysis
+                    Question-by-Question Analysis
                   </h4>
                   <div style={{ maxHeight: '300px', overflowY: 'auto', paddingRight: '8px' }}>
                     {selectedResult.questionAnalysis.map((qa, index) => (
@@ -1391,8 +1760,8 @@ const Results = () => {
                   fontWeight: '500',
                   transition: 'all 0.2s'
                 }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#3a431a'}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#4B5320'}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#3a431a'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#4B5320'; }}
               >
                 Close
               </button>

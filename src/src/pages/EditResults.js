@@ -1,10 +1,9 @@
-// pages/editresults.js
+// pages/editresults.js - REDESIGNED WITH BRAND COLORS
 import React, { useState, useEffect, useContext } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import { useResultEditing } from '../hooks/useResultEditing';
-import ResultScoreEditor from '../components/ResultScoreEditor';
 import { 
   FiDownload, 
   FiSearch, 
@@ -16,8 +15,44 @@ import {
   FiX,
   FiChevronLeft,
   FiChevronRight,
-  FiAlertTriangle
+  FiAlertTriangle,
+  FiUser,
+  FiBook,
+  FiBookOpen,
+  FiCalendar,
+  FiBarChart2,
+  FiEdit2,
+  FiCheckCircle,
+  FiClock,
+  FiSliders,
+  FiGrid,
+  FiList,
+  FiPercent,
+  FiStar,
+  FiUsers,
+  FiTrendingUp,
+  FiTrendingDown,
+  FiAward,
+  FiActivity,
+  FiHelpCircle
 } from 'react-icons/fi';
+
+// Brand Colors - MOVED TO TOP
+const brandColors = {
+  armyGreen: '#4B5320',    // Army Green
+  brightGreen: '#7CFC00',   // Bright Green (Lawn Green)
+  orange: '#FFA500',        // Orange
+  lightBg: '#f9faf7',       // Light background
+  cardBg: '#ffffff',        // Card background
+  border: '#e5e7de',        // Border color
+  textPrimary: '#2c3e1c',   // Primary text
+  textSecondary: '#5a6c47', // Secondary text
+  textMuted: '#8a9a6e',     // Muted text
+  success: '#45a049',       // Success color
+  warning: '#ff9800',       // Warning color
+  danger: '#f44336',        // Danger color
+  info: '#2196f3'           // Info color
+};
 
 const EditResults = () => {
   const { user } = useContext(AuthContext);
@@ -31,6 +66,9 @@ const EditResults = () => {
   const [filterSession, setFilterSession] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(20);
+  const [viewMode, setViewMode] = useState('table');
+  const [expandedDetails, setExpandedDetails] = useState({});
+  const [studentDetails, setStudentDetails] = useState({}); // Cache for student details
   const navigate = useNavigate();
 
   // Use the reusable editing hook
@@ -57,6 +95,27 @@ const EditResults = () => {
     fetchAllResults();
   }, []);
 
+  // Function to fetch student details by ID
+  const fetchStudentDetails = async (studentId) => {
+    if (!studentId || studentDetails[studentId]) return;
+    
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`http://localhost:5000/api/users/${studentId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      
+      if (response.data.success && response.data.user) {
+        setStudentDetails(prev => ({
+          ...prev,
+          [studentId]: response.data.user
+        }));
+      }
+    } catch (error) {
+      console.error('Error fetching student details:', error);
+    }
+  };
+
   const fetchTests = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -64,7 +123,6 @@ const EditResults = () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       
-      // Handle different response formats
       let testsData = [];
       if (res.data.success && res.data.tests) {
         testsData = res.data.tests;
@@ -97,9 +155,16 @@ const EditResults = () => {
       
       console.log('All Results API response:', res.data);
       
-      // The results endpoint returns { success: true, results: [], pagination: {} }
       const resultsData = res.data.results || [];
       setResults(resultsData);
+      
+      // Fetch student details for all results
+      resultsData.forEach(result => {
+        if (result.userId && typeof result.userId === 'string') {
+          fetchStudentDetails(result.userId);
+        }
+      });
+      
       setEditingError(null);
     } catch (err) {
       console.error('Error fetching results:', err);
@@ -109,15 +174,104 @@ const EditResults = () => {
     }
   };
 
+  // Improved function to get student name with multiple fallbacks
+  const getStudentName = (result) => {
+    try {
+      // If userId is an object with student details
+      if (result.userId && typeof result.userId === 'object') {
+        const user = result.userId;
+        if (user.name) return user.name;
+        if (user.firstName && user.lastName) return `${user.firstName} ${user.lastName}`;
+        if (user.firstName) return user.firstName;
+        if (user.username) return user.username;
+      }
+      
+      // If userId is a string ID, check cached student details
+      if (result.userId && typeof result.userId === 'string') {
+        const cachedStudent = studentDetails[result.userId];
+        if (cachedStudent) {
+          if (cachedStudent.name) return cachedStudent.name;
+          if (cachedStudent.firstName && cachedStudent.lastName) return `${cachedStudent.firstName} ${cachedStudent.lastName}`;
+          if (cachedStudent.firstName) return cachedStudent.firstName;
+          if (cachedStudent.username) return cachedStudent.username;
+        }
+        
+        // If not cached yet, trigger fetch and return placeholder
+        if (!studentDetails[result.userId]) {
+          fetchStudentDetails(result.userId);
+        }
+        return 'Loading...';
+      }
+      
+      // Check for student data in other fields
+      if (result.student) {
+        if (typeof result.student === 'object') {
+          if (result.student.name) return result.student.name;
+          if (result.student.firstName && result.student.lastName) return `${result.student.firstName} ${result.student.lastName}`;
+          if (result.student.username) return result.student.username;
+        }
+      }
+      
+      // Final fallback
+      return 'Unknown Student';
+    } catch (error) {
+      console.error('Error getting student name:', error);
+      return 'Unknown Student';
+    }
+  };
+
+  // Get student ID
+  const getStudentId = (result) => {
+    try {
+      if (result.userId && typeof result.userId === 'object') {
+        return result.userId.studentId || result.userId.username || 'N/A';
+      }
+      
+      if (result.userId && typeof result.userId === 'string') {
+        const cachedStudent = studentDetails[result.userId];
+        if (cachedStudent) {
+          return cachedStudent.studentId || cachedStudent.username || 'N/A';
+        }
+        return result.userId.substring(0, 8) + '...';
+      }
+      
+      if (result.student && typeof result.student === 'object') {
+        return result.student.studentId || result.student.username || 'N/A';
+      }
+      
+      return 'N/A';
+    } catch (error) {
+      return 'N/A';
+    }
+  };
+
+  // Get student profile image
+  const getStudentProfileImage = (result) => {
+    try {
+      if (result.userId && typeof result.userId === 'object') {
+        return result.userId.profileImage || result.userId.profilePicture;
+      }
+      
+      if (result.userId && typeof result.userId === 'string') {
+        const cachedStudent = studentDetails[result.userId];
+        if (cachedStudent) {
+          return cachedStudent.profileImage || cachedStudent.profilePicture;
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      return null;
+    }
+  };
+
   const handleSaveScore = async (resultId) => {
-    // Only super admins and admins can edit scores
     if (user.role !== 'super_admin' && user.role !== 'admin') {
       setEditingError('Only administrators can edit scores.');
       return;
     }
 
     await saveScore(resultId, (updatedResultId, newScore) => {
-      // Update local state after successful save
       setResults(results.map(r => 
         r._id === updatedResultId ? { ...r, score: newScore } : r
       ));
@@ -132,9 +286,6 @@ const EditResults = () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       
-      console.log('Test results response:', resultsRes.data);
-      
-      // Handle different response structures
       let resultsData = [];
       if (resultsRes.data.results) {
         resultsData = resultsRes.data.results;
@@ -142,28 +293,16 @@ const EditResults = () => {
         resultsData = resultsRes.data;
       }
       
-      // Fetch detailed results for each student
-      const detailedResults = await Promise.all(
-        resultsData.map(async (result) => {
-          try {
-            const detailRes = await axios.get(`http://localhost:5000/api/results/details/${result._id}`, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            return { 
-              ...result, 
-              questionAnalysis: detailRes.data.questionAnalysis || [],
-              detailedData: detailRes.data 
-            };
-          } catch (err) {
-            console.error('Error fetching details for result:', result._id, err.message);
-            return { ...result, questionAnalysis: [], detailedData: null };
-          }
-        })
-      );
+      // Fetch student details for test results
+      resultsData.forEach(result => {
+        if (result.userId && typeof result.userId === 'string') {
+          fetchStudentDetails(result.userId);
+        }
+      });
       
       setSelectedTest({ 
         test, 
-        results: detailedResults,
+        results: resultsData,
         statistics: resultsRes.data.statistics || {}
       });
       setEditingError(null);
@@ -184,10 +323,8 @@ const EditResults = () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       
-      // Remove from local state
       setResults(results.filter(r => r._id !== resultId));
       
-      // Also remove from selected test if viewing
       if (selectedTest) {
         setSelectedTest({
           ...selectedTest,
@@ -210,8 +347,8 @@ const EditResults = () => {
   const exportToCSV = () => {
     const headers = ['Student Name', 'Student ID', 'Test', 'Subject', 'Class', 'Session', 'Score', 'Total Marks', 'Percentage', 'Grade', 'Submitted At'];
     const rows = results.map(result => [
-      result.userId?.name || 'N/A',
-      result.userId?.studentId || 'N/A',
+      getStudentName(result),
+      getStudentId(result),
       result.testId?.title || 'N/A',
       result.subject || 'N/A',
       result.class?.name || result.class || 'N/A',
@@ -250,11 +387,58 @@ const EditResults = () => {
     fetchAllResults();
   };
 
+  const toggleDetails = (resultId) => {
+    setExpandedDetails(prev => ({
+      ...prev,
+      [resultId]: !prev[resultId]
+    }));
+  };
+
+  // Calculate percentage
+  const calculatePercentage = (result) => {
+    if (result.percentage !== undefined) {
+      return Math.round(result.percentage);
+    }
+    
+    const totalMarks = result.totalMarks || 100;
+    if (totalMarks > 0 && result.score !== undefined) {
+      return Math.round((result.score / totalMarks) * 100);
+    }
+    
+    return 0;
+  };
+
+  // Get percentage color
+  const getPercentageColor = (percentage) => {
+    if (percentage >= 80) return brandColors.success;
+    if (percentage >= 60) return brandColors.brightGreen;
+    if (percentage >= 50) return brandColors.orange;
+    if (percentage >= 40) return '#ff6b35';
+    return brandColors.danger;
+  };
+
+  // Get grade color
+  const getGradeColor = (grade) => {
+    if (!grade) return brandColors.textMuted;
+    switch(grade.toUpperCase()) {
+      case 'A': return brandColors.success;
+      case 'B': return brandColors.brightGreen;
+      case 'C': return brandColors.orange;
+      case 'D': return '#ff6b35';
+      case 'E': 
+      case 'F': return brandColors.danger;
+      default: return brandColors.textMuted;
+    }
+  };
+
   // Filter results based on search and filters
   const filteredResults = results.filter(result => {
+    const studentName = getStudentName(result).toLowerCase();
+    const studentId = getStudentId(result).toLowerCase();
+    
     const matchesSearch = searchTerm === '' || 
-      (result.userId?.name && result.userId.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (result.userId?.studentId && result.userId.studentId.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      studentName.includes(searchTerm.toLowerCase()) ||
+      studentId.includes(searchTerm.toLowerCase()) ||
       (result.testId?.title && result.testId.title.toLowerCase().includes(searchTerm.toLowerCase()));
     
     const matchesSubject = filterSubject === '' || result.subject === filterSubject;
@@ -271,23 +455,28 @@ const EditResults = () => {
   const uniqueClasses = [...new Set(results.map(r => r.class?.name || r.class).filter(Boolean))];
   const uniqueSessions = [...new Set(results.map(r => r.session).filter(Boolean))];
 
+  // Calculate statistics
+  const stats = {
+    totalResults: filteredResults.length,
+    averageScore: filteredResults.length > 0 
+      ? (filteredResults.reduce((sum, r) => sum + (r.score || 0), 0) / filteredResults.length).toFixed(1)
+      : 0,
+    averagePercentage: filteredResults.length > 0
+      ? (filteredResults.reduce((sum, r) => sum + calculatePercentage(r), 0) / filteredResults.length).toFixed(1)
+      : 0,
+    highestScore: filteredResults.length > 0
+      ? Math.max(...filteredResults.map(r => r.score || 0))
+      : 0,
+    lowestScore: filteredResults.length > 0
+      ? Math.min(...filteredResults.map(r => r.score || 0))
+      : 0
+  };
+
   if (!user || (user.role !== 'super_admin' && user.role !== 'admin')) {
     return (
-      <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#f8f9fa'
-      }}>
-        <div style={{
-          backgroundColor: '#FFF3F3',
-          color: '#B22222',
-          padding: '24px',
-          borderRadius: '8px',
-          textAlign: 'center'
-        }}>
-          <FiAlertTriangle size={32} style={{ marginBottom: '16px' }} />
+      <div style={styles.accessDeniedContainer}>
+        <div style={styles.accessDeniedCard}>
+          <FiAlertTriangle size={32} style={{ color: brandColors.danger }} />
           <h3>Access Denied</h3>
           <p>Only administrators can access this page.</p>
         </div>
@@ -296,39 +485,19 @@ const EditResults = () => {
   }
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      backgroundColor: '#f8f9fa',
-      padding: '20px'
-    }}>
+    <div style={styles.container}>
       {/* Header */}
-      <div style={{
-        backgroundColor: '#4B5320',
-        color: 'white',
-        padding: '20px',
-        borderRadius: '8px',
-        marginBottom: '20px'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <h1 style={{ margin: '0 0 8px 0', fontSize: '24px' }}>Edit Results</h1>
-            <p style={{ margin: 0, opacity: 0.9 }}>Edit and manage test results</p>
+      <div style={styles.header}>
+        <div style={styles.headerContent}>
+          <div style={styles.headerText}>
+            <h1>Edit Results</h1>
+            <p>Manage and edit test results with precision</p>
           </div>
           <button
             onClick={() => navigate('/admin')}
-            style={{
-              backgroundColor: '#D4A017',
-              color: '#4B5320',
-              border: 'none',
-              padding: '10px 20px',
-              borderRadius: '6px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}
+            style={styles.backButton}
           >
+            <FiChevronLeft size={18} />
             Back to Dashboard
           </button>
         </div>
@@ -336,138 +505,113 @@ const EditResults = () => {
 
       {/* Messages */}
       {editingError && (
-        <div style={{
-          backgroundColor: '#FFF3F3',
-          color: '#B22222',
-          padding: '16px',
-          borderRadius: '8px',
-          marginBottom: '20px',
-          borderLeft: '4px solid #B22222'
-        }}>
-          <strong>Error:</strong> {editingError}
+        <div style={styles.alertError}>
+          <FiAlertTriangle size={18} />
+          <div>
+            <strong>Error:</strong> {editingError}
+          </div>
         </div>
       )}
       
       {editingSuccess && (
-        <div style={{
-          backgroundColor: '#E6FFE6',
-          color: '#228B22',
-          padding: '16px',
-          borderRadius: '8px',
-          marginBottom: '20px',
-          borderLeft: '4px solid #228B22'
-        }}>
-          <strong>Success:</strong> {editingSuccess}
+        <div style={styles.alertSuccess}>
+          <FiCheckCircle size={18} />
+          <div>
+            <strong>Success:</strong> {editingSuccess}
+          </div>
         </div>
       )}
 
+      {/* Stats Cards */}
+      <div style={styles.statsGrid}>
+        <div style={styles.statCard}>
+          <div style={{...styles.statIcon, background: brandColors.armyGreen}}>
+            <FiBook size={24} />
+          </div>
+          <div style={styles.statContent}>
+            <h3>{stats.totalResults}</h3>
+            <p>Total Results</p>
+          </div>
+        </div>
+        
+        <div style={styles.statCard}>
+          <div style={{...styles.statIcon, background: brandColors.brightGreen}}>
+            <FiTrendingUp size={24} />
+          </div>
+          <div style={styles.statContent}>
+            <h3>{stats.averageScore}</h3>
+            <p>Average Score</p>
+          </div>
+        </div>
+        
+        <div style={styles.statCard}>
+          <div style={{...styles.statIcon, background: brandColors.orange}}>
+            <FiPercent size={24} />
+          </div>
+          <div style={styles.statContent}>
+            <h3>{stats.averagePercentage}%</h3>
+            <p>Average %</p>
+          </div>
+        </div>
+        
+        <div style={styles.statCard}>
+          <div style={{...styles.statIcon, background: brandColors.info}}>
+            <FiAward size={24} />
+          </div>
+          <div style={styles.statContent}>
+            <h3>{stats.highestScore}</h3>
+            <p>Highest Score</p>
+          </div>
+        </div>
+      </div>
+
       {/* Filters Section */}
-      <div style={{
-        backgroundColor: 'white',
-        padding: '20px',
-        borderRadius: '8px',
-        marginBottom: '20px',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <h3 style={{ margin: 0, color: '#4B5320' }}>Filters</h3>
-          <div style={{ display: 'flex', gap: '10px' }}>
+      <div style={styles.filtersSection}>
+        <div style={styles.filtersHeader}>
+          <h3><FiFilter size={18} /> Filters & Controls</h3>
+          <div style={styles.filtersActions}>
             <button
               onClick={refreshData}
-              style={{
-                backgroundColor: '#6c757d',
-                color: 'white',
-                border: 'none',
-                padding: '8px 16px',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}
+              style={styles.btnSecondary}
             >
               <FiRefreshCw /> Refresh
             </button>
             <button
               onClick={resetFilters}
-              style={{
-                backgroundColor: '#6c757d',
-                color: 'white',
-                border: 'none',
-                padding: '8px 16px',
-                borderRadius: '6px',
-                cursor: 'pointer'
-              }}
+              style={styles.btnSecondary}
             >
-              Reset Filters
+              Clear Filters
             </button>
             <button
               onClick={exportToCSV}
-              style={{
-                backgroundColor: '#28a745',
-                color: 'white',
-                border: 'none',
-                padding: '8px 16px',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}
+              style={styles.btnSuccess}
             >
               <FiDownload /> Export CSV
             </button>
           </div>
         </div>
         
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: '16px'
-        }}>
-          <div>
-            <label style={{ display: 'block', marginBottom: '8px', color: '#4B5320', fontWeight: '500' }}>
-              Search
-            </label>
-            <div style={{ position: 'relative' }}>
-              <FiSearch style={{
-                position: 'absolute',
-                left: '12px',
-                top: '50%',
-                transform: 'translateY(-50%)',
-                color: '#6c757d'
-              }} />
+        <div style={styles.filtersGrid}>
+          <div style={styles.filterGroup}>
+            <label>Search Students</label>
+            <div style={styles.searchInputWrapper}>
+              <FiSearch style={styles.searchIcon} />
               <input
                 type="text"
-                placeholder="Search by student or test..."
+                placeholder="Search by student name, ID, or test..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '10px 16px 10px 40px',
-                  border: '1px solid #dee2e6',
-                  borderRadius: '6px',
-                  fontSize: '14px'
-                }}
+                style={styles.searchInput}
               />
             </div>
           </div>
           
-          <div>
-            <label style={{ display: 'block', marginBottom: '8px', color: '#4B5320', fontWeight: '500' }}>
-              Subject
-            </label>
+          <div style={styles.filterGroup}>
+            <label>Subject</label>
             <select
               value={filterSubject}
               onChange={(e) => setFilterSubject(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 16px',
-                border: '1px solid #dee2e6',
-                borderRadius: '6px',
-                fontSize: '14px',
-                backgroundColor: 'white'
-              }}
+              style={styles.filterSelect}
             >
               <option value="">All Subjects</option>
               {uniqueSubjects.map(subject => (
@@ -476,21 +620,12 @@ const EditResults = () => {
             </select>
           </div>
           
-          <div>
-            <label style={{ display: 'block', marginBottom: '8px', color: '#4B5320', fontWeight: '500' }}>
-              Class
-            </label>
+          <div style={styles.filterGroup}>
+            <label>Class</label>
             <select
               value={filterClass}
               onChange={(e) => setFilterClass(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 16px',
-                border: '1px solid #dee2e6',
-                borderRadius: '6px',
-                fontSize: '14px',
-                backgroundColor: 'white'
-              }}
+              style={styles.filterSelect}
             >
               <option value="">All Classes</option>
               {uniqueClasses.map(cls => (
@@ -499,21 +634,12 @@ const EditResults = () => {
             </select>
           </div>
           
-          <div>
-            <label style={{ display: 'block', marginBottom: '8px', color: '#4B5320', fontWeight: '500' }}>
-              Session
-            </label>
+          <div style={styles.filterGroup}>
+            <label>Session</label>
             <select
               value={filterSession}
               onChange={(e) => setFilterSession(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 16px',
-                border: '1px solid #dee2e6',
-                borderRadius: '6px',
-                fontSize: '14px',
-                backgroundColor: 'white'
-              }}
+              style={styles.filterSelect}
             >
               <option value="">All Sessions</option>
               {uniqueSessions.map(session => (
@@ -522,564 +648,574 @@ const EditResults = () => {
             </select>
           </div>
         </div>
-      </div>
 
-      {/* Results Table */}
-      <div style={{
-        backgroundColor: 'white',
-        padding: '20px',
-        borderRadius: '8px',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-        overflowX: 'auto'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h3 style={{ margin: 0, color: '#4B5320' }}>All Results ({filteredResults.length})</h3>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ color: '#6c757d' }}>Show:</span>
+        {/* View Toggle */}
+        <div style={styles.viewToggleSection}>
+          <div style={styles.viewToggleButtons}>
+            <button
+              onClick={() => setViewMode('table')}
+              style={{
+                ...styles.viewToggleBtn,
+                ...(viewMode === 'table' ? styles.viewToggleBtnActive : {})
+              }}
+            >
+              <FiList size={16} />
+              Table View
+            </button>
+            <button
+              onClick={() => setViewMode('card')}
+              style={{
+                ...styles.viewToggleBtn,
+                ...(viewMode === 'card' ? styles.viewToggleBtnActive : {})
+              }}
+            >
+              <FiGrid size={16} />
+              Card View
+            </button>
+          </div>
+          
+          <div style={styles.pageSizeSelector}>
+            <span>Show:</span>
             <select
               value={itemsPerPage}
               onChange={(e) => setItemsPerPage(Number(e.target.value))}
-              style={{
-                padding: '8px 12px',
-                border: '1px solid #dee2e6',
-                borderRadius: '6px',
-                fontSize: '14px'
-              }}
+              style={styles.pageSizeSelect}
             >
               <option value={10}>10</option>
               <option value={20}>20</option>
               <option value={50}>50</option>
               <option value={100}>100</option>
             </select>
+            <span>results per page</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Results Section */}
+      <div style={styles.resultsSection}>
+        <div style={styles.sectionHeader}>
+          <h3>Student Results ({filteredResults.length})</h3>
+          <div style={styles.sectionSubtitle}>
+            <FiBarChart2 size={16} />
+            Showing {Math.min(filteredResults.length, itemsPerPage)} results
           </div>
         </div>
         
         {loading ? (
-          <div style={{ textAlign: 'center', padding: '40px' }}>
-            <div style={{
-              width: '40px',
-              height: '40px',
-              border: '3px solid #f3f3f3',
-              borderTop: '3px solid #4B5320',
-              borderRadius: '50%',
-              animation: 'spin 1s linear infinite',
-              margin: '0 auto 16px'
-            }} />
+          <div style={styles.loadingContainer}>
+            <div style={styles.loadingSpinner}></div>
             <p>Loading results...</p>
           </div>
         ) : filteredResults.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '40px', color: '#6c757d' }}>
-            <p>No results found. Try adjusting your filters.</p>
+          <div style={styles.emptyState}>
+            <FiBook size={48} style={{ color: brandColors.textMuted }} />
+            <h4>No results found</h4>
+            <p>Try adjusting your filters or search terms</p>
+            <button onClick={resetFilters} style={styles.btnPrimary}>
+              Reset Filters
+            </button>
           </div>
-        ) : (
+        ) : viewMode === 'table' ? (
           <>
-            <table style={{
-              width: '100%',
-              borderCollapse: 'collapse'
-            }}>
-              <thead>
-                <tr style={{
-                  backgroundColor: '#4B5320', // Changed to match header color
-                  borderBottom: '2px solid #dee2e6'
-                }}>
-                  <th style={{ padding: '12px', textAlign: 'left', color: 'white', fontWeight: '600' }}>Student</th>
-                  <th style={{ padding: '12px', textAlign: 'left', color: 'white', fontWeight: '600' }}>Test</th>
-                  <th style={{ padding: '12px', textAlign: 'left', color: 'white', fontWeight: '600' }}>Subject</th>
-                  <th style={{ padding: '12px', textAlign: 'left', color: 'white', fontWeight: '600' }}>Class</th>
-                  <th style={{ padding: '12px', textAlign: 'left', color: 'white', fontWeight: '600' }}>Score</th>
-                  <th style={{ padding: '12px', textAlign: 'left', color: 'white', fontWeight: '600' }}>Submitted</th>
-                  <th style={{ padding: '12px', textAlign: 'left', color: 'white', fontWeight: '600' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredResults.map((result) => (
-                  <tr key={result._id} style={{
-                    borderBottom: '1px solid #dee2e6',
-                    '&:hover': { backgroundColor: '#f8f9fa' }
-                  }}>
-                    <td style={{ padding: '12px' }}>
-                      <div>
-                        <strong>{result.userId?.name || 'Unknown'}</strong>
-                        <div style={{ fontSize: '12px', color: '#6c757d' }}>
-                          {result.userId?.studentId || 'No ID'}
+            {/* Table View */}
+            <div style={styles.tableContainer}>
+              <table style={styles.resultsTable}>
+                <thead>
+                  <tr>
+                    <th>Student</th>
+                    <th>Test</th>
+                    <th>Subject</th>
+                    <th>Class</th>
+                    <th>Score</th>
+                    <th>Submitted</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredResults.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((result) => {
+                    const percentage = calculatePercentage(result);
+                    const gradeColor = getGradeColor(result.grade);
+                    const percentageColor = getPercentageColor(percentage);
+                    
+                    return (
+                      <tr key={result._id} style={styles.tableRow}>
+                        <td style={styles.tableCell}>
+                          <div style={styles.studentCell}>
+                            <div style={styles.studentAvatar}>
+                              <FiUser size={16} />
+                            </div>
+                            <div style={styles.studentInfo}>
+                              <strong>{getStudentName(result)}</strong>
+                              <span style={styles.studentId}>
+                                {getStudentId(result)}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                        <td style={styles.tableCell}>
+                          <div style={styles.testInfo}>
+                            {result.testId?.title || 'Unknown Test'}
+                            {result.testId?.type && (
+                              <span style={styles.testType}>{result.testId.type}</span>
+                            )}
+                          </div>
+                        </td>
+                        <td style={styles.tableCell}>
+                          <span style={styles.subjectBadge}>
+                            {result.subject || 'N/A'}
+                          </span>
+                        </td>
+                        <td style={styles.tableCell}>
+                          <span style={styles.classBadge}>
+                            {result.class?.name || result.class || 'N/A'}
+                          </span>
+                        </td>
+                        <td style={styles.tableCell}>
+                          {editingResultId === result._id ? (
+                            <div style={styles.scoreEditor}>
+                              <input
+                                type="number"
+                                value={editScore}
+                                onChange={(e) => setEditScore(e.target.value)}
+                                min="0"
+                                max={result.totalMarks || result.testId?.totalMarks || 100}
+                                style={styles.scoreInput}
+                              />
+                              <div style={styles.scoreActions}>
+                                <button
+                                  onClick={() => handleSaveScore(result._id)}
+                                  disabled={editingLoading}
+                                  style={styles.btnSuccess}
+                                >
+                                  {editingLoading ? 'Saving...' : 'Save'}
+                                </button>
+                                <button
+                                  onClick={cancelEditing}
+                                  style={styles.btnSecondary}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={styles.scoreDisplay}>
+                              <div style={styles.scoreValue}>
+                                {result.score || 0} / {result.totalMarks || result.testId?.totalMarks || 100}
+                              </div>
+                              <div style={styles.scoreDetails}>
+                                <span style={{...styles.scorePercentage, color: percentageColor}}>
+                                  {percentage}%
+                                </span>
+                                {result.grade && (
+                                  <span style={{...styles.scoreGrade, background: gradeColor}}>
+                                    {result.grade}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </td>
+                        <td style={styles.tableCell}>
+                          <div style={styles.dateCell}>
+                            <div style={styles.dateMain}>
+                              {new Date(result.submittedAt).toLocaleDateString()}
+                            </div>
+                            <div style={styles.dateTime}>
+                              {new Date(result.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </div>
+                          </div>
+                        </td>
+                        <td style={styles.tableCell}>
+                          <div style={styles.actionButtons}>
+                            <button
+                              onClick={() => handleViewTestResults({ 
+                                _id: result.testId?._id || result.testId, 
+                                title: result.testId?.title || 'Unknown Test' 
+                              })}
+                              style={styles.btnPrimary}
+                              title="View test results"
+                            >
+                              <FiEye size={14} />
+                            </button>
+                            <button
+                              onClick={() => startEditing(result)}
+                              style={styles.btnWarning}
+                              title="Edit score"
+                              disabled={editingResultId === result._id}
+                            >
+                              <FiEdit size={14} />
+                            </button>
+                            {user.role === 'super_admin' && (
+                              <button
+                                onClick={() => handleDeleteResult(result._id)}
+                                style={styles.btnDanger}
+                                title="Delete result"
+                              >
+                                <FiTrash2 size={14} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          /* Card View */
+          <div style={styles.cardsGrid}>
+            {filteredResults.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((result) => {
+              const percentage = calculatePercentage(result);
+              const gradeColor = getGradeColor(result.grade);
+              const percentageColor = getPercentageColor(percentage);
+              
+              return (
+                <div key={result._id} style={styles.resultCard}>
+                  <div style={styles.cardHeader}>
+                    <div style={styles.cardStudent}>
+                      <div style={styles.studentAvatarLarge}>
+                        <FiUser size={20} />
+                      </div>
+                      <div style={styles.studentInfoLarge}>
+                        <h4>{getStudentName(result)}</h4>
+                        <p>{getStudentId(result)}</p>
+                      </div>
+                    </div>
+                    <div style={styles.cardStatus}>
+                      {result.passed ? (
+                        <span style={styles.statusPassed}>Passed</span>
+                      ) : (
+                        <span style={styles.statusFailed}>Failed</span>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div style={styles.cardContent}>
+                    <div style={styles.cardRow}>
+                      <div style={styles.cardLabel}>
+                        <FiBook size={14} />
+                        <span>Test:</span>
+                      </div>
+                      <div style={styles.cardValue}>{result.testId?.title || 'Unknown'}</div>
+                    </div>
+                    
+                    <div style={styles.cardRow}>
+                      <div style={styles.cardLabel}>
+                        <FiBookOpen size={14} />
+                        <span>Subject:</span>
+                      </div>
+                      <div style={styles.cardValue}>{result.subject || 'N/A'}</div>
+                    </div>
+                    
+                    <div style={styles.cardRow}>
+                      <div style={styles.cardLabel}>
+                        <FiGrid size={14} />
+                        <span>Class:</span>
+                      </div>
+                      <div style={styles.cardValue}>{result.class?.name || result.class || 'N/A'}</div>
+                    </div>
+                    
+                    <div style={styles.cardRow}>
+                      <div style={styles.cardLabel}>
+                        <FiCalendar size={14} />
+                        <span>Session:</span>
+                      </div>
+                      <div style={styles.cardValue}>{result.session || 'N/A'}</div>
+                    </div>
+                    
+                    <div style={styles.cardScoreSection}>
+                      <div style={styles.scoreMain}>
+                        <div style={styles.scoreLabel}>Score</div>
+                        <div style={styles.scoreValueLarge}>
+                          {result.score || 0} / {result.totalMarks || 100}
                         </div>
                       </div>
-                    </td>
-                    <td style={{ padding: '12px' }}>{result.testId?.title || 'Unknown Test'}</td>
-                    <td style={{ padding: '12px' }}>{result.subject || 'N/A'}</td>
-                    <td style={{ padding: '12px' }}>{result.class?.name || result.class || 'N/A'}</td>
-                    <td style={{ padding: '12px' }}>
-                      {editingResultId === result._id ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <input
-                            type="number"
-                            value={editScore}
-                            onChange={(e) => setEditScore(e.target.value)}
-                            min="0"
-                            max={result.totalMarks || result.testId?.totalMarks || 100}
-                            style={{
-                              width: '60px',
-                              padding: '6px',
-                              border: '1px solid #dee2e6',
-                              borderRadius: '4px'
-                            }}
-                          />
+                      <div style={styles.scoreDetails}>
+                        <div style={{...styles.scorePercentageLarge, color: percentageColor}}>
+                          <FiPercent size={14} />
+                          {percentage}%
+                        </div>
+                        {result.grade && (
+                          <div style={{...styles.scoreGradeLarge, color: gradeColor}}>
+                            <FiStar size={14} />
+                            {result.grade}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div style={styles.cardFooter}>
+                    <div style={styles.cardDate}>
+                      <FiClock size={12} />
+                      {new Date(result.submittedAt).toLocaleDateString()}
+                    </div>
+                    <div style={styles.cardActions}>
+                      <button
+                        onClick={() => handleViewTestResults({ 
+                          _id: result.testId?._id || result.testId, 
+                          title: result.testId?.title || 'Unknown Test' 
+                        })}
+                        style={styles.btnPrimary}
+                      >
+                        <FiEye size={14} />
+                      </button>
+                      <button
+                        onClick={() => startEditing(result)}
+                        style={styles.btnWarning}
+                        disabled={editingResultId === result._id}
+                      >
+                        <FiEdit size={14} />
+                      </button>
+                      {user.role === 'super_admin' && (
+                        <button
+                          onClick={() => handleDeleteResult(result._id)}
+                          style={styles.btnDanger}
+                        >
+                          <FiTrash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {editingResultId === result._id && (
+                    <div style={styles.cardEditor}>
+                      <div style={styles.editorHeader}>
+                        <FiEdit2 size={16} />
+                        <span>Edit Score</span>
+                      </div>
+                      <div style={styles.editorBody}>
+                        <input
+                          type="number"
+                          value={editScore}
+                          onChange={(e) => setEditScore(e.target.value)}
+                          min="0"
+                          max={result.totalMarks || 100}
+                          style={styles.editorInput}
+                          placeholder="Enter score"
+                        />
+                        <div style={styles.editorActions}>
                           <button
                             onClick={() => handleSaveScore(result._id)}
                             disabled={editingLoading}
-                            style={{
-                              backgroundColor: '#28a745',
-                              color: 'white',
-                              border: 'none',
-                              padding: '6px 12px',
-                              borderRadius: '4px',
-                              cursor: 'pointer',
-                              fontSize: '12px'
-                            }}
+                            style={styles.btnSuccess}
                           >
                             {editingLoading ? 'Saving...' : 'Save'}
                           </button>
                           <button
                             onClick={cancelEditing}
-                            style={{
-                              backgroundColor: '#6c757d',
-                              color: 'white',
-                              border: 'none',
-                              padding: '6px 12px',
-                              borderRadius: '4px',
-                              cursor: 'pointer',
-                              fontSize: '12px'
-                            }}
+                            style={styles.btnSecondary}
                           >
                             Cancel
                           </button>
                         </div>
-                      ) : (
-                        <span>
-                          {result.score || 0} / {result.totalMarks || result.testId?.totalMarks || 100}
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ padding: '12px' }}>
-                      {new Date(result.submittedAt).toLocaleDateString()}
-                    </td>
-                    <td style={{ padding: '12px' }}>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button
-                          onClick={() => handleViewTestResults({ 
-                            _id: result.testId?._id || result.testId, 
-                            title: result.testId?.title || 'Unknown Test' 
-                          })}
-                          style={{
-                            backgroundColor: '#007bff',
-                            color: 'white',
-                            border: 'none',
-                            padding: '6px 12px',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            fontSize: '12px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '4px'
-                          }}
-                          title="View test results"
-                        >
-                          <FiEye /> View
-                        </button>
-                        <button
-                          onClick={() => startEditing(result)}
-                          style={{
-                            backgroundColor: '#D4A017',
-                            color: '#4B5320',
-                            border: 'none',
-                            padding: '6px 12px',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            fontSize: '12px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '4px'
-                          }}
-                          title="Edit score"
-                          disabled={editingResultId === result._id}
-                        >
-                          <FiEdit /> Edit
-                        </button>
-                        {user.role === 'super_admin' && (
-                          <button
-                            onClick={() => handleDeleteResult(result._id)}
-                            style={{
-                              backgroundColor: '#dc3545',
-                              color: 'white',
-                              border: 'none',
-                              padding: '6px 12px',
-                              borderRadius: '4px',
-                              cursor: 'pointer',
-                              fontSize: '12px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '4px'
-                            }}
-                            title="Delete result"
-                          >
-                            <FiTrash2 /> Delete
-                          </button>
-                        )}
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        
+        {/* Pagination */}
+        {filteredResults.length > itemsPerPage && (
+          <div style={styles.pagination}>
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              style={styles.paginationBtn}
+            >
+              <FiChevronLeft size={18} />
+              Previous
+            </button>
             
-            {/* Pagination */}
-            {filteredResults.length > itemsPerPage && (
-              <div style={{
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                gap: '16px',
-                marginTop: '20px',
-                paddingTop: '20px',
-                borderTop: '1px solid #dee2e6'
-              }}>
-                <button
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                  style={{
-                    padding: '8px 16px',
-                    backgroundColor: currentPage === 1 ? '#e9ecef' : '#4B5320',
-                    color: currentPage === 1 ? '#6c757d' : 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px'
-                  }}
-                >
-                  <FiChevronLeft /> Previous
-                </button>
-                
-                <span style={{ color: '#4B5320' }}>
-                  Page {currentPage} of {Math.ceil(filteredResults.length / itemsPerPage)}
-                </span>
-                
-                <button
-                  onClick={() => setCurrentPage(p => Math.min(Math.ceil(filteredResults.length / itemsPerPage), p + 1))}
-                  disabled={currentPage >= Math.ceil(filteredResults.length / itemsPerPage)}
-                  style={{
-                    padding: '8px 16px',
-                    backgroundColor: currentPage >= Math.ceil(filteredResults.length / itemsPerPage) ? '#e9ecef' : '#4B5320',
-                    color: currentPage >= Math.ceil(filteredResults.length / itemsPerPage) ? '#6c757d' : 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: currentPage >= Math.ceil(filteredResults.length / itemsPerPage) ? 'not-allowed' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px'
-                  }}
-                >
-                  Next <FiChevronRight />
-                </button>
-              </div>
-            )}
-          </>
+            <div style={styles.paginationInfo}>
+              Page {currentPage} of {Math.ceil(filteredResults.length / itemsPerPage)}
+            </div>
+            
+            <button
+              onClick={() => setCurrentPage(p => Math.min(Math.ceil(filteredResults.length / itemsPerPage), p + 1))}
+              disabled={currentPage >= Math.ceil(filteredResults.length / itemsPerPage)}
+              style={styles.paginationBtn}
+            >
+              Next
+              <FiChevronRight size={18} />
+            </button>
+          </div>
         )}
       </div>
 
       {/* Test Results Modal */}
       {selectedTest && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 1000,
-          padding: '20px'
-        }}>
-          <div style={{
-            backgroundColor: 'white',
-            borderRadius: '8px',
-            width: '90%',
-            maxWidth: '1200px',
-            maxHeight: '90vh',
-            overflow: 'auto',
-            position: 'relative'
-          }}>
-            <div style={{
-              padding: '20px',
-              borderBottom: '1px solid #dee2e6',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
-            }}>
-              <h3 style={{ margin: 0, color: '#4B5320' }}>
+        <div style={styles.modalOverlay}>
+          <div style={styles.modalContainer}>
+            <div style={styles.modalHeader}>
+              <h3>
+                <FiBarChart2 size={20} />
                 Results for: {selectedTest.test.title}
               </h3>
               <button
                 onClick={closeTestResults}
-                style={{
-                  backgroundColor: 'transparent',
-                  border: 'none',
-                  fontSize: '24px',
-                  cursor: 'pointer',
-                  color: '#6c757d'
-                }}
+                style={styles.modalClose}
               >
-                <FiX />
+                <FiX size={24} />
               </button>
             </div>
             
             {selectedTest.statistics && Object.keys(selectedTest.statistics).length > 0 && (
-              <div style={{
-                padding: '20px',
-                backgroundColor: '#f8f9fa',
-                borderBottom: '1px solid #dee2e6'
-              }}>
-                <h4 style={{ margin: '0 0 16px 0', color: '#4B5320' }}>Test Statistics</h4>
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                  gap: '16px'
-                }}>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#4B5320' }}>
-                      {selectedTest.statistics.totalStudents || 0}
-                    </div>
-                    <div style={{ fontSize: '14px', color: '#6c757d' }}>Total Students</div>
+              <div style={styles.modalStats}>
+                <h4>Test Statistics</h4>
+                <div style={styles.statsGridSmall}>
+                  <div style={styles.statItem}>
+                    <div style={styles.statNumber}>{selectedTest.statistics.totalStudents || 0}</div>
+                    <div style={styles.statLabel}>Total Students</div>
                   </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#28a745' }}>
+                  <div style={styles.statItem}>
+                    <div style={{...styles.statNumber, color: brandColors.success}}>
                       {selectedTest.statistics.averageScore || 0}%
                     </div>
-                    <div style={{ fontSize: '14px', color: '#6c757d' }}>Average Score</div>
+                    <div style={styles.statLabel}>Average Score</div>
                   </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#007bff' }}>
+                  <div style={styles.statItem}>
+                    <div style={{...styles.statNumber, color: brandColors.brightGreen}}>
                       {selectedTest.statistics.highestScore || 0}%
                     </div>
-                    <div style={{ fontSize: '14px', color: '#6c757d' }}>Highest Score</div>
+                    <div style={styles.statLabel}>Highest Score</div>
                   </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#dc3545' }}>
+                  <div style={styles.statItem}>
+                    <div style={{...styles.statNumber, color: brandColors.danger}}>
                       {selectedTest.statistics.lowestScore || 0}%
                     </div>
-                    <div style={{ fontSize: '14px', color: '#6c757d' }}>Lowest Score</div>
+                    <div style={styles.statLabel}>Lowest Score</div>
                   </div>
                 </div>
               </div>
             )}
             
-            <div style={{ padding: '20px' }}>
+            <div style={styles.modalContent}>
               {selectedTest.results.length === 0 ? (
-                <p style={{ textAlign: 'center', color: '#6c757d' }}>No results found for this test.</p>
+                <div style={styles.emptyState}>
+                  <FiBook size={32} style={{ color: brandColors.textMuted }} />
+                  <p>No results found for this test.</p>
+                </div>
               ) : (
-                selectedTest.results.map((result) => (
-                  <div key={result._id} style={{
-                    marginBottom: '20px',
-                    padding: '16px',
-                    border: '1px solid #dee2e6',
-                    borderRadius: '6px'
-                  }}>
-                    <div style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      marginBottom: '12px'
-                    }}>
-                      <div>
-                        <strong>{result.userId?.name || 'Unknown Student'}</strong>
-                        <div style={{ fontSize: '14px', color: '#6c757d' }}>
-                          Score: {result.score} / {result.totalMarks}
+                selectedTest.results.map((result) => {
+                  const percentage = calculatePercentage(result);
+                  
+                  return (
+                    <div key={result._id} style={styles.modalResultItem}>
+                      <div style={styles.modalResultHeader}>
+                        <div style={styles.modalStudentInfo}>
+                          <strong>{getStudentName(result)}</strong>
+                          <div style={styles.modalScoreInfo}>
+                            Score: {result.score} / {result.totalMarks}
+                            <span style={styles.modalPercentage}>
+                              ({percentage}%)
+                            </span>
+                          </div>
+                        </div>
+                        <div style={styles.modalResultActions}>
+                          <button
+                            onClick={() => startEditing(result)}
+                            style={styles.btnWarning}
+                            disabled={editingResultId === result._id}
+                          >
+                            <FiEdit size={14} /> Edit Score
+                          </button>
+                          {user.role === 'super_admin' && (
+                            <button
+                              onClick={() => handleDeleteResult(result._id)}
+                              style={styles.btnDanger}
+                            >
+                              <FiTrash2 size={14} /> Delete
+                            </button>
+                          )}
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button
-                          onClick={() => startEditing(result)}
-                          style={{
-                            backgroundColor: '#D4A017',
-                            color: '#4B5320',
-                            border: 'none',
-                            padding: '6px 12px',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            fontSize: '12px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '4px'
-                          }}
-                          disabled={editingResultId === result._id}
-                        >
-                          <FiEdit /> Edit Score
-                        </button>
-                        {user.role === 'super_admin' && (
-                          <button
-                            onClick={() => handleDeleteResult(result._id)}
-                            style={{
-                              backgroundColor: '#dc3545',
-                              color: 'white',
-                              border: 'none',
-                              padding: '6px 12px',
-                              borderRadius: '4px',
-                              cursor: 'pointer',
-                              fontSize: '12px',
-                              display: 'flex',
-                            alignItems: 'center',
-                            gap: '4px'
-                            }}
-                          >
-                            <FiTrash2 /> Delete
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    
-                    {result.questionAnalysis && result.questionAnalysis.length > 0 && (
-                      <div>
-                        <h5 style={{ margin: '0 0 12px 0', color: '#4B5320' }}>Question Analysis</h5>
-                        <div style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-                          gap: '12px'
-                        }}>
-                          {result.questionAnalysis.map((qa, index) => (
-                            <div key={index} style={{
-                              padding: '12px',
-                              backgroundColor: qa.isCorrect ? '#d4edda' : '#f8d7da',
-                              border: `1px solid ${qa.isCorrect ? '#c3e6cb' : '#f5c6cb'}`,
-                              borderRadius: '4px'
-                            }}>
-                              <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '8px' }}>
-                                Q{index + 1}: {qa.questionText?.substring(0, 50)}...
-                              </div>
-                              <div style={{ fontSize: '13px' }}>
-                                <div><strong>Selected:</strong> {qa.selectedAnswer}</div>
-                                <div><strong>Correct:</strong> {qa.correctAnswer}</div>
-                                {qa.options && (
-                                  <div style={{ marginTop: '8px' }}>
-                                    <strong>Options:</strong>
-                                    <ul style={{ margin: '4px 0 0 0', paddingLeft: '20px' }}>
-                                      {qa.options.map((option, optIndex) => (
-                                        <li key={optIndex} style={{
-                                          color: option === qa.correctAnswer ? '#28a745' : 
-                                                 option === qa.selectedAnswer ? '#dc3545' : '#6c757d',
-                                          fontWeight: option === qa.correctAnswer ? 'bold' : 'normal'
-                                        }}>
-                                          {option}
-                                          {option === qa.correctAnswer && ' ✓'}
-                                          {option === qa.selectedAnswer && option !== qa.correctAnswer && ' ✗'}
-                                        </li>
-                                      ))}
-                                    </ul>
+                      
+                      {expandedDetails[result._id] && result.questionAnalysis && result.questionAnalysis.length > 0 && (
+                        <div style={styles.questionAnalysis}>
+                          <h5>Question Analysis</h5>
+                          <div style={styles.questionsGrid}>
+                            {result.questionAnalysis.map((qa, index) => (
+                              <div key={index} style={{
+                                ...styles.questionCard,
+                                borderLeftColor: qa.isCorrect ? brandColors.success : brandColors.danger,
+                                background: qa.isCorrect ? 'rgba(69, 160, 73, 0.05)' : 'rgba(244, 67, 54, 0.05)'
+                              }}>
+                                <div style={styles.questionHeader}>
+                                  <span style={styles.questionNumber}>Q{index + 1}</span>
+                                  <span style={{
+                                    ...styles.questionStatus,
+                                    background: qa.isCorrect ? 'rgba(69, 160, 73, 0.1)' : 'rgba(244, 67, 54, 0.1)',
+                                    color: qa.isCorrect ? brandColors.success : brandColors.danger
+                                  }}>
+                                    {qa.isCorrect ? 'Correct' : 'Incorrect'}
+                                  </span>
+                                </div>
+                                <div style={styles.questionText}>
+                                  {qa.questionText?.substring(0, 80)}...
+                                </div>
+                                <div style={styles.questionAnswers}>
+                                  <div style={styles.answerRow}>
+                                    <span style={styles.answerLabel}>Selected:</span>
+                                    <span style={{...styles.answerValue, color: brandColors.danger}}>{qa.selectedAnswer}</span>
                                   </div>
-                                )}
-                                <div style={{ 
-                                  color: qa.isCorrect ? '#155724' : '#721c24',
-                                  marginTop: '8px',
-                                  fontWeight: 'bold'
-                                }}>
-                                  <strong>Status:</strong> {qa.isCorrect ? 'Correct' : 'Incorrect'}
+                                  <div style={styles.answerRow}>
+                                    <span style={styles.answerLabel}>Correct:</span>
+                                    <span style={{...styles.answerValue, color: brandColors.success}}>{qa.correctAnswer}</span>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* If no questionAnalysis but have detailedData */}
-                    {(!result.questionAnalysis || result.questionAnalysis.length === 0) && result.detailedData && (
-                      <div>
-                        <h5 style={{ margin: '0 0 12px 0', color: '#4B5320' }}>Result Details</h5>
-                        <div style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                          gap: '12px',
-                          padding: '12px',
-                          backgroundColor: '#f8f9fa',
-                          borderRadius: '4px'
-                        }}>
-                          <div>
-                            <strong>Correct Answers:</strong> {result.detailedData.summary?.correctAnswers || 'N/A'}
-                          </div>
-                          <div>
-                            <strong>Total Questions:</strong> {result.detailedData.summary?.totalQuestions || 'N/A'}
-                          </div>
-                          <div>
-                            <strong>Accuracy:</strong> {result.detailedData.analysis?.accuracy || 'N/A'}%
-                          </div>
-                          <div>
-                            <strong>Time Per Question:</strong> {result.detailedData.summary?.timePerQuestion || 'N/A'}s
+                            ))}
                           </div>
                         </div>
+                      )}
+                      
+                      <div style={styles.modalResultFooter}>
+                        <button
+                          onClick={() => toggleDetails(result._id)}
+                          style={styles.btnSecondary}
+                        >
+                          {expandedDetails[result._id] ? 'Hide Details' : 'Show Details'}
+                        </button>
                       </div>
-                    )}
-                  </div>
-                ))
+                    </div>
+                  );
+                })
               )}
             </div>
             
             {/* Edit Score Section in Modal */}
             {editingResultId && selectedTest.results.some(r => r._id === editingResultId) && (
-              <div style={{
-                position: 'sticky',
-                bottom: 0,
-                backgroundColor: 'white',
-                borderTop: '1px solid #dee2e6',
-                padding: '16px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center'
-              }}>
-                <div>
+              <div style={styles.modalEditor}>
+                <div style={styles.editorInfo}>
                   <strong>Editing Score for:</strong> {
-                    selectedTest.results.find(r => r._id === editingResultId)?.userId?.name || 'Unknown Student'
+                    getStudentName(selectedTest.results.find(r => r._id === editingResultId))
                   }
                 </div>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <div style={styles.editorControls}>
                   <input
                     type="number"
                     value={editScore}
                     onChange={(e) => setEditScore(e.target.value)}
                     min="0"
                     max={selectedTest.results.find(r => r._id === editingResultId)?.totalMarks || 100}
-                    style={{
-                      padding: '8px',
-                      border: '1px solid #dee2e6',
-                      borderRadius: '4px',
-                      width: '100px'
-                    }}
+                    style={styles.modalScoreInput}
                   />
                   <button
                     onClick={() => handleSaveScore(editingResultId)}
                     disabled={editingLoading}
-                    style={{
-                      backgroundColor: '#28a745',
-                      color: 'white',
-                      border: 'none',
-                      padding: '8px 16px',
-                      borderRadius: '4px',
-                      cursor: 'pointer'
-                    }}
+                    style={styles.btnSuccess}
                   >
                     {editingLoading ? 'Saving...' : 'Save'}
                   </button>
                   <button
                     onClick={cancelEditing}
-                    style={{
-                      backgroundColor: '#6c757d',
-                      color: 'white',
-                      border: 'none',
-                      padding: '8px 16px',
-                      borderRadius: '4px',
-                      cursor: 'pointer'
-                    }}
+                    style={styles.btnSecondary}
                   >
                     Cancel
                   </button>
@@ -1089,18 +1225,906 @@ const EditResults = () => {
           </div>
         </div>
       )}
-      
-      <style>{`
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        tr:hover {
-          background-color: #f8f9fa;
-        }
-      `}</style>
     </div>
   );
 };
+
+// Styles Object - Now properly references brandColors
+const styles = {
+  container: {
+    minHeight: '100vh',
+    background: brandColors.lightBg,
+    padding: '20px',
+    fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif"
+  },
+  header: {
+    background: brandColors.armyGreen,
+    color: 'white',
+    padding: '24px',
+    borderRadius: '12px',
+    marginBottom: '24px',
+    boxShadow: '0 4px 12px rgba(75, 83, 32, 0.2)'
+  },
+  headerContent: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  headerText: {
+    flex: 1
+  },
+  backButton: {
+    background: brandColors.orange,
+    color: brandColors.armyGreen,
+    border: 'none',
+    padding: '12px 24px',
+    borderRadius: '10px',
+    fontWeight: '600',
+    fontSize: '14px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    transition: 'all 0.3s ease'
+  },
+  alertError: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '16px',
+    borderRadius: '10px',
+    marginBottom: '24px',
+    fontSize: '14px',
+    background: '#ffebee',
+    color: '#c62828',
+    borderLeft: `4px solid ${brandColors.danger}`
+  },
+  alertSuccess: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '16px',
+    borderRadius: '10px',
+    marginBottom: '24px',
+    fontSize: '14px',
+    background: '#e8f5e8',
+    color: '#2e7d32',
+    borderLeft: `4px solid ${brandColors.success}`
+  },
+  statsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+    gap: '20px',
+    marginBottom: '24px'
+  },
+  statCard: {
+    background: brandColors.cardBg,
+    border: `2px solid ${brandColors.border}`,
+    borderRadius: '12px',
+    padding: '24px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '20px',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
+    transition: 'transform 0.3s ease'
+  },
+  statIcon: {
+    width: '60px',
+    height: '60px',
+    borderRadius: '12px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: 'white',
+    flexShrink: 0
+  },
+  statContent: {
+    flex: 1
+  },
+  filtersSection: {
+    background: brandColors.cardBg,
+    border: `2px solid ${brandColors.border}`,
+    borderRadius: '12px',
+    padding: '24px',
+    marginBottom: '24px',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
+  },
+  filtersHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '24px',
+    paddingBottom: '16px',
+    borderBottom: `2px solid ${brandColors.border}`
+  },
+  filtersActions: {
+    display: 'flex',
+    gap: '12px'
+  },
+  filtersGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+    gap: '20px',
+    marginBottom: '24px'
+  },
+  filterGroup: {
+    display: 'flex',
+    flexDirection: 'column'
+  },
+  searchInputWrapper: {
+    position: 'relative'
+  },
+  searchIcon: {
+    position: 'absolute',
+    left: '14px',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    color: brandColors.textMuted,
+    fontSize: '16px'
+  },
+  searchInput: {
+    width: '100%',
+    padding: '14px 16px 14px 44px',
+    border: `2px solid ${brandColors.border}`,
+    borderRadius: '10px',
+    fontSize: '14px',
+    transition: 'all 0.3s ease',
+    background: brandColors.lightBg,
+    color: brandColors.textPrimary
+  },
+  filterSelect: {
+    width: '100%',
+    padding: '14px 16px',
+    border: `2px solid ${brandColors.border}`,
+    borderRadius: '10px',
+    fontSize: '14px',
+    background: brandColors.lightBg,
+    color: brandColors.textPrimary,
+    cursor: 'pointer',
+    transition: 'all 0.3s ease'
+  },
+  viewToggleSection: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: '20px',
+    borderTop: `2px solid ${brandColors.border}`
+  },
+  viewToggleButtons: {
+    display: 'flex',
+    gap: '10px'
+  },
+  viewToggleBtn: {
+    padding: '12px 20px',
+    border: `2px solid ${brandColors.border}`,
+    borderRadius: '10px',
+    background: brandColors.lightBg,
+    color: brandColors.textSecondary,
+    fontSize: '14px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    transition: 'all 0.3s ease'
+  },
+  viewToggleBtnActive: {
+    background: brandColors.armyGreen,
+    color: 'white',
+    borderColor: brandColors.armyGreen,
+    boxShadow: '0 2px 8px rgba(75, 83, 32, 0.2)'
+  },
+  pageSizeSelector: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    fontSize: '14px',
+    color: brandColors.textSecondary
+  },
+  pageSizeSelect: {
+    padding: '10px 14px',
+    border: `2px solid ${brandColors.border}`,
+    borderRadius: '8px',
+    fontSize: '14px',
+    background: brandColors.lightBg,
+    color: brandColors.textPrimary,
+    cursor: 'pointer'
+  },
+  resultsSection: {
+    background: brandColors.cardBg,
+    border: `2px solid ${brandColors.border}`,
+    borderRadius: '12px',
+    padding: '24px',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
+  },
+  sectionHeader: {
+    marginBottom: '24px',
+    paddingBottom: '16px',
+    borderBottom: `2px solid ${brandColors.border}`
+  },
+  loadingContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '60px 20px'
+  },
+  loadingSpinner: {
+    width: '50px',
+    height: '50px',
+    border: `4px solid ${brandColors.border}`,
+    borderTop: `4px solid ${brandColors.armyGreen}`,
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite',
+    marginBottom: '20px'
+  },
+  emptyState: {
+    textAlign: 'center',
+    padding: '60px 20px',
+    color: brandColors.textMuted
+  },
+  tableContainer: {
+    overflowX: 'auto',
+    borderRadius: '10px',
+    border: `2px solid ${brandColors.border}`
+  },
+  resultsTable: {
+    width: '100%',
+    borderCollapse: 'collapse',
+    minWidth: '1000px'
+  },
+  tableRow: {
+    borderBottom: `2px solid ${brandColors.border}`,
+    transition: 'background-color 0.2s ease'
+  },
+  tableCell: {
+    padding: '18px 16px',
+    fontSize: '14px',
+    color: brandColors.textPrimary
+  },
+  studentCell: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '14px'
+  },
+  studentAvatar: {
+    width: '40px',
+    height: '40px',
+    borderRadius: '10px',
+    background: brandColors.armyGreen,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: 'white',
+    flexShrink: 0
+  },
+  studentInfo: {
+    display: 'flex',
+    flexDirection: 'column'
+  },
+  studentId: {
+    fontSize: '12px',
+    color: brandColors.textMuted,
+    background: brandColors.lightBg,
+    padding: '4px 10px',
+    borderRadius: '6px',
+    display: 'inline-block',
+    width: 'fit-content'
+  },
+  testInfo: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px'
+  },
+  testType: {
+    fontSize: '12px',
+    color: brandColors.orange,
+    background: 'rgba(255, 165, 0, 0.1)',
+    padding: '4px 10px',
+    borderRadius: '6px',
+    width: 'fit-content',
+    fontWeight: '600'
+  },
+  subjectBadge: {
+    padding: '8px 14px',
+    borderRadius: '8px',
+    fontSize: '13px',
+    fontWeight: '600',
+    width: 'fit-content',
+    display: 'inline-block',
+    background: 'rgba(75, 83, 32, 0.1)',
+    color: brandColors.armyGreen
+  },
+  classBadge: {
+    padding: '8px 14px',
+    borderRadius: '8px',
+    fontSize: '13px',
+    fontWeight: '600',
+    width: 'fit-content',
+    display: 'inline-block',
+    background: 'rgba(255, 165, 0, 0.1)',
+    color: '#cc8400'
+  },
+  scoreDisplay: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px'
+  },
+  scoreValue: {
+    fontWeight: '700',
+    fontSize: '16px',
+    color: brandColors.textPrimary
+  },
+  scoreDetails: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    fontSize: '13px'
+  },
+  scoreEditor: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px'
+  },
+  scoreInput: {
+    padding: '10px 14px',
+    border: `2px solid ${brandColors.border}`,
+    borderRadius: '8px',
+    fontSize: '14px',
+    width: '100px',
+    background: brandColors.lightBg,
+    color: brandColors.textPrimary
+  },
+  scoreActions: {
+    display: 'flex',
+    gap: '10px'
+  },
+  dateCell: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px'
+  },
+  dateMain: {
+    fontSize: '14px',
+    color: brandColors.textPrimary,
+    fontWeight: '500'
+  },
+  dateTime: {
+    fontSize: '12px',
+    color: brandColors.textMuted
+  },
+  actionButtons: {
+    display: 'flex',
+    gap: '10px'
+  },
+  btnPrimary: {
+    background: brandColors.armyGreen,
+    color: 'white',
+    border: 'none',
+    padding: '10px 16px',
+    borderRadius: '8px',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    transition: 'all 0.3s ease'
+  },
+  btnSecondary: {
+    background: brandColors.lightBg,
+    color: brandColors.textSecondary,
+    border: `2px solid ${brandColors.border}`,
+    padding: '10px 16px',
+    borderRadius: '8px',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    transition: 'all 0.3s ease'
+  },
+  btnSuccess: {
+    background: brandColors.success,
+    color: 'white',
+    border: 'none',
+    padding: '10px 16px',
+    borderRadius: '8px',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    transition: 'all 0.3s ease'
+  },
+  btnWarning: {
+    background: brandColors.orange,
+    color: 'white',
+    border: 'none',
+    padding: '10px 16px',
+    borderRadius: '8px',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    transition: 'all 0.3s ease'
+  },
+  btnDanger: {
+    background: brandColors.danger,
+    color: 'white',
+    border: 'none',
+    padding: '10px 16px',
+    borderRadius: '8px',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    transition: 'all 0.3s ease'
+  },
+  cardsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))',
+    gap: '24px'
+  },
+  resultCard: {
+    background: brandColors.cardBg,
+    border: `2px solid ${brandColors.border}`,
+    borderRadius: '12px',
+    padding: '24px',
+    transition: 'all 0.3s ease'
+  },
+  cardHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: '20px'
+  },
+  cardStudent: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '14px'
+  },
+  studentAvatarLarge: {
+    width: '48px',
+    height: '48px',
+    borderRadius: '12px',
+    background: brandColors.armyGreen,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: 'white',
+    flexShrink: 0
+  },
+  studentInfoLarge: {
+    display: 'flex',
+    flexDirection: 'column'
+  },
+  cardStatus: {
+    fontSize: '12px',
+    fontWeight: '600'
+  },
+  statusPassed: {
+    background: 'rgba(69, 160, 73, 0.1)',
+    color: brandColors.success,
+    padding: '6px 12px',
+    borderRadius: '6px'
+  },
+  statusFailed: {
+    background: 'rgba(244, 67, 54, 0.1)',
+    color: brandColors.danger,
+    padding: '6px 12px',
+    borderRadius: '6px'
+  },
+  cardContent: {
+    marginBottom: '20px'
+  },
+  cardRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '8px 0',
+    borderBottom: `1px solid ${brandColors.border}`
+  },
+  cardLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    color: brandColors.textSecondary,
+    fontSize: '13px'
+  },
+  cardValue: {
+    color: brandColors.textPrimary,
+    fontWeight: '500',
+    fontSize: '13px'
+  },
+  cardScoreSection: {
+    marginTop: '20px',
+    padding: '16px',
+    background: brandColors.lightBg,
+    borderRadius: '10px'
+  },
+  scoreMain: {
+    textAlign: 'center',
+    marginBottom: '12px'
+  },
+  scoreLabel: {
+    fontSize: '12px',
+    color: brandColors.textSecondary,
+    marginBottom: '4px'
+  },
+  scoreValueLarge: {
+    fontSize: '24px',
+    fontWeight: '700',
+    color: brandColors.textPrimary
+  },
+  scoreDetails: {
+    display: 'flex',
+    justifyContent: 'center',
+    gap: '20px',
+    alignItems: 'center'
+  },
+  scorePercentageLarge: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: '14px',
+    fontWeight: '600'
+  },
+  scoreGradeLarge: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: '14px',
+    fontWeight: '600'
+  },
+  cardFooter: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: '16px',
+    borderTop: `2px solid ${brandColors.border}`
+  },
+  cardDate: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: '12px',
+    color: brandColors.textMuted
+  },
+  cardActions: {
+    display: 'flex',
+    gap: '8px'
+  },
+  cardEditor: {
+    marginTop: '20px',
+    padding: '16px',
+    background: brandColors.lightBg,
+    borderRadius: '10px',
+    border: `2px solid ${brandColors.border}`
+  },
+  editorHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    marginBottom: '12px',
+    color: brandColors.textPrimary,
+    fontWeight: '600'
+  },
+  editorBody: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px'
+  },
+  editorInput: {
+    flex: 1,
+    padding: '10px 14px',
+    border: `2px solid ${brandColors.border}`,
+    borderRadius: '8px',
+    fontSize: '14px',
+    background: 'white',
+    color: brandColors.textPrimary
+  },
+  editorActions: {
+    display: 'flex',
+    gap: '8px'
+  },
+  pagination: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: '20px',
+    marginTop: '30px',
+    paddingTop: '20px',
+    borderTop: `2px solid ${brandColors.border}`
+  },
+  paginationBtn: {
+    background: brandColors.lightBg,
+    color: brandColors.textSecondary,
+    border: `2px solid ${brandColors.border}`,
+    padding: '10px 20px',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    transition: 'all 0.3s ease'
+  },
+  paginationInfo: {
+    color: brandColors.textSecondary,
+    fontSize: '14px',
+    fontWeight: '500'
+  },
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'rgba(0, 0, 0, 0.5)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
+    padding: '20px'
+  },
+  modalContainer: {
+    background: brandColors.cardBg,
+    borderRadius: '12px',
+    width: '100%',
+    maxWidth: '900px',
+    maxHeight: '80vh',
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+    boxShadow: '0 20px 40px rgba(0,0,0,0.2)'
+  },
+  modalHeader: {
+    background: brandColors.armyGreen,
+    color: 'white',
+    padding: '24px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  modalClose: {
+    background: 'transparent',
+    border: 'none',
+    color: 'white',
+    cursor: 'pointer',
+    padding: '4px',
+    borderRadius: '4px',
+    transition: 'background 0.2s ease'
+  },
+  modalStats: {
+    padding: '20px 24px',
+    borderBottom: `2px solid ${brandColors.border}`
+  },
+  statsGridSmall: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+    gap: '16px',
+    marginTop: '16px'
+  },
+  statItem: {
+    textAlign: 'center'
+  },
+  statNumber: {
+    fontSize: '24px',
+    fontWeight: '700',
+    marginBottom: '4px'
+  },
+  statLabel: {
+    fontSize: '12px',
+    color: brandColors.textSecondary
+  },
+  modalContent: {
+    flex: 1,
+    overflowY: 'auto',
+    padding: '24px'
+  },
+  modalResultItem: {
+    background: brandColors.lightBg,
+    border: `2px solid ${brandColors.border}`,
+    borderRadius: '10px',
+    padding: '20px',
+    marginBottom: '16px',
+    transition: 'all 0.3s ease'
+  },
+  modalResultHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '16px'
+  },
+  modalStudentInfo: {
+    flex: 1
+  },
+  modalScoreInfo: {
+    fontSize: '14px',
+    color: brandColors.textSecondary,
+    marginTop: '4px'
+  },
+  modalPercentage: {
+    marginLeft: '8px',
+    fontWeight: '600'
+  },
+  modalResultActions: {
+    display: 'flex',
+    gap: '10px'
+  },
+  modalResultFooter: {
+    marginTop: '16px',
+    paddingTop: '16px',
+    borderTop: `1px solid ${brandColors.border}`
+  },
+  questionAnalysis: {
+    marginTop: '20px',
+    padding: '20px',
+    background: 'white',
+    borderRadius: '8px',
+    border: `1px solid ${brandColors.border}`
+  },
+  questionsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
+    gap: '12px',
+    marginTop: '16px'
+  },
+  questionCard: {
+    padding: '16px',
+    borderRadius: '8px',
+    borderLeft: `4px solid ${brandColors.border}`
+  },
+  questionHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '8px'
+  },
+  questionNumber: {
+    fontWeight: '600',
+    color: brandColors.textPrimary
+  },
+  questionStatus: {
+    fontSize: '11px',
+    padding: '3px 8px',
+    borderRadius: '4px',
+    fontWeight: '600'
+  },
+  questionText: {
+    fontSize: '12px',
+    color: brandColors.textSecondary,
+    marginBottom: '12px',
+    lineHeight: '1.4'
+  },
+  questionAnswers: {
+    fontSize: '11px'
+  },
+  answerRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    marginBottom: '4px'
+  },
+  answerLabel: {
+    color: brandColors.textMuted
+  },
+  answerValue: {
+    fontWeight: '600'
+  },
+  modalEditor: {
+    padding: '20px 24px',
+    background: brandColors.lightBg,
+    borderTop: `2px solid ${brandColors.border}`
+  },
+  editorInfo: {
+    marginBottom: '12px',
+    color: brandColors.textPrimary,
+    fontSize: '14px'
+  },
+  editorControls: {
+    display: 'flex',
+    gap: '12px',
+    alignItems: 'center'
+  },
+  modalScoreInput: {
+    padding: '10px 14px',
+    border: `2px solid ${brandColors.border}`,
+    borderRadius: '8px',
+    fontSize: '14px',
+    width: '100px',
+    background: 'white',
+    color: brandColors.textPrimary
+  },
+  accessDeniedContainer: {
+    minHeight: '100vh',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+  },
+  accessDeniedCard: {
+    background: 'rgba(255, 255, 255, 0.95)',
+    color: brandColors.danger,
+    padding: '40px',
+    borderRadius: '20px',
+    textAlign: 'center',
+    boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+    maxWidth: '400px',
+    width: '90%'
+  }
+};
+
+// Add CSS animation for spinner
+const styleSheet = document.styleSheets[0];
+styleSheet.insertRule(`
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+`, styleSheet.cssRules.length);
+
+// Add hover effects for buttons
+const addButtonHoverEffects = () => {
+  const buttonStyles = {
+    '.btn-primary:hover': {
+      background: '#3a431a',
+      transform: 'translateY(-1px)',
+      boxShadow: '0 4px 12px rgba(75, 83, 32, 0.2)'
+    },
+    '.btn-secondary:hover': {
+      background: brandColors.border,
+      transform: 'translateY(-1px)'
+    },
+    '.btn-success:hover': {
+      background: '#3d8b40',
+      transform: 'translateY(-1px)',
+      boxShadow: '0 4px 12px rgba(69, 160, 73, 0.3)'
+    },
+    '.btn-warning:hover': {
+      background: '#cc8400',
+      transform: 'translateY(-1px)',
+      boxShadow: '0 4px 12px rgba(255, 165, 0, 0.3)'
+    },
+    '.btn-danger:hover': {
+      background: '#d32f2f',
+      transform: 'translateY(-1px)',
+      boxShadow: '0 4px 12px rgba(244, 67, 54, 0.3)'
+    },
+    '.result-card:hover': {
+      borderColor: brandColors.armyGreen,
+      boxShadow: '0 8px 16px rgba(0,0,0,0.1)',
+      transform: 'translateY(-2px)'
+    },
+    '.stat-card:hover': {
+      transform: 'translateY(-2px)',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+    },
+    '.modal-result-item:hover': {
+      borderColor: brandColors.armyGreen,
+      boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
+    },
+    '.back-button:hover': {
+      background: '#ff8c00',
+      transform: 'translateY(-1px)',
+      boxShadow: '0 4px 12px rgba(255, 165, 0, 0.3)'
+    }
+  };
+
+  Object.entries(buttonStyles).forEach(([selector, styles]) => {
+    const rule = `${selector} { ${Object.entries(styles).map(([prop, value]) => `${prop}: ${value}`).join('; ')} }`;
+    styleSheet.insertRule(rule, styleSheet.cssRules.length);
+  });
+};
+
+// Initialize hover effects
+addButtonHoverEffects();
 
 export default EditResults;

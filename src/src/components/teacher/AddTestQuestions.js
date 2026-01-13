@@ -6,7 +6,7 @@ import {
   FiPlus, FiRefreshCw, FiFileText, FiList,
   FiCheck, FiClock, FiHash, FiBook, FiUsers,
   FiSearch, FiFilter, FiMaximize2, FiMinimize2,
-  FiChevronLeft, FiChevronRight
+  FiChevronLeft, FiChevronRight, FiArrowUp, FiArrowDown
 } from 'react-icons/fi';
 
 const AddTestQuestions = () => {
@@ -26,7 +26,9 @@ const AddTestQuestions = () => {
   const [filterType, setFilterType] = useState('all');
   const [viewMode, setViewMode] = useState('grid');
   const [currentPage, setCurrentPage] = useState(1);
-  const questionsPerPage = 12;
+  const [isScrolled, setIsScrolled] = useState(false);
+  const [showCompactHeader, setShowCompactHeader] = useState(false);
+  const questionsPerPage = 24; // Increased from 12 to 24
 
   // Brand colors
   const brandColors = {
@@ -188,6 +190,18 @@ const AddTestQuestions = () => {
     setCurrentPage(1);
   }, [questions, searchTerm, filterType]);
 
+  // Handle scroll events for sticky header
+  useEffect(() => {
+    const handleScroll = () => {
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      setIsScrolled(scrollTop > 100);
+      setShowCompactHeader(scrollTop > 200);
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
   // Calculate pagination
   const indexOfLastQuestion = currentPage * questionsPerPage;
   const indexOfFirstQuestion = indexOfLastQuestion - questionsPerPage;
@@ -334,13 +348,23 @@ const AddTestQuestions = () => {
   const requiredMarks = getRequiredMarks();
   const progress = Math.min(100, (totalMarks / requiredMarks) * 100);
 
+  // Scroll to top
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Scroll to bottom
+  const scrollToBottom = () => {
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  };
+
   // Styles
   const styles = {
     container: {
       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
       backgroundColor: brandColors.background,
       minHeight: '100vh',
-      padding: '20px'
+      paddingTop: '80px', // Add padding for fixed header
     },
 
     loadingContainer: {
@@ -367,13 +391,105 @@ const AddTestQuestions = () => {
       fontSize: '14px'
     },
 
+    // Main header (original position)
     header: {
       backgroundColor: brandColors.card,
       borderRadius: '12px',
       padding: '24px',
-      marginBottom: '20px',
+      margin: '20px',
       boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
-      border: `1px solid ${brandColors.border}`
+      border: `1px solid ${brandColors.border}`,
+      position: 'relative',
+      zIndex: 10
+    },
+
+    // Compact header (sticky when scrolling)
+    stickyHeader: {
+      position: 'fixed',
+      top: '0',
+      left: '0',
+      right: '0',
+      backgroundColor: brandColors.card,
+      borderBottom: `1px solid ${brandColors.border}`,
+      padding: showCompactHeader ? '12px 20px' : '16px 20px',
+      zIndex: 1000,
+      boxShadow: isScrolled ? '0 2px 8px rgba(0, 0, 0, 0.1)' : 'none',
+      transition: 'all 0.3s ease',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between'
+    },
+
+    compactHeaderContent: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '16px',
+      flex: 1,
+      overflow: 'hidden'
+    },
+
+    compactHeaderLeft: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '12px',
+      minWidth: '0'
+    },
+
+    compactIcon: {
+      fontSize: '20px',
+      color: brandColors.primary,
+      flexShrink: 0
+    },
+
+    compactTitle: {
+      fontSize: showCompactHeader ? '14px' : '16px',
+      fontWeight: '600',
+      color: brandColors.text,
+      margin: '0',
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis'
+    },
+
+    compactInfo: {
+      fontSize: '12px',
+      color: brandColors.textLight,
+      margin: '0',
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis'
+    },
+
+    compactProgress: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '12px',
+      marginLeft: '20px',
+      minWidth: '200px'
+    },
+
+    compactProgressBar: {
+      flex: 1,
+      height: '6px',
+      backgroundColor: brandColors.border,
+      borderRadius: '3px',
+      overflow: 'hidden',
+      minWidth: '100px'
+    },
+
+    compactProgressFill: {
+      height: '100%',
+      width: `${progress}%`,
+      backgroundColor: progress === 100 ? brandColors.success : brandColors.primary,
+      borderRadius: '3px',
+      transition: 'width 0.3s ease'
+    },
+
+    compactProgressText: {
+      fontSize: '12px',
+      fontWeight: '600',
+      color: brandColors.primary,
+      whiteSpace: 'nowrap'
     },
 
     headerContent: {
@@ -440,7 +556,7 @@ const AddTestQuestions = () => {
 
     infoGrid: {
       display: 'grid',
-      gridTemplateColumns: 'repeat(2, 1fr)',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
       gap: '12px'
     },
 
@@ -452,12 +568,17 @@ const AddTestQuestions = () => {
       color: brandColors.text
     },
 
+    // Progress section (sticky)
     progressSection: {
       backgroundColor: brandColors.card,
       borderRadius: '12px',
       padding: '20px',
-      marginBottom: '20px',
-      border: `1px solid ${brandColors.border}`
+      margin: '0 20px 20px 20px',
+      border: `1px solid ${brandColors.border}`,
+      position: 'sticky',
+      top: isScrolled ? (showCompactHeader ? '52px' : '60px') : '80px',
+      zIndex: 50,
+      boxShadow: isScrolled ? '0 4px 6px rgba(0, 0, 0, 0.05)' : 'none'
     },
 
     progressHeader: {
@@ -529,7 +650,7 @@ const AddTestQuestions = () => {
       color: brandColors.error,
       borderRadius: '8px',
       padding: '16px',
-      marginBottom: '20px',
+      margin: '0 20px 20px 20px',
       display: 'flex',
       alignItems: 'center',
       gap: '12px',
@@ -542,7 +663,7 @@ const AddTestQuestions = () => {
       color: brandColors.success,
       borderRadius: '8px',
       padding: '16px',
-      marginBottom: '20px',
+      margin: '0 20px 20px 20px',
       display: 'flex',
       alignItems: 'center',
       gap: '12px',
@@ -552,19 +673,28 @@ const AddTestQuestions = () => {
     mainContent: {
       display: 'flex',
       flexDirection: 'row',
-      gap: '20px'
+      gap: '20px',
+      margin: '0 20px',
+      minHeight: 'calc(100vh - 300px)'
     },
 
     questionsPanel: {
       backgroundColor: brandColors.card,
       borderRadius: '12px',
-      padding: '24px',
+      padding: '20px',
       border: `1px solid ${brandColors.border}`,
-      flex: 2
+      flex: 3, // Increased from 2 to 3
+      minHeight: '600px',
+      overflow: 'auto'
     },
 
     panelHeader: {
-      marginBottom: '24px'
+      marginBottom: '20px',
+      position: 'sticky',
+      top: '0',
+      backgroundColor: brandColors.card,
+      padding: '10px 0',
+      zIndex: 5
     },
 
     panelTitle: {
@@ -585,7 +715,8 @@ const AddTestQuestions = () => {
       flexDirection: 'row',
       alignItems: 'center',
       gap: '12px',
-      marginTop: '16px'
+      marginTop: '16px',
+      flexWrap: 'wrap'
     },
 
     searchBox: {
@@ -594,8 +725,9 @@ const AddTestQuestions = () => {
       backgroundColor: brandColors.background,
       border: `1px solid ${brandColors.border}`,
       borderRadius: '8px',
-      padding: '10px 12px',
-      flex: 1
+      padding: '8px 12px',
+      flex: 1,
+      minWidth: '200px'
     },
 
     searchInput: {
@@ -617,8 +749,8 @@ const AddTestQuestions = () => {
       backgroundColor: brandColors.background,
       border: `1px solid ${brandColors.border}`,
       borderRadius: '8px',
-      padding: '10px 12px',
-      minWidth: '150px'
+      padding: '8px 12px',
+      minWidth: '120px'
     },
 
     filterSelect: {
@@ -644,7 +776,7 @@ const AddTestQuestions = () => {
       backgroundColor: active ? brandColors.primary : 'transparent',
       color: active ? '#FFFFFF' : brandColors.textLight,
       border: 'none',
-      padding: '10px',
+      padding: '8px 12px',
       cursor: 'pointer',
       display: 'flex',
       alignItems: 'center',
@@ -659,7 +791,7 @@ const AddTestQuestions = () => {
       backgroundColor: brandColors.background,
       color: brandColors.primary,
       border: `1px solid ${brandColors.border}`,
-      padding: '10px',
+      padding: '8px',
       borderRadius: '8px',
       cursor: 'pointer',
       display: 'flex',
@@ -675,7 +807,7 @@ const AddTestQuestions = () => {
       backgroundColor: brandColors.primary,
       color: '#FFFFFF',
       border: 'none',
-      padding: '10px 16px',
+      padding: '8px 16px',
       borderRadius: '8px',
       cursor: 'pointer',
       fontWeight: '500',
@@ -691,7 +823,12 @@ const AddTestQuestions = () => {
 
     emptyState: {
       textAlign: 'center',
-      padding: '60px 20px'
+      padding: '60px 20px',
+      minHeight: '300px',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center'
     },
 
     emptyIcon: {
@@ -719,22 +856,27 @@ const AddTestQuestions = () => {
       }
     },
 
+    // Compact question grid with more columns
     questionsGrid: {
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-      gap: '16px',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+      gap: '12px',
       marginBottom: '24px'
     },
 
+    // Compact question card
     questionCard: (isSelected) => ({
       backgroundColor: isSelected ? '#F0F4F8' : brandColors.card,
       border: `2px solid ${isSelected ? brandColors.primary : brandColors.border}`,
       borderRadius: '8px',
-      padding: '16px',
+      padding: '12px',
       cursor: 'pointer',
       transition: 'all 0.2s',
       position: 'relative',
       zIndex: 1,
+      height: '180px', // Fixed height for consistency
+      display: 'flex',
+      flexDirection: 'column',
       '&:hover': {
         borderColor: brandColors.primary,
         boxShadow: `0 2px 8px rgba(75, 83, 32, 0.1)`
@@ -742,8 +884,8 @@ const AddTestQuestions = () => {
     }),
 
     selectionIndicator: (isSelected) => ({
-      width: '24px',
-      height: '24px',
+      width: '20px',
+      height: '20px',
       borderRadius: '50%',
       backgroundColor: isSelected ? brandColors.primary : brandColors.card,
       border: `2px solid ${isSelected ? brandColors.primary : brandColors.border}`,
@@ -751,78 +893,93 @@ const AddTestQuestions = () => {
       alignItems: 'center',
       justifyContent: 'center',
       color: '#FFFFFF',
-      fontSize: '12px',
+      fontSize: '10px',
       position: 'absolute',
-      top: '16px',
-      right: '16px'
+      top: '12px',
+      right: '12px',
+      flexShrink: 0
     }),
 
     questionContent: {
-      marginTop: '8px'
+      marginTop: '4px',
+      flex: 1,
+      display: 'flex',
+      flexDirection: 'column',
+      minHeight: 0
     },
 
     questionHeader: {
       display: 'flex',
       justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: '12px'
+      alignItems: 'flex-start',
+      marginBottom: '8px',
+      gap: '8px'
     },
 
     questionNumber: {
-      fontSize: '12px',
+      fontSize: '11px',
       fontWeight: '600',
-      color: brandColors.textLight
+      color: brandColors.textLight,
+      flexShrink: 0
     },
 
     questionMeta: {
       display: 'flex',
-      gap: '8px'
+      gap: '4px',
+      flexWrap: 'wrap',
+      justifyContent: 'flex-end'
     },
 
     questionType: (type) => ({
-      fontSize: '11px',
+      fontSize: '10px',
       fontWeight: '500',
       color: '#6B7280',
       backgroundColor: '#F3F4F6',
-      padding: '2px 8px',
-      borderRadius: '12px',
-      textTransform: 'uppercase'
+      padding: '2px 6px',
+      borderRadius: '10px',
+      textTransform: 'uppercase',
+      lineHeight: '1'
     }),
 
     questionDifficulty: (difficulty) => ({
-      fontSize: '11px',
+      fontSize: '10px',
       fontWeight: '500',
       color: difficulty === 'Hard' ? '#DC2626' : 
              difficulty === 'Easy' ? '#10B981' : '#D97706',
       backgroundColor: difficulty === 'Hard' ? '#FEF2F2' : 
                       difficulty === 'Easy' ? '#D1FAE5' : '#FEF3C7',
-      padding: '2px 8px',
-      borderRadius: '12px'
+      padding: '2px 6px',
+      borderRadius: '10px',
+      lineHeight: '1'
     }),
 
     questionText: {
-      fontSize: '14px',
+      fontSize: '13px',
       color: brandColors.text,
-      lineHeight: '1.5',
-      margin: '0 0 12px 0',
-      minHeight: '40px'
+      lineHeight: '1.4',
+      margin: '0 0 8px 0',
+      flex: 1,
+      overflow: 'hidden',
+      display: '-webkit-box',
+      WebkitLineClamp: '2',
+      WebkitBoxOrient: 'vertical'
     },
 
     optionPreview: {
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
-      marginBottom: '4px'
+      gap: '6px',
+      marginBottom: '3px'
     },
 
     optionLetter: {
-      fontSize: '11px',
+      fontSize: '10px',
       fontWeight: '600',
       color: brandColors.primary,
       backgroundColor: '#F0F4F8',
-      width: '18px',
-      height: '18px',
-      borderRadius: '4px',
+      width: '16px',
+      height: '16px',
+      borderRadius: '3px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -830,29 +987,34 @@ const AddTestQuestions = () => {
     },
 
     optionText: {
-      fontSize: '12px',
+      fontSize: '11px',
       color: brandColors.textLight,
-      flex: 1
+      flex: 1,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap'
     },
 
     questionFooter: {
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
-      paddingTop: '12px',
+      paddingTop: '8px',
+      marginTop: '8px',
       borderTop: '1px solid #F3F4F6',
-      marginTop: '12px'
+      flexShrink: 0
     },
 
     correctAnswer: {
       display: 'flex',
       alignItems: 'center',
       gap: '4px',
-      fontSize: '12px',
+      fontSize: '11px',
       color: brandColors.textLight,
       '& strong': {
         color: '#059669',
-        marginLeft: '4px'
+        marginLeft: '2px',
+        fontSize: '11px'
       }
     },
 
@@ -863,11 +1025,11 @@ const AddTestQuestions = () => {
     },
 
     marksInput: {
-      width: '50px',
-      padding: '4px 8px',
+      width: '45px',
+      padding: '3px 6px',
       border: `1px solid ${brandColors.border}`,
       borderRadius: '4px',
-      fontSize: '12px',
+      fontSize: '11px',
       textAlign: 'center',
       outline: 'none',
       '&:focus': {
@@ -876,36 +1038,42 @@ const AddTestQuestions = () => {
     },
 
     marksLabel: {
-      fontSize: '11px',
+      fontSize: '10px',
       color: brandColors.textLight
     },
 
     marksStatic: {
-      fontSize: '12px',
-      color: brandColors.textLight
+      fontSize: '11px',
+      color: brandColors.textLight,
+      whiteSpace: 'nowrap'
     },
 
     pagination: {
       display: 'flex',
       justifyContent: 'center',
       alignItems: 'center',
-      gap: '16px',
-      marginTop: '24px',
-      paddingTop: '24px',
-      borderTop: `1px solid ${brandColors.border}`
+      gap: '12px',
+      marginTop: '20px',
+      paddingTop: '20px',
+      borderTop: `1px solid ${brandColors.border}`,
+      position: 'sticky',
+      bottom: '0',
+      backgroundColor: brandColors.card,
+      paddingBottom: '10px',
+      zIndex: 5
     },
 
     pageButton: {
       backgroundColor: brandColors.background,
       color: brandColors.text,
       border: `1px solid ${brandColors.border}`,
-      padding: '8px 16px',
+      padding: '6px 12px',
       borderRadius: '6px',
       cursor: 'pointer',
-      fontSize: '14px',
+      fontSize: '13px',
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
+      gap: '6px',
       transition: 'all 0.2s',
       '&:hover:not(:disabled)': {
         backgroundColor: brandColors.border
@@ -918,18 +1086,18 @@ const AddTestQuestions = () => {
 
     pageNumbers: {
       display: 'flex',
-      gap: '4px'
+      gap: '3px'
     },
 
     pageNumber: (active) => ({
       backgroundColor: active ? brandColors.primary : 'transparent',
       color: active ? '#FFFFFF' : brandColors.text,
       border: `1px solid ${active ? brandColors.primary : brandColors.border}`,
-      width: '36px',
-      height: '36px',
+      width: '32px',
+      height: '32px',
       borderRadius: '6px',
       cursor: 'pointer',
-      fontSize: '14px',
+      fontSize: '13px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -940,32 +1108,40 @@ const AddTestQuestions = () => {
     }),
 
     summaryPanel: {
-      width: '400px'
+      width: '350px',
+      flexShrink: 0
     },
 
     summaryCard: {
       backgroundColor: brandColors.card,
       borderRadius: '12px',
-      padding: '24px',
+      padding: '20px',
       border: `1px solid ${brandColors.border}`,
       position: 'sticky',
-      top: '20px'
+      top: isScrolled ? (showCompactHeader ? '52px' : '60px') : '80px',
+      maxHeight: 'calc(100vh - 100px)',
+      overflow: 'auto',
+      zIndex: 50
     },
 
     summaryTitle: {
-      fontSize: '18px',
+      fontSize: '16px',
       fontWeight: '600',
       color: brandColors.text,
-      margin: '0 0 24px 0',
+      margin: '0 0 20px 0',
       paddingBottom: '16px',
-      borderBottom: `1px solid ${brandColors.border}`
+      borderBottom: `1px solid ${brandColors.border}`,
+      position: 'sticky',
+      top: '0',
+      backgroundColor: brandColors.card,
+      zIndex: 2
     },
 
     summaryStats: {
       display: 'flex',
       flexDirection: 'column',
-      gap: '20px',
-      marginBottom: '24px'
+      gap: '16px',
+      marginBottom: '20px'
     },
 
     statItem: {
@@ -975,21 +1151,21 @@ const AddTestQuestions = () => {
     },
 
     statCircle: (isComplete) => ({
-      width: '48px',
-      height: '48px',
+      width: '40px',
+      height: '40px',
       borderRadius: '50%',
       backgroundColor: isComplete ? '#D1FAE5' : '#F0F4F8',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      fontSize: '18px',
+      fontSize: '16px',
       fontWeight: '700',
       color: isComplete ? '#059669' : brandColors.primary,
       flexShrink: 0
     }),
 
     statLabel: {
-      fontSize: '14px',
+      fontSize: '13px',
       fontWeight: '600',
       color: brandColors.text,
       margin: '0 0 2px 0'
@@ -1002,42 +1178,47 @@ const AddTestQuestions = () => {
     },
 
     selectionList: {
-      marginBottom: '24px'
+      marginBottom: '20px',
+      flex: 1,
+      minHeight: '200px'
     },
 
     selectionTitle: {
       fontSize: '14px',
       fontWeight: '600',
       color: brandColors.text,
-      margin: '0 0 16px 0'
+      margin: '0 0 12px 0'
     },
 
     emptySelection: {
       textAlign: 'center',
-      padding: '24px',
+      padding: '20px',
       backgroundColor: brandColors.background,
       borderRadius: '8px',
       '& p': {
-        fontSize: '14px',
+        fontSize: '13px',
         color: brandColors.textLight,
         margin: '0 0 4px 0',
         '&:last-child': {
-          fontSize: '12px',
+          fontSize: '11px',
           color: '#9CA3AF'
         }
       }
     },
 
     selectedQuestionsList: {
-      maxHeight: '300px',
-      overflowY: 'auto'
+      maxHeight: '200px',
+      overflowY: 'auto',
+      backgroundColor: brandColors.background,
+      borderRadius: '8px',
+      padding: '4px'
     },
 
     selectedQuestionItem: {
       display: 'flex',
       alignItems: 'flex-start',
-      gap: '12px',
-      padding: '12px',
+      gap: '8px',
+      padding: '8px',
       borderBottom: `1px solid ${brandColors.border}`,
       '&:last-child': {
         borderBottom: 'none'
@@ -1047,13 +1228,13 @@ const AddTestQuestions = () => {
     selectedNumber: {
       backgroundColor: brandColors.primary,
       color: '#FFFFFF',
-      width: '24px',
-      height: '24px',
-      borderRadius: '6px',
+      width: '22px',
+      height: '22px',
+      borderRadius: '5px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      fontSize: '12px',
+      fontSize: '11px',
       fontWeight: '600',
       flexShrink: 0
     },
@@ -1062,29 +1243,35 @@ const AddTestQuestions = () => {
       flex: 1,
       display: 'flex',
       justifyContent: 'space-between',
-      alignItems: 'center'
+      alignItems: 'center',
+      gap: '8px'
     },
 
     selectedText: {
-      fontSize: '13px',
+      fontSize: '12px',
       color: brandColors.primary,
       flex: 1,
-      marginRight: '12px',
-      lineHeight: '1.4'
+      marginRight: '8px',
+      lineHeight: '1.4',
+      overflow: 'hidden',
+      display: '-webkit-box',
+      WebkitLineClamp: '2',
+      WebkitBoxOrient: 'vertical'
     },
 
     selectedMarks: {
       display: 'flex',
       alignItems: 'center',
-      gap: '4px'
+      gap: '4px',
+      flexShrink: 0
     },
 
     smallMarksInput: {
-      width: '40px',
-      padding: '4px',
+      width: '35px',
+      padding: '3px',
       border: `1px solid ${brandColors.border}`,
       borderRadius: '4px',
-      fontSize: '12px',
+      fontSize: '11px',
       textAlign: 'center',
       outline: 'none',
       '&:focus': {
@@ -1096,7 +1283,7 @@ const AddTestQuestions = () => {
       backgroundColor: brandColors.background,
       borderRadius: '8px',
       padding: '16px',
-      marginBottom: '24px'
+      marginBottom: '20px'
     },
 
     requirementsTitle: {
@@ -1114,10 +1301,10 @@ const AddTestQuestions = () => {
     },
 
     requirementItem: (isMet) => ({
-      fontSize: '13px',
+      fontSize: '12px',
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
+      gap: '6px',
       marginBottom: '6px',
       color: isMet ? '#059669' : brandColors.textLight
     }),
@@ -1126,7 +1313,7 @@ const AddTestQuestions = () => {
       backgroundColor: isReady ? brandColors.primary : brandColors.border,
       color: isReady ? '#FFFFFF' : brandColors.textLight,
       border: 'none',
-      padding: '14px',
+      padding: '12px',
       borderRadius: '8px',
       cursor: isReady ? 'pointer' : 'not-allowed',
       fontWeight: '500',
@@ -1149,6 +1336,59 @@ const AddTestQuestions = () => {
       borderTop: '2px solid #FFFFFF',
       borderRadius: '50%',
       animation: 'spin 1s linear infinite'
+    },
+
+    // Scroll buttons
+    scrollButtons: {
+      position: 'fixed',
+      right: '20px',
+      bottom: '20px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '10px',
+      zIndex: 1000
+    },
+
+    scrollButton: {
+      backgroundColor: brandColors.primary,
+      color: '#FFFFFF',
+      border: 'none',
+      width: '40px',
+      height: '40px',
+      borderRadius: '50%',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '18px',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+      transition: 'all 0.2s',
+      '&:hover': {
+        backgroundColor: brandColors.primaryDark,
+        transform: 'translateY(-2px)'
+      }
+    },
+
+    quickNav: {
+      display: 'flex',
+      gap: '8px',
+      marginTop: '12px',
+      flexWrap: 'wrap'
+    },
+
+    quickNavButton: {
+      backgroundColor: brandColors.background,
+      color: brandColors.textLight,
+      border: `1px solid ${brandColors.border}`,
+      padding: '4px 8px',
+      borderRadius: '4px',
+      cursor: 'pointer',
+      fontSize: '11px',
+      transition: 'all 0.2s',
+      '&:hover': {
+        backgroundColor: brandColors.border,
+        color: brandColors.text
+      }
     }
   };
 
@@ -1164,7 +1404,42 @@ const AddTestQuestions = () => {
 
   return (
     <div style={styles.container}>
-      {/* Header */}
+      {/* Sticky Compact Header */}
+      {isScrolled && (
+        <div style={styles.stickyHeader}>
+          <div style={styles.compactHeaderContent}>
+            <div style={styles.compactHeaderLeft}>
+              <FiFileText style={styles.compactIcon} />
+              <div style={{ minWidth: '0' }}>
+                <h3 style={styles.compactTitle}>{test?.title || 'Add Questions'}</h3>
+                <p style={styles.compactInfo}>
+                  {test?.subject} • {test?.className} • {selectedQuestions.length} questions selected
+                </p>
+              </div>
+            </div>
+            <div style={styles.compactProgress}>
+              <div style={styles.compactProgressBar}>
+                <div style={styles.compactProgressFill} />
+              </div>
+              <span style={styles.compactProgressText}>
+                {totalMarks}/{requiredMarks} marks
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={() => navigate('/teacher/tests')}
+            style={{
+              ...styles.secondaryButton,
+              padding: '6px 12px',
+              fontSize: '12px'
+            }}
+          >
+            <FiX /> Cancel
+          </button>
+        </div>
+      )}
+
+      {/* Main Header */}
       <div style={styles.header}>
         <div style={styles.headerContent}>
           <div style={styles.headerLeft}>
@@ -1207,7 +1482,7 @@ const AddTestQuestions = () => {
         )}
       </div>
 
-      {/* Progress Bar */}
+      {/* Sticky Progress Bar */}
       <div style={styles.progressSection}>
         <div style={styles.progressHeader}>
           <div>
@@ -1259,11 +1534,34 @@ const AddTestQuestions = () => {
             <div>
               <h3 style={styles.panelTitle}>Available Questions</h3>
               <p style={styles.panelSubtitle}>
-                {filteredQuestions.length} questions • Page {currentPage} of {totalPages}
+                {filteredQuestions.length} questions • Page {currentPage} of {totalPages} • Showing {questionsPerPage} per page
                 <span style={{ color: brandColors.primary, marginLeft: '10px' }}>
                   Select questions that total {requiredMarks} marks
                 </span>
               </p>
+            </div>
+            
+            {/* Quick Navigation */}
+            <div style={styles.quickNav}>
+              <button 
+                onClick={() => setFilterType('all')}
+                style={styles.quickNavButton}
+              >
+                All Types
+              </button>
+              {questionTypes.filter(t => t !== 'all').map(type => (
+                <button
+                  key={type}
+                  onClick={() => setFilterType(type)}
+                  style={{
+                    ...styles.quickNavButton,
+                    backgroundColor: filterType === type ? brandColors.primary : styles.quickNavButton.backgroundColor,
+                    color: filterType === type ? '#FFFFFF' : styles.quickNavButton.color
+                  }}
+                >
+                  {type}
+                </button>
+              ))}
             </div>
             
             {/* Controls */}
@@ -1389,8 +1687,8 @@ const AddTestQuestions = () => {
                         </div>
 
                         <p style={styles.questionText}>
-                          {question.text?.substring(0, 100)}
-                          {question.text?.length > 100 ? '...' : ''}
+                          {question.text?.substring(0, 120)}
+                          {question.text?.length > 120 ? '...' : ''}
                         </p>
 
                         {question.options?.slice(0, 2).map((opt, idx) => (
@@ -1399,15 +1697,15 @@ const AddTestQuestions = () => {
                               {String.fromCharCode(65 + idx)}
                             </span>
                             <span style={styles.optionText}>
-                              {opt.substring(0, 30)}
-                              {opt.length > 30 ? '...' : ''}
+                              {opt.substring(0, 40)}
+                              {opt.length > 40 ? '...' : ''}
                             </span>
                           </div>
                         ))}
 
                         <div style={styles.questionFooter}>
                           <div style={styles.correctAnswer}>
-                            <span>Answer:</span>
+                            <span>Ans:</span>
                             <strong>{question.correctAnswer}</strong>
                           </div>
                           
@@ -1422,11 +1720,11 @@ const AddTestQuestions = () => {
                                 onClick={(e) => e.stopPropagation()}
                                 style={styles.marksInput}
                               />
-                              <span style={styles.marksLabel}>marks</span>
+                              <span style={styles.marksLabel}>pts</span>
                             </div>
                           ) : (
                             <div style={styles.marksStatic}>
-                              <span>1 mark</span>
+                              <span>1 pt</span>
                             </div>
                           )}
                         </div>
@@ -1540,8 +1838,8 @@ const AddTestQuestions = () => {
                         </div>
                         <div style={styles.selectedContent}>
                           <p style={styles.selectedText}>
-                            {question?.text?.substring(0, 50)}
-                            {question?.text?.length > 50 ? '...' : ''}
+                            {question?.text?.substring(0, 60)}
+                            {question?.text?.length > 60 ? '...' : ''}
                           </p>
                           <div style={styles.selectedMarks}>
                             <input
@@ -1552,7 +1850,7 @@ const AddTestQuestions = () => {
                               onChange={(e) => handleMarkChange(qId, e.target.value)}
                               style={styles.smallMarksInput}
                             />
-                            <span>marks</span>
+                            <span style={{ fontSize: '11px' }}>pts</span>
                           </div>
                         </div>
                       </div>
@@ -1607,6 +1905,16 @@ const AddTestQuestions = () => {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Scroll Buttons */}
+      <div style={styles.scrollButtons}>
+        <button onClick={scrollToTop} style={styles.scrollButton} title="Scroll to top">
+          <FiArrowUp />
+        </button>
+        <button onClick={scrollToBottom} style={styles.scrollButton} title="Scroll to bottom">
+          <FiArrowDown />
+        </button>
       </div>
     </div>
   );

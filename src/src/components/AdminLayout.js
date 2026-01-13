@@ -130,8 +130,8 @@ const AdminLayout = ({ children }) => {
         <div style={styles.headerContent}>
           <div style={styles.headerLeft}>
             <img
-              src="/uploads/sanni.png"
-              alt="Sanniville Academy"
+              src="../uploads/syntra.jpeg"
+              alt="Syntra Logo"
               style={styles.logo}
               onError={(e) => {
                 e.target.onerror = null;
@@ -332,6 +332,7 @@ const styles = {
     fontSize: '24px',
     fontWeight: '600',
     margin: 0,
+    color: '#FFFFFF',
   },
   headerSubtitle: {
     display: 'block',

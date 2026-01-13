@@ -715,9 +715,7 @@ const ManageTests = () => {
     });
   };
 
-  const handleEditTest = (testId) => {
-    navigate(`/admin/tests/${testId}/edit`);
-  };
+
 
   const filteredTests = tests.filter(test => {
     const matchesSearch = test.title?.toLowerCase().includes(search.toLowerCase()) || 
@@ -1745,28 +1743,7 @@ const ManageTests = () => {
                         <FiBarChart /> Results
                       </button>
 
-                      {/* EDIT Button */}
-                      {canEdit && (
-                        <button
-                          onClick={() => handleEditTest(test._id)}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '8px',
-                            padding: '8px 16px',
-                            backgroundColor: '#17a2b8',
-                            color: '#FFFFFF',
-                            border: 'none',
-                            borderRadius: '6px',
-                            cursor: 'pointer',
-                            fontSize: '14px',
-                            fontWeight: '500'
-                          }}
-                        >
-                          <FiEdit /> Edit Test
-                        </button>
-                      )}
+                    
 
                       {/* DELETE Button */}
                       {canDelete && (

@@ -36,8 +36,8 @@ const COLORS = {
   darkGray: '#374151',
   dark: '#111827',
   border: '#E5E7EB',
-  shadow: 'rgba(0, 0, 0, 0.1)',
-  overlay: 'rgba(0, 0, 0, 0.5)',
+  shadow: 'rgba(0, 0, 0, 0.08)',
+  overlay: 'rgba(0, 0, 0, 0.45)',
 };
 
 const TestTaking = () => {
@@ -183,7 +183,7 @@ const TestTaking = () => {
     const checkLayout = () => {
       if (questionBodyRef.current) {
         const questionHeight = questionBodyRef.current.scrollHeight;
-        const containerHeight = window.innerHeight - 180; // Account for header/footer
+        const containerHeight = window.innerHeight - 140; // Further reduced from 160
         setCompactMode(questionHeight > containerHeight * 0.8);
       }
     };
@@ -391,7 +391,7 @@ const TestTaking = () => {
     }
   };
 
-  // Modern Styles
+  // Modern Styles - FURTHER REDUCED BY ~10% MORE (TOTAL ~20% REDUCTION)
   const styles = {
     container: {
       minHeight: '100vh',
@@ -399,6 +399,7 @@ const TestTaking = () => {
       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       display: 'flex',
       flexDirection: 'column',
+      fontSize: '81%', // Further reduced from 90% (81% of original)
     },
 
     // Loading Screen
@@ -414,21 +415,21 @@ const TestTaking = () => {
       color: COLORS.white,
     },
     spinner: {
-      width: '60px',
-      height: '60px',
-      border: '4px solid rgba(255,255,255,0.3)',
+      width: '50px', // Further reduced from 54px
+      height: '50px', // Further reduced from 54px
+      border: '2px solid rgba(255,255,255,0.3)', // Thinner border
       borderTopColor: COLORS.white,
       borderRadius: '50%',
       animation: 'spin 1s linear infinite',
-      margin: '0 auto 24px',
+      margin: '0 auto 1px', // Further reduced
     },
     loadingTitle: {
-      fontSize: '20px',
+      fontSize: '16px', // Further reduced from 18px
       fontWeight: '600',
-      marginBottom: '8px',
+      marginBottom: '5px', // Further reduced
     },
     loadingText: {
-      fontSize: '14px',
+      fontSize: '12px', // Further reduced from 13px
       opacity: 0.9,
     },
 
@@ -438,35 +439,35 @@ const TestTaking = () => {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: '24px',
+      padding: '18px', // Further reduced
     },
     errorCard: {
-      maxWidth: '500px',
-      padding: '32px',
+      maxWidth: '405px', // Further reduced from 450px
+      padding: '25px', // Further reduced from 28px
       backgroundColor: COLORS.white,
-      borderRadius: '16px',
-      boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
+      borderRadius: '13px', // Further reduced
+      boxShadow: '0 6px 24px rgba(0,0,0,0.07)', // Lighter shadow
       textAlign: 'center',
     },
     errorIcon: {
-      margin: '0 auto 20px',
+      margin: '0 auto 14px', // Further reduced
       color: COLORS.danger,
     },
     errorTitle: {
-      fontSize: '18px',
+      fontSize: '15px', // Further reduced from 16px
       fontWeight: '600',
       color: COLORS.danger,
-      marginBottom: '12px',
+      marginBottom: '9px', // Further reduced
     },
     errorMessage: {
       color: COLORS.gray,
-      marginBottom: '24px',
+      marginBottom: '18px', // Further reduced
       lineHeight: 1.5,
-      fontSize: '14px',
+      fontSize: '12px', // Further reduced
     },
     errorActions: {
       display: 'flex',
-      gap: '12px',
+      gap: '9px', // Further reduced
       justifyContent: 'center',
     },
 
@@ -474,9 +475,9 @@ const TestTaking = () => {
     studentProfile: {
       display: 'flex',
       alignItems: 'center',
-      gap: '12px',
-      padding: '6px 12px',
-      borderRadius: '8px',
+      gap: '9px', // Further reduced
+      padding: '4px 9px', // Further reduced
+      borderRadius: '6px', // Further reduced
       cursor: 'pointer',
       transition: 'all 0.2s',
       ':hover': {
@@ -488,15 +489,15 @@ const TestTaking = () => {
       flexShrink: 0,
     },
     studentAvatarImage: {
-      width: '36px',
-      height: '36px',
+      width: '29px', // Further reduced from 32px
+      height: '29px', // Further reduced from 32px
       borderRadius: '50%',
       objectFit: 'cover',
-      border: `2px solid ${COLORS.white}`,
+      border: `1px solid ${COLORS.white}`, // Thinner border
     },
     studentAvatarFallback: {
-      width: '36px',
-      height: '36px',
+      width: '29px', // Further reduced from 32px
+      height: '29px', // Further reduced from 32px
       borderRadius: '50%',
       backgroundColor: '#90EE90',
       color: COLORS.primary,
@@ -504,8 +505,8 @@ const TestTaking = () => {
       alignItems: 'center',
       justifyContent: 'center',
       fontWeight: '600',
-      fontSize: '14px',
-      border: `2px solid ${COLORS.white}`,
+      fontSize: '12px', // Further reduced
+      border: `1px solid ${COLORS.white}`, // Thinner border
     },
     studentInfo: {
       display: 'flex',
@@ -513,13 +514,13 @@ const TestTaking = () => {
       textAlign: 'left',
     },
     studentName: {
-      fontSize: '14px',
+      fontSize: '12px', // Further reduced
       fontWeight: '600',
       color: COLORS.white,
       whiteSpace: 'nowrap',
     },
     studentRole: {
-      fontSize: '12px',
+      fontSize: '10px', // Further reduced
       color: 'rgba(255, 255, 255, 0.8)',
       fontWeight: '400',
     },
@@ -536,51 +537,51 @@ const TestTaking = () => {
       alignItems: 'center',
       justifyContent: 'center',
       zIndex: 1000,
-      padding: '20px',
-      backdropFilter: 'blur(8px)',
+      padding: '14px', // Further reduced
+      backdropFilter: 'blur(5px)', // Further reduced
     },
     instructionsContent: {
-      maxWidth: '800px',
+      maxWidth: '648px', // Further reduced from 720px
       width: '100%',
-      maxHeight: '90vh',
+      maxHeight: '80vh', // Further reduced
       backgroundColor: COLORS.white,
-      borderRadius: '20px',
+      borderRadius: '16px', // Further reduced
       overflow: 'hidden',
-      boxShadow: '0 25px 50px rgba(0,0,0,0.15)',
+      boxShadow: '0 16px 32px rgba(0,0,0,0.1)', // Lighter shadow
       display: 'flex',
       flexDirection: 'column',
     },
     instructionsHeader: {
-      padding: '24px 32px',
+      padding: '18px 25px', // Further reduced
       background: `linear-gradient(135deg, ${COLORS.primary} 0%, ${COLORS.primaryDark} 100%)`,
       color: COLORS.white,
       flexShrink: 0,
     },
     instructionsTitle: {
-      fontSize: '22px', // Reduced from 28px
+      fontSize: '18px', // Further reduced from 20px
       fontWeight: '700',
-      marginBottom: '6px',
+      marginBottom: '4px',
     },
     instructionsSubtitle: {
-      fontSize: '14px', // Reduced from 16px
+      fontSize: '12px', // Further reduced
       opacity: 0.9,
     },
     instructionsBody: {
-      padding: '24px 32px',
+      padding: '18px 25px', // Further reduced
       overflowY: 'auto',
       flex: 1,
-      maxHeight: 'calc(90vh - 200px)',
+      maxHeight: 'calc(80vh - 160px)', // Adjusted
     },
     instructionsGrid: {
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-      gap: '16px',
-      marginBottom: '24px',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(144px, 1fr))', // Further reduced
+      gap: '13px', // Further reduced
+      marginBottom: '18px', // Further reduced
     },
     instructionCard: {
-      padding: '20px',
+      padding: '16px', // Further reduced
       backgroundColor: COLORS.lightGray,
-      borderRadius: '12px',
+      borderRadius: '10px', // Further reduced
       textAlign: 'center',
       transition: 'transform 0.2s',
       cursor: 'default',
@@ -589,69 +590,69 @@ const TestTaking = () => {
       },
     },
     instructionIcon: {
-      width: '48px',
-      height: '48px',
-      margin: '0 auto 12px',
+      width: '40px', // Further reduced
+      height: '40px', // Further reduced
+      margin: '0 auto 9px', // Further reduced
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       borderRadius: '50%',
-      fontSize: '20px',
+      fontSize: '16px', // Further reduced
     },
     instructionTitle: {
-      fontSize: '14px', // Reduced
+      fontSize: '12px', // Further reduced
       fontWeight: '600',
-      marginBottom: '6px',
+      marginBottom: '4px',
       color: COLORS.dark,
     },
     instructionText: {
-      fontSize: '13px', // Reduced
+      fontSize: '11px', // Further reduced
       color: COLORS.gray,
     },
     guidelinesSection: {
       backgroundColor: COLORS.lightGray,
-      padding: '20px',
-      borderRadius: '12px',
-      marginBottom: '20px',
+      padding: '16px', // Further reduced
+      borderRadius: '10px', // Further reduced
+      marginBottom: '16px', // Further reduced
     },
     guidelinesTitle: {
-      fontSize: '16px', // Reduced
+      fontSize: '14px', // Further reduced
       fontWeight: '600',
       color: COLORS.primary,
-      marginBottom: '12px',
+      marginBottom: '9px', // Further reduced
     },
     guidelinesList: {
       display: 'flex',
       flexDirection: 'column',
-      gap: '10px',
+      gap: '7px', // Further reduced
     },
     guidelineItem: {
       display: 'flex',
       alignItems: 'flex-start',
-      gap: '10px',
+      gap: '7px', // Further reduced
       color: COLORS.darkGray,
-      fontSize: '13px', // Reduced
+      fontSize: '11px', // Further reduced
     },
     guidelineIcon: {
       color: COLORS.secondary,
       flexShrink: 0,
       marginTop: '2px',
-      fontSize: '14px',
+      fontSize: '12px', // Further reduced
     },
     warningSection: {
       display: 'flex',
       alignItems: 'flex-start',
-      gap: '12px',
-      padding: '16px',
+      gap: '9px', // Further reduced
+      padding: '13px', // Further reduced
       backgroundColor: `${COLORS.warning}10`,
       border: `1px solid ${COLORS.warning}`,
-      borderRadius: '12px',
+      borderRadius: '10px', // Further reduced
       color: COLORS.warning,
-      marginTop: '20px',
-      fontSize: '13px',
+      marginTop: '16px', // Further reduced
+      fontSize: '11px', // Further reduced
     },
     instructionsFooter: {
-      padding: '20px 32px',
+      padding: '16px 25px', // Further reduced
       borderTop: `1px solid ${COLORS.border}`,
       display: 'flex',
       justifyContent: 'space-between',
@@ -662,35 +663,35 @@ const TestTaking = () => {
     // Header
     header: {
       backgroundColor: COLORS.white,
-      padding: '16px 24px',
-      boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
+      padding: '13px 18px', // Further reduced
+      boxShadow: '0 1px 6px rgba(0,0,0,0.03)', // Lighter shadow
       position: 'sticky',
       top: 0,
       zIndex: 100,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      gap: '20px',
+      gap: '16px', // Further reduced
     },
     headerLeft: {
       display: 'flex',
       alignItems: 'center',
-      gap: '12px',
+      gap: '9px', // Further reduced
       flex: 1,
     },
     backButton: {
       display: 'flex',
       alignItems: 'center',
-      gap: '6px',
-      padding: '8px 14px',
+      gap: '4px', // Further reduced
+      padding: '6px 11px', // Further reduced
       backgroundColor: COLORS.lightGray,
       border: `1px solid ${COLORS.border}`,
-      borderRadius: '8px',
+      borderRadius: '6px', // Further reduced
       color: COLORS.primary,
       fontWeight: '600',
       cursor: 'pointer',
       transition: 'all 0.2s',
-      fontSize: '13px',
+      fontSize: '11px', // Further reduced
       '&:hover': {
         backgroundColor: `${COLORS.primary}10`,
       },
@@ -699,7 +700,7 @@ const TestTaking = () => {
       flex: 1,
     },
     testTitle: {
-      fontSize: '16px',
+      fontSize: '14px', // Further reduced from 15px
       fontWeight: '600',
       color: COLORS.dark,
       marginBottom: '2px',
@@ -707,72 +708,72 @@ const TestTaking = () => {
     testMeta: {
       display: 'flex',
       flexWrap: 'wrap',
-      gap: '8px',
-      fontSize: '12px',
+      gap: '5px', // Further reduced
+      fontSize: '10px', // Further reduced
       color: COLORS.gray,
     },
     metaItem: {
       display: 'flex',
       alignItems: 'center',
-      gap: '4px',
-      padding: '3px 8px',
+      gap: '3px',
+      padding: '2px 6px', // Further reduced
       backgroundColor: COLORS.lightGray,
-      borderRadius: '12px',
+      borderRadius: '10px', // Further reduced
     },
     timerSection: {
       display: 'flex',
       alignItems: 'center',
-      gap: '12px',
+      gap: '9px', // Further reduced
     },
     timerCard: {
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
-      padding: '8px 16px',
+      gap: '6px', // Further reduced
+      padding: '6px 13px', // Further reduced
       background: timeWarning ? `linear-gradient(135deg, ${COLORS.warning} 0%, ${COLORS.accentDark} 100%)` : `linear-gradient(135deg, ${COLORS.primary} 0%, ${COLORS.primaryDark} 100%)`,
       color: COLORS.white,
-      borderRadius: '10px',
+      borderRadius: '8px', // Further reduced
       fontWeight: '600',
-      minWidth: '120px',
-      fontSize: '14px',
+      minWidth: '99px', // Further reduced
+      fontSize: '12px', // Further reduced
       position: 'relative',
       overflow: 'hidden',
     },
     timerWarning: {
       position: 'absolute',
-      top: '-6px',
+      top: '-4px', // Further reduced
       left: '50%',
       transform: 'translateX(-50%)',
       backgroundColor: COLORS.warning,
       color: COLORS.white,
-      padding: '3px 8px',
-      borderRadius: '8px',
-      fontSize: '10px',
+      padding: '2px 5px', // Further reduced
+      borderRadius: '5px', // Further reduced
+      fontSize: '8px', // Further reduced
       fontWeight: '600',
       display: 'flex',
       alignItems: 'center',
-      gap: '3px',
+      gap: '2px',
       whiteSpace: 'nowrap',
       animation: 'pulse 1.5s infinite',
     },
     headerControls: {
       display: 'flex',
       alignItems: 'center',
-      gap: '6px',
+      gap: '4px', // Further reduced
     },
     controlButton: {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      width: '36px',
-      height: '36px',
+      width: '31px', // Further reduced
+      height: '31px', // Further reduced
       backgroundColor: COLORS.lightGray,
       border: `1px solid ${COLORS.border}`,
-      borderRadius: '8px',
+      borderRadius: '6px', // Further reduced
       color: COLORS.primary,
       cursor: 'pointer',
       transition: 'all 0.2s',
-      fontSize: '16px',
+      fontSize: '14px', // Further reduced
       '&:hover': {
         backgroundColor: `${COLORS.primary}10`,
       },
@@ -782,34 +783,34 @@ const TestTaking = () => {
     mainContent: {
       flex: 1,
       display: 'flex',
-      padding: '16px',
-      gap: '16px',
-      maxWidth: '1400px',
+      padding: '13px', // Further reduced
+      gap: '13px', // Further reduced
+      maxWidth: '1134px', // Further reduced from 1260px
       margin: '0 auto',
       width: '100%',
-      height: compactMode ? 'calc(100vh - 140px)' : 'auto',
-      minHeight: compactMode ? 'calc(100vh - 140px)' : 'auto',
+      height: compactMode ? 'calc(100vh - 120px)' : 'auto', // Further reduced
+      minHeight: compactMode ? 'calc(100vh - 120px)' : 'auto', // Further reduced
     },
     questionArea: {
       flex: 1,
       display: 'flex',
       flexDirection: 'column',
-      gap: '12px',
+      gap: '9px', // Further reduced
       minWidth: 0,
       height: compactMode ? '100%' : 'auto',
     },
     questionCard: {
       flex: 1,
       backgroundColor: COLORS.white,
-      borderRadius: '12px',
-      boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+      borderRadius: '10px', // Further reduced
+      boxShadow: '0 2px 10px rgba(0,0,0,0.06)', // Lighter shadow
       overflow: 'hidden',
       display: 'flex',
       flexDirection: 'column',
-      height: compactMode ? 'calc(100% - 70px)' : 'auto',
+      height: compactMode ? 'calc(100% - 60px)' : 'auto', // Further reduced
     },
     questionHeader: {
-      padding: '16px 20px',
+      padding: '13px 16px', // Further reduced
       borderBottom: `1px solid ${COLORS.border}`,
       display: 'flex',
       justifyContent: 'space-between',
@@ -820,55 +821,55 @@ const TestTaking = () => {
     questionNav: {
       display: 'flex',
       alignItems: 'center',
-      gap: '12px',
+      gap: '9px', // Further reduced
     },
     questionNumber: {
-      fontSize: '16px',
+      fontSize: '14px', // Further reduced from 15px
       fontWeight: '600',
       color: COLORS.primary,
       display: 'flex',
       alignItems: 'center',
-      gap: '6px',
+      gap: '4px', // Further reduced
     },
     questionTotal: {
-      fontSize: '13px',
+      fontSize: '11px', // Further reduced
       color: COLORS.gray,
       fontWeight: '500',
     },
     questionActions: {
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
+      gap: '6px', // Further reduced
     },
     actionButton: {
       display: 'flex',
       alignItems: 'center',
-      gap: '6px',
-      padding: '6px 12px',
+      gap: '4px', // Further reduced
+      padding: '4px 9px', // Further reduced
       backgroundColor: 'transparent',
       border: `1px solid ${COLORS.border}`,
-      borderRadius: '8px',
+      borderRadius: '6px', // Further reduced
       color: COLORS.darkGray,
       fontWeight: '500',
       cursor: 'pointer',
       transition: 'all 0.2s',
-      fontSize: '13px',
+      fontSize: '11px', // Further reduced
       '&:hover': {
         backgroundColor: COLORS.lightGray,
       },
     },
     questionBody: {
       flex: 1,
-      padding: compactMode ? '20px' : '24px',
+      padding: compactMode ? '16px' : '20px', // Further reduced
       overflowY: compactMode ? 'auto' : 'visible',
       display: 'flex',
       flexDirection: 'column',
     },
     questionText: {
-      fontSize: compactMode ? '16px' : '17px',
+      fontSize: compactMode ? '14px' : '15px', // Further reduced
       lineHeight: 1.5,
       color: COLORS.dark,
-      marginBottom: '24px',
+      marginBottom: '18px', // Further reduced
       fontWeight: '500',
       flexShrink: 0,
     },
@@ -876,75 +877,75 @@ const TestTaking = () => {
       flex: 1,
       display: 'flex',
       flexDirection: 'column',
-      gap: compactMode ? '10px' : '12px',
-      maxHeight: compactMode ? 'calc(100% - 60px)' : 'none',
+      gap: compactMode ? '8px' : '10px', // Further reduced
+      maxHeight: compactMode ? 'calc(100% - 50px)' : 'none', // Further reduced
       overflowY: compactMode ? 'auto' : 'visible',
     },
     optionItem: {
       display: 'flex',
       alignItems: 'center',
-      padding: compactMode ? '14px' : '16px',
-      border: `2px solid ${COLORS.border}`,
-      borderRadius: '10px',
+      padding: compactMode ? '11px' : '13px', // Further reduced
+      border: `1px solid ${COLORS.border}`, // Thinner border
+      borderRadius: '8px', // Further reduced
       cursor: 'pointer',
       transition: 'all 0.2s',
       backgroundColor: COLORS.white,
       flexShrink: 0,
-      minHeight: compactMode ? '56px' : '60px',
+      minHeight: compactMode ? '47px' : '51px', // Further reduced
       '&:hover': {
         borderColor: COLORS.primary,
       },
     },
     optionLetter: {
-      width: '32px',
-      height: '32px',
+      width: '27px', // Further reduced
+      height: '27px', // Further reduced
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: '8px',
+      borderRadius: '6px', // Further reduced
       backgroundColor: COLORS.lightGray,
       color: COLORS.darkGray,
       fontWeight: '600',
-      fontSize: '14px',
-      marginRight: '12px',
+      fontSize: '12px', // Further reduced
+      marginRight: '9px', // Further reduced
       flexShrink: 0,
     },
     optionText: {
       flex: 1,
-      fontSize: compactMode ? '14px' : '15px',
+      fontSize: compactMode ? '12px' : '13px', // Further reduced
       lineHeight: 1.4,
       color: COLORS.darkGray,
       wordBreak: 'break-word',
     },
     optionCheck: {
-      marginLeft: '8px',
+      marginLeft: '5px', // Further reduced
       color: COLORS.success,
-      fontSize: '18px',
+      fontSize: '14px', // Further reduced
       flexShrink: 0,
     },
     navigationButtons: {
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
-      padding: '12px 16px',
+      padding: '9px 13px', // Further reduced
       backgroundColor: COLORS.white,
-      borderRadius: '12px',
-      boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+      borderRadius: '10px', // Further reduced
+      boxShadow: '0 2px 10px rgba(0,0,0,0.06)', // Lighter shadow
       flexShrink: 0,
       marginTop: 'auto',
     },
     pageIndicator: {
-      fontSize: '14px',
+      fontSize: '12px', // Further reduced
       color: COLORS.gray,
       fontWeight: '500',
     },
 
     // Sidebar
     sidebar: {
-      width: compactMode ? '280px' : '300px',
+      width: compactMode ? '227px' : '243px', // Further reduced
       backgroundColor: COLORS.white,
-      borderRadius: '12px',
-      boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+      borderRadius: '10px', // Further reduced
+      boxShadow: '0 2px 10px rgba(0,0,0,0.06)', // Lighter shadow
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
@@ -952,43 +953,43 @@ const TestTaking = () => {
       height: compactMode ? '100%' : 'auto',
     },
     sidebarHeader: {
-      padding: '16px 20px',
+      padding: '13px 16px', // Further reduced
       borderBottom: `1px solid ${COLORS.border}`,
       backgroundColor: COLORS.lightGray,
     },
     sidebarTitle: {
-      fontSize: '16px',
+      fontSize: '14px', // Further reduced
       fontWeight: '600',
       color: COLORS.primary,
-      marginBottom: '12px',
+      marginBottom: '9px', // Further reduced
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
     },
     filterTabs: {
       display: 'flex',
-      gap: '6px',
-      marginBottom: '12px',
+      gap: '4px', // Further reduced
+      marginBottom: '9px', // Further reduced
     },
     filterTab: {
       flex: 1,
-      padding: '8px',
+      padding: '6px', // Further reduced
       textAlign: 'center',
       backgroundColor: COLORS.white,
       border: `1px solid ${COLORS.border}`,
-      borderRadius: '6px',
-      fontSize: '12px',
+      borderRadius: '4px', // Further reduced
+      fontSize: '10px', // Further reduced
       fontWeight: '500',
       cursor: 'pointer',
       transition: 'all 0.2s',
     },
     questionsGrid: {
       flex: 1,
-      padding: '12px',
+      padding: '9px', // Further reduced
       overflowY: 'auto',
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fill, minmax(40px, 1fr))',
-      gap: '8px',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(32px, 1fr))', // Further reduced
+      gap: '5px', // Further reduced
     },
     gridButton: {
       position: 'relative',
@@ -997,12 +998,12 @@ const TestTaking = () => {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: '8px',
-      border: `2px solid ${COLORS.border}`,
+      borderRadius: '6px', // Further reduced
+      border: `1px solid ${COLORS.border}`, // Thinner border
       backgroundColor: COLORS.white,
       color: COLORS.darkGray,
       fontWeight: '600',
-      fontSize: '13px',
+      fontSize: '11px', // Further reduced
       cursor: 'pointer',
       transition: 'all 0.2s',
       overflow: 'hidden',
@@ -1012,41 +1013,41 @@ const TestTaking = () => {
     },
     flagIndicator: {
       position: 'absolute',
-      top: '3px',
-      right: '3px',
-      fontSize: '9px',
+      top: '2px',
+      right: '2px',
+      fontSize: '7px', // Further reduced
       color: COLORS.accent,
     },
     sidebarFooter: {
-      padding: '16px',
+      padding: '13px', // Further reduced
       borderTop: `1px solid ${COLORS.border}`,
       backgroundColor: COLORS.lightGray,
     },
     legend: {
       display: 'flex',
       flexDirection: 'column',
-      gap: '8px',
+      gap: '5px', // Further reduced
     },
     legendItem: {
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
-      fontSize: '12px',
+      gap: '5px', // Further reduced
+      fontSize: '10px', // Further reduced
       color: COLORS.gray,
     },
     legendDot: {
-      width: '10px',
-      height: '10px',
+      width: '7px', // Further reduced
+      height: '7px', // Further reduced
       borderRadius: '2px',
       flexShrink: 0,
     },
 
     // Footer
     footer: {
-      padding: '12px 24px',
+      padding: '9px 18px', // Further reduced
       backgroundColor: COLORS.white,
       borderTop: `1px solid ${COLORS.border}`,
-      boxShadow: '0 -2px 10px rgba(0,0,0,0.05)',
+      boxShadow: '0 -1px 6px rgba(0,0,0,0.03)', // Lighter shadow
       position: 'sticky',
       bottom: 0,
       zIndex: 99,
@@ -1055,49 +1056,49 @@ const TestTaking = () => {
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
-      maxWidth: '1400px',
+      maxWidth: '1134px', // Further reduced
       margin: '0 auto',
     },
     progressStats: {
       display: 'flex',
       alignItems: 'center',
-      gap: '16px',
+      gap: '13px', // Further reduced
     },
     statItem: {
       display: 'flex',
       alignItems: 'center',
-      gap: '6px',
-      fontSize: '13px',
+      gap: '4px', // Further reduced
+      fontSize: '11px', // Further reduced
       color: COLORS.darkGray,
     },
     statBadge: {
-      width: '28px',
-      height: '28px',
+      width: '23px', // Further reduced
+      height: '23px', // Further reduced
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: '6px',
+      borderRadius: '4px', // Further reduced
       fontWeight: '600',
-      fontSize: '13px',
+      fontSize: '11px', // Further reduced
     },
     footerActions: {
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
+      gap: '6px', // Further reduced
     },
     footerButton: {
       display: 'flex',
       alignItems: 'center',
-      gap: '6px',
-      padding: '8px 16px',
+      gap: '4px', // Further reduced
+      padding: '6px 13px', // Further reduced
       backgroundColor: COLORS.lightGray,
       border: `1px solid ${COLORS.border}`,
-      borderRadius: '8px',
+      borderRadius: '6px', // Further reduced
       color: COLORS.primary,
       fontWeight: '600',
       cursor: 'pointer',
       transition: 'all 0.2s',
-      fontSize: '13px',
+      fontSize: '11px', // Further reduced
       '&:hover': {
         backgroundColor: `${COLORS.primary}10`,
       },
@@ -1105,19 +1106,19 @@ const TestTaking = () => {
     submitButton: {
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
-      padding: '10px 24px',
+      gap: '6px', // Further reduced
+      padding: '8px 18px', // Further reduced
       background: `linear-gradient(135deg, ${COLORS.success} 0%, ${COLORS.secondaryDark} 100%)`,
       color: COLORS.white,
       border: 'none',
-      borderRadius: '10px',
+      borderRadius: '8px', // Further reduced
       fontWeight: '600',
-      fontSize: '14px',
+      fontSize: '12px', // Further reduced
       cursor: 'pointer',
       transition: 'all 0.2s',
       '&:hover': {
         transform: 'translateY(-2px)',
-        boxShadow: '0 8px 20px rgba(16, 185, 129, 0.3)',
+        boxShadow: '0 5px 14px rgba(16, 185, 129, 0.2)', // Reduced
       },
     },
 
@@ -1133,67 +1134,67 @@ const TestTaking = () => {
       alignItems: 'center',
       justifyContent: 'center',
       zIndex: 1000,
-      padding: '20px',
-      backdropFilter: 'blur(8px)',
+      padding: '14px', // Further reduced
+      backdropFilter: 'blur(5px)', // Further reduced
     },
     confirmationContent: {
-      maxWidth: '500px',
+      maxWidth: '405px', // Further reduced
       width: '100%',
       backgroundColor: COLORS.white,
-      borderRadius: '16px',
+      borderRadius: '13px', // Further reduced
       overflow: 'hidden',
-      boxShadow: '0 25px 50px rgba(0,0,0,0.15)',
+      boxShadow: '0 16px 32px rgba(0,0,0,0.1)', // Lighter
     },
     confirmationHeader: {
-      padding: '24px 24px 16px',
+      padding: '18px 18px 13px', // Further reduced
       textAlign: 'center',
     },
     confirmationIcon: {
-      margin: '0 auto 16px',
+      margin: '0 auto 13px', // Further reduced
       color: COLORS.warning,
     },
     confirmationTitle: {
-      fontSize: '20px',
+      fontSize: '16px', // Further reduced
       fontWeight: '600',
       color: COLORS.dark,
-      marginBottom: '8px',
+      marginBottom: '5px', // Further reduced
     },
     confirmationText: {
-      fontSize: '14px',
+      fontSize: '12px', // Further reduced
       color: COLORS.gray,
       lineHeight: 1.5,
     },
     confirmationStats: {
-      padding: '16px 24px',
+      padding: '13px 18px', // Further reduced
       backgroundColor: COLORS.lightGray,
     },
     statsGrid: {
       display: 'grid',
       gridTemplateColumns: 'repeat(3, 1fr)',
-      gap: '12px',
+      gap: '9px', // Further reduced
     },
     statCard: {
       backgroundColor: COLORS.white,
-      padding: '16px',
-      borderRadius: '10px',
+      padding: '13px', // Further reduced
+      borderRadius: '8px', // Further reduced
       textAlign: 'center',
-      boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
+      boxShadow: '0 1px 5px rgba(0,0,0,0.03)', // Lighter
     },
     statValue: {
-      fontSize: '20px',
+      fontSize: '16px', // Further reduced
       fontWeight: '700',
       color: COLORS.primary,
-      marginBottom: '4px',
+      marginBottom: '3px',
     },
     statLabel: {
-      fontSize: '11px',
+      fontSize: '9px', // Further reduced
       color: COLORS.gray,
       textTransform: 'uppercase',
       letterSpacing: '0.5px',
       fontWeight: '600',
     },
     confirmationFooter: {
-      padding: '20px 24px',
+      padding: '16px 18px', // Further reduced
       borderTop: `1px solid ${COLORS.border}`,
       display: 'flex',
       justifyContent: 'space-between',
@@ -1212,65 +1213,65 @@ const TestTaking = () => {
       alignItems: 'center',
       justifyContent: 'center',
       zIndex: 1000,
-      backdropFilter: 'blur(8px)',
+      backdropFilter: 'blur(5px)', // Further reduced
     },
     pauseModal: {
-      padding: '32px',
+      padding: '25px', // Further reduced
       backgroundColor: COLORS.white,
-      borderRadius: '16px',
+      borderRadius: '13px', // Further reduced
       textAlign: 'center',
-      boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
-      maxWidth: '400px',
+      boxShadow: '0 14px 28px rgba(0,0,0,0.1)', // Lighter
+      maxWidth: '324px', // Further reduced
       width: '100%',
     },
     pauseIcon: {
-      margin: '0 auto 16px',
+      margin: '0 auto 13px', // Further reduced
       color: COLORS.primary,
     },
     pauseTitle: {
-      fontSize: '20px',
+      fontSize: '16px', // Further reduced
       fontWeight: '600',
       color: COLORS.dark,
-      marginBottom: '8px',
+      marginBottom: '5px', // Further reduced
     },
     pauseText: {
-      fontSize: '14px',
+      fontSize: '12px', // Further reduced
       color: COLORS.gray,
-      marginBottom: '24px',
+      marginBottom: '18px', // Further reduced
     },
 
     // Summary Panel
     summaryPanel: {
-      marginTop: '12px',
+      marginTop: '9px', // Further reduced
       backgroundColor: COLORS.white,
-      borderRadius: '12px',
-      padding: '16px',
-      boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+      borderRadius: '10px', // Further reduced
+      padding: '13px', // Further reduced
+      boxShadow: '0 2px 10px rgba(0,0,0,0.06)', // Lighter
       border: `1px solid ${COLORS.border}`,
     },
     summaryHeader: {
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: '16px',
+      marginBottom: '13px', // Further reduced
     },
     summaryTitle: {
-      fontSize: '16px',
+      fontSize: '14px', // Further reduced
       fontWeight: '600',
       color: COLORS.primary,
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
+      gap: '5px', // Further reduced
     },
     summaryStats: {
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
-      gap: '12px',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(97px, 1fr))', // Further reduced
+      gap: '9px', // Further reduced
     },
     summaryCard: {
       backgroundColor: COLORS.lightGray,
-      padding: '12px',
-      borderRadius: '8px',
+      padding: '9px', // Further reduced
+      borderRadius: '6px', // Further reduced
       textAlign: 'center',
       transition: 'transform 0.2s',
       '&:hover': {
@@ -1278,13 +1279,13 @@ const TestTaking = () => {
       },
     },
     summaryValue: {
-      fontSize: '20px',
+      fontSize: '16px', // Further reduced
       fontWeight: '700',
       color: COLORS.primary,
-      marginBottom: '4px',
+      marginBottom: '3px',
     },
     summaryLabel: {
-      fontSize: '11px',
+      fontSize: '9px', // Further reduced
       color: COLORS.gray,
       textTransform: 'uppercase',
       letterSpacing: '0.5px',
@@ -1297,19 +1298,19 @@ const TestTaking = () => {
     primary: {
       display: 'flex',
       alignItems: 'center',
-      gap: '10px',
-      padding: '12px 24px',
+      gap: '7px', // Further reduced
+      padding: '9px 18px', // Further reduced
       background: `linear-gradient(135deg, ${COLORS.primary} 0%, ${COLORS.primaryDark} 100%)`,
       color: COLORS.white,
       border: 'none',
-      borderRadius: '10px',
+      borderRadius: '8px', // Further reduced
       fontWeight: '600',
-      fontSize: '14px',
+      fontSize: '12px', // Further reduced
       cursor: 'pointer',
       transition: 'all 0.2s',
       '&:hover': {
         transform: 'translateY(-2px)',
-        boxShadow: '0 8px 20px rgba(75, 83, 32, 0.3)',
+        boxShadow: '0 5px 14px rgba(75, 83, 32, 0.2)', // Reduced
       },
       '&:active': {
         transform: 'translateY(0)',
@@ -1323,14 +1324,14 @@ const TestTaking = () => {
     secondary: {
       display: 'flex',
       alignItems: 'center',
-      gap: '10px',
-      padding: '12px 24px',
+      gap: '7px', // Further reduced
+      padding: '9px 18px', // Further reduced
       backgroundColor: COLORS.white,
-      border: `2px solid ${COLORS.primary}`,
+      border: `1px solid ${COLORS.primary}`, // Thinner
       color: COLORS.primary,
-      borderRadius: '10px',
+      borderRadius: '8px', // Further reduced
       fontWeight: '600',
-      fontSize: '14px',
+      fontSize: '12px', // Further reduced
       cursor: 'pointer',
       transition: 'all 0.2s',
       '&:hover': {
@@ -1346,19 +1347,19 @@ const TestTaking = () => {
     danger: {
       display: 'flex',
       alignItems: 'center',
-      gap: '10px',
-      padding: '12px 24px',
+      gap: '7px', // Further reduced
+      padding: '9px 18px', // Further reduced
       background: `linear-gradient(135deg, ${COLORS.danger} 0%, #DC2626 100%)`,
       color: COLORS.white,
       border: 'none',
-      borderRadius: '10px',
+      borderRadius: '8px', // Further reduced
       fontWeight: '600',
-      fontSize: '14px',
+      fontSize: '12px', // Further reduced
       cursor: 'pointer',
       transition: 'all 0.2s',
       '&:hover': {
         transform: 'translateY(-2px)',
-        boxShadow: '0 8px 20px rgba(239, 68, 68, 0.3)',
+        boxShadow: '0 5px 14px rgba(239, 68, 68, 0.2)', // Reduced
       },
     },
   };
@@ -1377,7 +1378,7 @@ const TestTaking = () => {
   const ErrorScreen = () => (
     <div style={styles.errorScreen}>
       <div style={styles.errorCard}>
-        <FiAlertCircle size={40} style={styles.errorIcon} />
+        <FiAlertCircle size={32} style={styles.errorIcon} /> {/* Further reduced */}
         <h2 style={styles.errorTitle}>Unable to Load Test</h2>
         <p style={styles.errorMessage}>
           {error || 'An error occurred while loading the test. Please try again.'}
@@ -1414,7 +1415,7 @@ const TestTaking = () => {
                 e.target.style.display = 'none';
                 // Show fallback avatar if image fails to load
                 const fallback = document.createElement('div');
-                fallback.style.cssText = styles.studentAvatarFallback;
+                fallback.style.cssText = Object.entries(styles.studentAvatarFallback).map(([k, v]) => `${k}: ${v}`).join(';');
                 fallback.textContent = getStudentInitials();
                 e.target.parentElement.appendChild(fallback);
               }}
@@ -1472,7 +1473,7 @@ const TestTaking = () => {
             ref={instructionsContentRef}
             style={styles.instructionsBody}
             onScroll={(e) => {
-              // Prevent auto-scroll issue
+              // FIXED: Prevent default scroll behavior that was causing issues
               e.stopPropagation();
             }}
           >
@@ -1517,7 +1518,7 @@ const TestTaking = () => {
               </div>
             </div>
             <div style={styles.warningSection}>
-              <FiAlertTriangle size={16} />
+              <FiAlertTriangle size={13} /> {/* Further reduced */}
               <div>
                 <strong>Important:</strong> Do not refresh the page or close the browser during the test.
                 Any attempt to cheat will result in disqualification.
@@ -1546,7 +1547,7 @@ const TestTaking = () => {
       <div style={styles.confirmationModal}>
         <div style={styles.confirmationContent}>
           <div style={styles.confirmationHeader}>
-            <FiAlertTriangle size={40} style={styles.confirmationIcon} />
+            <FiAlertTriangle size={32} style={styles.confirmationIcon} /> {/* Further reduced */}
             <h2 style={styles.confirmationTitle}>Submit Test?</h2>
             <p style={styles.confirmationText}>
               Are you sure you want to submit your test? This action cannot be undone.
@@ -1570,13 +1571,13 @@ const TestTaking = () => {
           </div>
           {submissionError && (
             <div style={{
-              padding: '12px 24px',
+              padding: '9px 18px', // Further reduced
               backgroundColor: `${COLORS.danger}10`,
               color: COLORS.danger,
-              fontSize: '13px',
+              fontSize: '11px', // Further reduced
               display: 'flex',
               alignItems: 'center',
-              gap: '8px',
+              gap: '5px', // Further reduced
             }}>
               <FiAlertCircle /> {submissionError}
             </div>
@@ -1597,9 +1598,9 @@ const TestTaking = () => {
               {isSubmitted ? (
                 <>
                   <div style={{
-                    width: '14px',
-                    height: '14px',
-                    border: '2px solid rgba(255,255,255,0.3)',
+                    width: '12px', // Further reduced
+                    height: '12px', // Further reduced
+                    border: '1px solid rgba(255,255,255,0.3)', // Thinner
                     borderTopColor: COLORS.white,
                     borderRadius: '50%',
                     animation: 'spin 1s linear infinite'
@@ -1635,13 +1636,13 @@ const TestTaking = () => {
               <span style={styles.questionTotal}>/{questions.length}</span>
             </div>
             <div style={{
-              padding: '4px 8px',
+              padding: '2px 5px', // Further reduced
               backgroundColor: status === 'answered' ? `${COLORS.success}15` : 
                              status === 'marked' ? `${COLORS.accent}15` : `${COLORS.gray}15`,
               color: status === 'answered' ? COLORS.success : 
                      status === 'marked' ? COLORS.accent : COLORS.gray,
-              borderRadius: '6px',
-              fontSize: '11px',
+              borderRadius: '4px', // Further reduced
+              fontSize: '9px', // Further reduced
               fontWeight: '600',
               textTransform: 'uppercase',
             }}>
@@ -1708,8 +1709,8 @@ const TestTaking = () => {
           ...buttonStyles.secondary,
           opacity: currentQuestion === 0 ? 0.5 : 1,
           cursor: currentQuestion === 0 ? 'not-allowed' : 'pointer',
-          padding: '10px 20px',
-          fontSize: '13px',
+          padding: '7px 14px', // Further reduced
+          fontSize: '11px', // Further reduced
         }}
         disabled={currentQuestion === 0}
         onClick={() => setCurrentQuestion(prev => prev - 1)}
@@ -1723,8 +1724,8 @@ const TestTaking = () => {
         <button 
           style={{
             ...buttonStyles.primary,
-            padding: '10px 20px',
-            fontSize: '13px',
+            padding: '7px 14px', // Further reduced
+            fontSize: '11px', // Further reduced
           }} 
           onClick={() => setShowConfirmation(true)}
         >
@@ -1734,8 +1735,8 @@ const TestTaking = () => {
         <button
           style={{
             ...buttonStyles.primary,
-            padding: '10px 20px',
-            fontSize: '13px',
+            padding: '7px 14px', // Further reduced
+            fontSize: '11px', // Further reduced
           }}
           onClick={() => setCurrentQuestion(prev => prev + 1)}
         >
@@ -1830,7 +1831,7 @@ const TestTaking = () => {
               >
                 {questionIndex + 1}
                 {isMarked && (
-                  <FiFlag size={8} style={styles.flagIndicator} />
+                  <FiFlag size={6} style={styles.flagIndicator} /> /* Further reduced */
                 )}
               </button>
             );
@@ -1902,11 +1903,11 @@ const TestTaking = () => {
         <button 
           style={{
             ...buttonStyles.secondary,
-            marginTop: '12px',
+            marginTop: '9px', // Further reduced
             width: '100%',
             justifyContent: 'center',
-            padding: '8px',
-            fontSize: '12px',
+            padding: '6px', // Further reduced
+            fontSize: '10px', // Further reduced
           }}
           onClick={saveProgress}
         >
@@ -1919,7 +1920,7 @@ const TestTaking = () => {
   const PauseOverlay = () => (
     <div style={styles.pauseOverlay}>
       <div style={styles.pauseModal}>
-        <FiLock size={40} style={styles.pauseIcon} />
+        <FiLock size={32} style={styles.pauseIcon} /> {/* Further reduced */}
         <h2 style={styles.pauseTitle}>Test Paused</h2>
         <p style={styles.pauseText}>
           Your test timer has been paused. You can resume when ready.
@@ -1946,13 +1947,13 @@ const TestTaking = () => {
             <h1 style={styles.testTitle}>{test?.title}</h1>
             <div style={styles.testMeta}>
               <span style={styles.metaItem}>
-                <FiBook size={10} /> {test?.subject}
+                <FiBook size={8} /> {test?.subject} {/* Further reduced */}
               </span>
               <span style={styles.metaItem}>
-                <FiUser size={10} /> {test?.class?.name || 'All Classes'}
+                <FiUser size={8} /> {test?.class?.name || 'All Classes'} {/* Further reduced */}
               </span>
               <span style={styles.metaItem}>
-                <FiCalendar size={10} /> Computer Based Test
+                <FiCalendar size={8} /> Computer Based Test {/* Further reduced */}
               </span>
             </div>
           </div>
@@ -1962,9 +1963,9 @@ const TestTaking = () => {
         <div style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '12px',
-          padding: '6px 12px',
-          borderRadius: '8px',
+          gap: '9px', // Further reduced
+          padding: '4px 9px', // Further reduced
+          borderRadius: '6px', // Further reduced
           cursor: 'pointer',
           transition: 'all 0.2s',
           ':hover': {
@@ -1972,15 +1973,15 @@ const TestTaking = () => {
           }
         }}>
           <div style={{
-            width: '36px',
-            height: '36px',
+            width: '29px', // Further reduced
+            height: '29px', // Further reduced
             borderRadius: '50%',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             color: COLORS.primary,
             fontWeight: '600',
-            fontSize: '14px',
+            fontSize: '12px', // Further reduced
             backgroundColor: '#90EE90',
             position: 'relative',
             overflow: 'hidden'
@@ -2009,20 +2010,20 @@ const TestTaking = () => {
             )}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-            <span style={{ fontSize: '14px', fontWeight: '600', color: COLORS.primary }}>
+            <span style={{ fontSize: '12px', fontWeight: '600', color: COLORS.primary }}>
               {getStudentName()}
             </span>
-            <span style={{ fontSize: '12px', color: COLORS.gray }}>Student</span>
+            <span style={{ fontSize: '10px', color: COLORS.gray }}>Student</span>
           </div>
         </div>
 
         <div style={styles.timerSection}>
           <div style={styles.timerCard}>
-            <FiClock size={14} />
+            <FiClock size={12} /> {/* Further reduced */}
             {formatTime(timeLeft)}
             {timeWarning && (
               <div style={styles.timerWarning}>
-                <FiAlertTriangle size={8} /> Time Running Out!
+                <FiAlertTriangle size={6} /> Time Running Out! {/* Further reduced */}
               </div>
             )}
           </div>
@@ -2118,18 +2119,19 @@ const TestTaking = () => {
         }
         body {
           overflow: ${showInstructions || isPaused || showConfirmation ? 'hidden' : 'auto'};
+          font-size: 81%; /* Further reduced base font size */
         }
         ::-webkit-scrollbar {
-          width: 6px;
-          height: 6px;
+          width: 4px; /* Further reduced */
+          height: 4px; /* Further reduced */
         }
         ::-webkit-scrollbar-track {
           background: ${COLORS.lightGray};
-          border-radius: 3px;
+          border-radius: 2px;
         }
         ::-webkit-scrollbar-thumb {
           background: ${COLORS.gray};
-          border-radius: 3px;
+          border-radius: 2px;
         }
         ::-webkit-scrollbar-thumb:hover {
           background: ${COLORS.darkGray};
@@ -2138,12 +2140,25 @@ const TestTaking = () => {
           outline: none;
           font-family: inherit;
           cursor: pointer;
+          font-size: 81%; /* Further reduced */
         }
         button:hover {
           transition: all 0.2s ease;
         }
         button:disabled {
           cursor: not-allowed;
+        }
+        h1, h2, h3, h4, h5, h6 {
+          margin: 0;
+          font-weight: 600;
+        }
+        p {
+          margin: 0;
+          line-height: 1.5;
+        }
+        .instructions-scrollable {
+          overflow-y: auto !important;
+          overflow-x: hidden !important;
         }
       `}</style>
     </div>
