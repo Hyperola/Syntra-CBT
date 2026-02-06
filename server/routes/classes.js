@@ -1,4 +1,4 @@
-// routes/classes.js - COMPLETE UPDATED VERSION WITH PROPER STUDENT COUNTING
+// routes/classes.js - COMPLETE UPDATED VERSION WITH STREAM REQUIREMENT
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
@@ -46,6 +46,7 @@ const formatClassResponse = (classData, studentCount = 0) => {
     name: classData.name,
     shortName: classData.shortName,
     level: classData.level,
+    grade: classData.grade || classData.level,
     stream: classData.stream || '',
     section: classData.section || '',
     fullName: classData.fullName || 
@@ -134,7 +135,7 @@ router.get('/', auth, async (req, res) => {
         select: 'name code category isCore',
         model: 'Subject'
       })
-      .sort({ level: 1, displayOrder: 1, name: 1 })
+      .sort({ level: 1, stream: 1, section: 1, name: 1 })
       .skip(skip)
       .limit(parseInt(limit))
       .lean();
@@ -390,13 +391,13 @@ router.get('/:id/students', auth, validateObjectId, async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────
-// 3. CREATE new class (Admin/Super Admin only)
+// 3. CREATE new class (Admin/Super Admin only) - UPDATED WITH STREAM REQUIREMENT
 // ──────────────────────────────────────────────────────────────
 router.post('/', auth, adminOrSuperAdmin, async (req, res) => {
   try {
     const { name, shortName, level, stream, section, capacity, classTeacherId } = req.body;
     
-    console.log('🏫 POST /api/classes - Creating class:', { 
+    console.log('🏫 POST /api/classes - Creating class with data:', { 
       name, 
       shortName, 
       level,
@@ -416,73 +417,61 @@ router.post('/', auth, adminOrSuperAdmin, async (req, res) => {
       });
     }
 
+    // IMPORTANT: Validate that stream is provided when creating multiple classes at same level
+    // Stream is required for uniqueness when creating JSS1 GOLD, JSS1 SILVER, etc.
+    if (!stream || stream.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        error: 'Stream name is required',
+        details: 'When creating multiple classes at the same level, you must provide a stream name (e.g., GOLD, SILVER, DIAMOND, SCIENCE, ARTS)',
+        suggestion: 'Provide a stream name like "GOLD", "SILVER", "SCIENCE", or "ARTS"'
+      });
+    }
+
     // Get academic year
     const currentYear = new Date().getFullYear();
     const academicYear = `${currentYear}/${currentYear + 1}`;
 
-    // Check if class combination already exists
+    // Format inputs
+    const formattedName = name.trim().toUpperCase();
+    const formattedLevel = level.toUpperCase();
+    const formattedStream = stream.trim().toUpperCase();
+    const formattedSection = section && section !== 'NONE' ? section.trim().toUpperCase() : '';
+    const formattedShortName = shortName ? shortName.trim().toUpperCase() : null;
+
+    // Check for existing class with same level+stream+section+academicYear
+    // This allows JSS1 EMERALD, JSS1 GOLD, JSS1 DIAMOND, etc.
     const existingClass = await Class.findOne({
-      level: level.toUpperCase(),
-      stream: stream ? stream.trim().toUpperCase() : '',
-      section: section ? section.trim().toUpperCase() : '',
+      level: formattedLevel,
+      stream: formattedStream,
+      section: formattedSection || '',
       academicYear: academicYear,
       isActive: true
     });
 
     if (existingClass) {
-      return res.status(409).json({
+      return res.status(400).json({
         success: false,
         error: 'Class already exists',
-        details: `A ${level}${stream ? ` ${stream}` : ''}${section ? ` (${section})` : ''} class already exists for ${academicYear}`,
-        existingClass: existingClass.name
+        details: `A ${formattedLevel} ${formattedStream} class${formattedSection ? ' in section ' + formattedSection : ''} already exists for academic year ${academicYear}`,
+        existingClass: {
+          name: existingClass.name,
+          level: existingClass.level,
+          stream: existingClass.stream,
+          section: existingClass.section,
+          academicYear: existingClass.academicYear
+        },
+        suggestion: 'Try using a different stream name (e.g., GOLD, SILVER, DIAMOND, SCIENCE, ARTS)'
       });
-    }
-
-    // Check if class name already exists
-    const existingClassName = await Class.findOne({ 
-      name: name.trim().toUpperCase(),
-      academicYear: academicYear
-    });
-    if (existingClassName) {
-      return res.status(409).json({
-        success: false,
-        error: 'Class name already exists',
-        details: `A class with name "${name}" already exists for ${academicYear}`
-      });
-    }
-
-    // Check if short name already exists
-    const generatedShortName = shortName ? shortName.trim().toUpperCase() : null;
-    if (generatedShortName) {
-      const existingShortName = await Class.findOne({ 
-        shortName: generatedShortName,
-        academicYear: academicYear 
-      });
-      if (existingShortName) {
-        return res.status(409).json({
-          success: false,
-          error: 'Class short name already exists',
-          details: `A class with short name "${generatedShortName}" already exists for ${academicYear}`
-        });
-      }
-    }
-
-    // Validate class teacher if provided
-    if (classTeacherId) {
-      const teacher = await User.findById(classTeacherId);
-      if (!teacher || teacher.role !== 'teacher') {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid class teacher. User must be a teacher.',
-          classTeacherId
-        });
-      }
     }
 
     // Build class data
     const classData = {
-      name: name.trim().toUpperCase(),
-      level: level.toUpperCase(),
+      name: formattedName,
+      level: formattedLevel,
+      grade: formattedLevel, // Set grade same as level
+      stream: formattedStream, // Stream is required
+      section: formattedSection || '', // Ensure empty string instead of null
       capacity: capacity || 40,
       academicYear: academicYear,
       metadata: {
@@ -493,12 +482,10 @@ router.post('/', auth, adminOrSuperAdmin, async (req, res) => {
       }
     };
 
-    if (shortName) classData.shortName = shortName.trim().toUpperCase();
-    if (stream) classData.stream = stream.trim().toUpperCase();
-    if (section) classData.section = section.trim().toUpperCase();
-    if (classTeacherId) classData.classTeacher = classTeacherId;
+    if (formattedShortName) classData.shortName = formattedShortName;
+    if (classTeacherId && classTeacherId !== 'NONE') classData.classTeacher = classTeacherId;
 
-    console.log('Creating class with data:', classData);
+    console.log('✅ Creating new class with data:', classData);
 
     const newClass = new Class(classData);
     await newClass.save();
@@ -508,6 +495,7 @@ router.post('/', auth, adminOrSuperAdmin, async (req, res) => {
       name: newClass.name,
       shortName: newClass.shortName,
       level: newClass.level,
+      grade: newClass.grade,
       stream: newClass.stream,
       section: newClass.section,
       academicYear: newClass.academicYear,
@@ -528,12 +516,20 @@ router.post('/', auth, adminOrSuperAdmin, async (req, res) => {
     console.error('❌ POST /classes error details:', err);
     
     if (err.code === 11000) {
-      const duplicateFields = err.keyValue;
+      // Check which field caused the duplicate
+      let errorMsg = 'Duplicate class combination';
+      let duplicateFields = err.keyValue || {};
+      
+      if (duplicateFields.level && duplicateFields.stream && duplicateFields.section) {
+        errorMsg = `A ${duplicateFields.level} ${duplicateFields.stream} class${duplicateFields.section ? ' in section ' + duplicateFields.section : ''} already exists`;
+      }
+      
       return res.status(409).json({
         success: false,
-        error: 'Duplicate class combination',
-        details: `A class with level "${duplicateFields.level}", stream "${duplicateFields.stream || ''}", section "${duplicateFields.section || ''}" already exists for academic year ${duplicateFields.academicYear}`,
-        duplicateFields
+        error: 'Duplicate entry',
+        details: errorMsg,
+        duplicateFields: duplicateFields,
+        solution: 'Try using a different stream name (e.g., GOLD, SILVER, DIAMOND) or section'
       });
     }
     
@@ -554,14 +550,92 @@ router.post('/', auth, adminOrSuperAdmin, async (req, res) => {
   }
 });
 
+// Add this route to your routes/classes.js
+router.get('/:id/students/count', auth, async (req, res) => {
+  try {
+    const classId = req.params.id;
+    
+    // Validate class ID
+    if (!mongoose.Types.ObjectId.isValid(classId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid class ID'
+      });
+    }
+
+    // Find the class with students populated
+    const classData = await Class.findById(classId)
+      .select('name shortName level capacity students isActive')
+      .populate({
+        path: 'students',
+        select: 'username firstName lastName studentId isActive',
+        match: { isActive: true } // Only count active students
+      });
+
+    if (!classData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Class not found'
+      });
+    }
+
+    // Count active students
+    const activeStudents = classData.students ? 
+      classData.students.filter(student => student.isActive !== false).length : 0;
+    
+    // Count all students (including inactive)
+    const totalStudents = classData.students ? classData.students.length : 0;
+    
+    // Calculate capacity utilization
+    const capacity = classData.capacity || 40;
+    const utilization = capacity > 0 ? Math.round((activeStudents / capacity) * 100) : 0;
+    const availableSeats = Math.max(0, capacity - activeStudents);
+
+    res.json({
+      success: true,
+      class: {
+        id: classData._id,
+        name: classData.name,
+        shortName: classData.shortName,
+        level: classData.level,
+        isActive: classData.isActive
+      },
+      counts: {
+        total: totalStudents,
+        active: activeStudents,
+        inactive: totalStudents - activeStudents,
+        capacity: capacity,
+        utilization: utilization,
+        availableSeats: availableSeats
+      }
+    });
+  } catch (error) {
+    console.error('❌ GET /classes/:id/students/count error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get student count'
+    });
+  }
+});
+
 // ──────────────────────────────────────────────────────────────
-// 4. UPDATE class (Admin/Super Admin only)
+// 4. UPDATE class (Admin/Super Admin only) - UPDATED VERSION
 // ──────────────────────────────────────────────────────────────
 router.put('/:id', auth, adminOrSuperAdmin, validateObjectId, async (req, res) => {
   try {
     const { name, shortName, level, stream, capacity, classTeacherId, isActive, displayOrder } = req.body;
     
     console.log('🏫 PUT /api/classes/:id - Updating class:', req.params.id);
+
+    // Get current class to check what we're updating
+    const currentClass = await Class.findById(req.params.id);
+    if (!currentClass) {
+      return res.status(404).json({
+        success: false,
+        error: 'Class not found',
+        classId: req.params.id
+      });
+    }
 
     const updates = {};
     if (name !== undefined) updates.name = name.trim().toUpperCase();
@@ -576,19 +650,47 @@ router.put('/:id', auth, adminOrSuperAdmin, validateObjectId, async (req, res) =
     updates['metadata.lastModifiedBy'] = req.user.id;
     updates['metadata.lastModifiedAt'] = new Date();
 
+    // Check if the update would create a duplicate combination
+    // Only check if level, stream, section, or academicYear are being changed
+    if (level !== undefined || stream !== undefined || req.body.section !== undefined) {
+      const checkLevel = level !== undefined ? level.toUpperCase() : currentClass.level;
+      const checkStream = stream !== undefined ? stream.trim().toUpperCase() : currentClass.stream || '';
+      const checkSection = req.body.section !== undefined ? req.body.section.trim().toUpperCase() : currentClass.section || '';
+      const academicYear = currentClass.academicYear;
+
+      // Don't check against ourselves
+      const existingClass = await Class.findOne({
+        level: checkLevel,
+        stream: checkStream,
+        section: checkSection,
+        academicYear: academicYear,
+        isActive: true,
+        _id: { $ne: req.params.id } // Exclude current class
+      });
+
+      if (existingClass) {
+        return res.status(409).json({
+          success: false,
+          error: 'Class combination already exists',
+          details: `A ${checkLevel}${checkStream ? ` ${checkStream}` : ''}${checkSection ? ` (${checkSection})` : ''} class already exists for ${academicYear}`,
+          existingClass: {
+            name: existingClass.name,
+            shortName: existingClass.shortName,
+            level: existingClass.level,
+            stream: existingClass.stream,
+            section: existingClass.section,
+            academicYear: existingClass.academicYear
+          }
+        });
+      }
+    }
+
+    // Perform the update
     const classData = await Class.findByIdAndUpdate(
       req.params.id,
       updates,
       { new: true, runValidators: true }
     );
-
-    if (!classData) {
-      return res.status(404).json({
-        success: false,
-        error: 'Class not found',
-        classId: req.params.id
-      });
-    }
 
     console.log('✅ Class updated:', {
       id: classData._id,
@@ -614,15 +716,34 @@ router.put('/:id', auth, adminOrSuperAdmin, validateObjectId, async (req, res) =
       class: formatClassResponse(populatedClass, studentCount)
     });
   } catch (err) {
+    console.error('❌ PUT /classes/:id error:', err);
+    
     if (err.code === 11000) {
+      // Handle duplicate key error
+      let errorMessage = 'Duplicate class entry';
+      if (err.keyValue.name && err.keyValue.academicYear) {
+        errorMessage = `A class with name "${err.keyValue.name}" already exists for academic year ${err.keyValue.academicYear}`;
+      } else if (err.keyValue.level && err.keyValue.stream && err.keyValue.section && err.keyValue.academicYear) {
+        errorMessage = `A ${err.keyValue.level}${err.keyValue.stream ? ` ${err.keyValue.stream}` : ''}${err.keyValue.section ? ` (${err.keyValue.section})` : ''} class already exists for ${err.keyValue.academicYear}`;
+      }
+      
       return res.status(409).json({
         success: false,
         error: 'Class already exists',
-        details: 'Another class with the same name or short name exists'
+        details: errorMessage,
+        duplicateFields: err.keyValue
       });
     }
     
-    console.error('❌ PUT /classes/:id error:', err);
+    if (err.name === 'ValidationError') {
+      const errors = Object.values(err.errors).map(e => e.message);
+      return res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        details: errors.join(', ')
+      });
+    }
+    
     res.status(500).json({
       success: false,
       error: 'Failed to update class',
@@ -701,28 +822,15 @@ router.delete('/:id/hard', auth, adminOrSuperAdmin, validateObjectId, async (req
 });
 
 // ──────────────────────────────────────────────────────────────
-// 6. DELETE class (deactivate - Admin/Super Admin only)
+// 6. DELETE class (deactivate - Admin/Super Admin only) - FIXED VERSION
 // ──────────────────────────────────────────────────────────────
 router.delete('/:id', auth, adminOrSuperAdmin, validateObjectId, async (req, res) => {
   try {
     console.log('🏫 DELETE /api/classes/:id - Soft deleting class:', req.params.id);
     
-    // Use findByIdAndUpdate to avoid validation issues
-    const classData = await Class.findByIdAndUpdate(
-      req.params.id,
-      {
-        isActive: false,
-        $set: {
-          'metadata.lastModifiedBy': req.user.id,
-          'metadata.lastModifiedAt': new Date()
-        }
-      },
-      { 
-        new: true,
-        runValidators: false // IMPORTANT: Disable validators for deactivation
-      }
-    );
-
+    // First check if class exists
+    const classData = await Class.findById(req.params.id);
+    
     if (!classData) {
       return res.status(404).json({
         success: false,
@@ -731,133 +839,98 @@ router.delete('/:id', auth, adminOrSuperAdmin, validateObjectId, async (req, res
       });
     }
 
+    // Check if there are any students in the class
+    const studentCount = await User.countDocuments({
+      class: req.params.id,
+      role: 'student',
+      active: true
+    });
+
+    if (studentCount > 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot delete class with active students',
+        studentCount,
+        suggestion: 'Remove all students first or use the deactivate endpoint'
+      });
+    }
+
+    // Use a safe update approach
+    const updateData = {
+      isActive: false,
+      'metadata.lastModifiedBy': req.user.id,
+      'metadata.lastModifiedAt': new Date()
+    };
+
     // Add note to metadata
     if (!classData.metadata) {
-      classData.metadata = {
+      updateData.metadata = {
         notes: [],
         createdBy: req.user.id,
         lastModifiedBy: req.user.id,
         lastModifiedAt: new Date()
       };
     }
-    
-    if (!Array.isArray(classData.metadata.notes)) {
-      classData.metadata.notes = [];
+
+    // Update the class with validation disabled for safety
+    const updatedClass = await Class.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { 
+        new: true,
+        runValidators: false // Disable validators to avoid schema conflicts
+      }
+    );
+
+    // Add a note to metadata
+    if (!updatedClass.metadata.notes) {
+      updatedClass.metadata.notes = [];
     }
     
-    classData.metadata.notes.push(`Deactivated by ${req.user.username} on ${new Date().toLocaleDateString()}`);
-    await classData.save({ validateBeforeSave: false });
+    updatedClass.metadata.notes.push(`Deactivated by ${req.user.username} on ${new Date().toLocaleDateString()}`);
+    
+    // Save without validation
+    await updatedClass.save({ validateBeforeSave: false });
 
-    console.log('✅ Class deactivated:', {
-      id: classData._id,
-      name: classData.name,
+    console.log('✅ Class deactivated successfully:', {
+      id: updatedClass._id,
+      name: updatedClass.name,
       by: req.user.username
-    });
-
-    // Get student count
-    const studentCount = await User.countDocuments({
-      class: req.params.id,
-      role: 'student',
-      active: true
     });
 
     // Get the updated class with populated data
-    const updatedClass = await Class.findById(classData._id)
+    const populatedClass = await Class.findById(updatedClass._id)
       .populate('classTeacher', 'firstName lastName email')
       .lean();
 
     res.json({
       success: true,
       message: 'Class deactivated successfully',
-      class: formatClassResponse(updatedClass, studentCount)
+      class: formatClassResponse(populatedClass, studentCount)
     });
   } catch (err) {
     console.error('❌ DELETE /classes/:id error:', err);
+    
+    // More specific error handling
+    if (err.name === 'CastError') {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid class ID format'
+      });
+    }
+    
+    if (err.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        error: 'Duplicate class entry'
+      });
+    }
+    
     res.status(500).json({
       success: false,
       error: 'Failed to delete class',
-      details: err.message
-    });
-  }
-});
-
-// ──────────────────────────────────────────────────────────────
-// 7. DEACTIVATE class (alternative PATCH method)
-// ──────────────────────────────────────────────────────────────
-router.patch('/:id/deactivate', auth, adminOrSuperAdmin, validateObjectId, async (req, res) => {
-  try {
-    console.log('🏫 PATCH /api/classes/:id/deactivate - Deactivating class:', req.params.id);
-    
-    // Use findByIdAndUpdate to avoid validation issues
-    const classData = await Class.findByIdAndUpdate(
-      req.params.id,
-      {
-        isActive: false,
-        $set: {
-          'metadata.lastModifiedBy': req.user.id,
-          'metadata.lastModifiedAt': new Date()
-        }
-      },
-      { 
-        new: true,
-        runValidators: false // Disable validators
-      }
-    );
-
-    if (!classData) {
-      return res.status(404).json({
-        success: false,
-        error: 'Class not found',
-        classId: req.params.id
-      });
-    }
-
-    // Add note to metadata
-    if (!classData.metadata) {
-      classData.metadata = {
-        notes: [],
-        createdBy: req.user.id,
-        lastModifiedBy: req.user.id,
-        lastModifiedAt: new Date()
-      };
-    }
-    
-    if (!Array.isArray(classData.metadata.notes)) {
-      classData.metadata.notes = [];
-    }
-    
-    classData.metadata.notes.push(`Deactivated by ${req.user.username} on ${new Date().toLocaleDateString()}`);
-    await classData.save({ validateBeforeSave: false });
-
-    console.log('✅ Class deactivated via PATCH:', {
-      id: classData._id,
-      name: classData.name,
-      by: req.user.username
-    });
-
-    // Get student count
-    const studentCount = await User.countDocuments({
-      class: req.params.id,
-      role: 'student',
-      active: true
-    });
-
-    // Get updated class with populated data
-    const updatedClass = await Class.findById(classData._id)
-      .populate('classTeacher', 'firstName lastName email')
-      .lean();
-
-    res.json({
-      success: true,
-      message: 'Class deactivated successfully',
-      class: formatClassResponse(updatedClass, studentCount)
-    });
-  } catch (err) {
-    console.error('❌ PATCH /classes/:id/deactivate error:', err);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to deactivate class',
-      details: err.message
+      details: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error',
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
     });
   }
 });
@@ -960,7 +1033,7 @@ router.get('/level/:level', auth, async (req, res) => {
         select: 'name code',
         model: 'Subject'
       })
-      .sort({ displayOrder: 1, name: 1 })
+      .sort({ displayOrder: 1, stream: 1, section: 1, name: 1 })
       .lean();
 
     // Get student counts for each class
@@ -1553,7 +1626,7 @@ router.get('/assignment/classes', auth, async (req, res) => {
     
     const classes = await Class.find({ isActive: true })
       .select('_id name shortName level fullName stream section capacity')
-      .sort({ level: 1, name: 1 })
+      .sort({ level: 1, stream: 1, section: 1, name: 1 })
       .lean();
 
     // Get student counts for each class
@@ -1842,6 +1915,7 @@ router.get('/availability/:level', auth, async (req, res) => {
       isActive: true 
     })
       .select('_id name shortName capacity stream section')
+      .sort({ stream: 1, section: 1, name: 1 })
       .lean();
 
     // Get student counts for each class
@@ -1887,9 +1961,62 @@ router.get('/availability/:level', auth, async (req, res) => {
   }
 });
 
+// ──────────────────────────────────────────────────────────────
+// 22. GET available streams for a level
+// ──────────────────────────────────────────────────────────────
+router.get('/streams/available', auth, async (req, res) => {
+  try {
+    const { level } = req.query;
+    
+    if (!level) {
+      return res.status(400).json({
+        success: false,
+        error: 'Level is required'
+      });
+    }
+
+    const currentYear = new Date().getFullYear();
+    const academicYear = `${currentYear}/${currentYear + 1}`;
+
+    // Get existing streams for this level in current academic year
+    const existingClasses = await Class.find({
+      level: level.toUpperCase(),
+      academicYear: academicYear,
+      isActive: true
+    }).select('stream name');
+
+    // Common stream suggestions
+    const commonStreams = ['GOLD', 'SILVER', 'DIAMOND', 'PEARL', 'RUBY', 'SAPPHIRE', 'EMERALD', 'SCIENCE', 'ARTS', 'COMMERCIAL'];
+
+    // Filter out already used streams
+    const existingStreams = existingClasses.map(c => c.stream?.toUpperCase()).filter(Boolean);
+    const availableStreams = commonStreams.filter(stream => 
+      !existingStreams.includes(stream.toUpperCase())
+    );
+
+    res.json({
+      success: true,
+      level: level.toUpperCase(),
+      existingClasses: existingClasses.map(c => ({
+        name: c.name,
+        stream: c.stream
+      })),
+      availableStreams,
+      suggestion: availableStreams.length > 0 
+        ? `Try: ${availableStreams.join(', ')}` 
+        : 'All common streams are taken. Try a unique stream name.'
+    });
+  } catch (error) {
+    console.error('Error fetching available streams:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch available streams'
+    });
+  }
+});
 
 // ──────────────────────────────────────────────────────────────
-// 22. TEST ROUTES
+// 23. TEST ROUTES
 // ──────────────────────────────────────────────────────────────
 router.get('/test', (req, res) => {
   console.log('✅ GET /api/classes/test - Test route hit');
@@ -1912,7 +2039,7 @@ router.get('/health', (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────
-// 23. RESET class metadata (for fixing corrupted data)
+// 24. RESET class metadata (for fixing corrupted data)
 // ──────────────────────────────────────────────────────────────
 router.patch('/:id/reset-metadata', auth, adminOrSuperAdmin, validateObjectId, async (req, res) => {
   try {
@@ -1968,7 +2095,7 @@ router.patch('/:id/reset-metadata', auth, adminOrSuperAdmin, validateObjectId, a
 });
 
 // ──────────────────────────────────────────────────────────────
-// 24. SIMPLE CREATE route for testing (bypasses some validation)
+// 25. SIMPLE CREATE route for testing (bypasses some validation)
 // ──────────────────────────────────────────────────────────────
 router.post('/simple-create', auth, adminOrSuperAdmin, async (req, res) => {
   try {
@@ -1991,6 +2118,7 @@ router.post('/simple-create', auth, adminOrSuperAdmin, async (req, res) => {
       name: name.trim().toUpperCase(),
       shortName: shortName,
       level: level.toUpperCase(),
+      stream: 'GENERAL', // Default stream
       metadata: {
         notes: [`Class created via simple-create by ${req.user.username}`],
         createdBy: req.user.id,
@@ -2009,7 +2137,8 @@ router.post('/simple-create', auth, adminOrSuperAdmin, async (req, res) => {
         id: newClass._id,
         name: newClass.name,
         shortName: newClass.shortName,
-        level: newClass.level
+        level: newClass.level,
+        stream: newClass.stream
       }
     });
   } catch (err) {
@@ -2023,7 +2152,7 @@ router.post('/simple-create', auth, adminOrSuperAdmin, async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────
-// 25. EMERGENCY FIX: Repair corrupted class data
+// 26. EMERGENCY FIX: Repair corrupted class data
 // ──────────────────────────────────────────────────────────────
 router.patch('/:id/repair', auth, adminOrSuperAdmin, validateObjectId, async (req, res) => {
   try {
@@ -2062,6 +2191,11 @@ router.patch('/:id/repair', auth, adminOrSuperAdmin, validateObjectId, async (re
       } else {
         updates.level = 'JSS1'; // Default
       }
+    }
+
+    // Fix stream if missing
+    if (!classData.stream || classData.stream.trim() === '') {
+      updates.stream = 'GENERAL';
     }
 
     // Fix shortName if missing
@@ -2133,9 +2267,8 @@ router.patch('/:id/repair', auth, adminOrSuperAdmin, validateObjectId, async (re
   }
 });
 
-
 // ──────────────────────────────────────────────────────────────
-// 26. BULK add students to class
+// 27. BULK add students to class
 // ──────────────────────────────────────────────────────────────
 router.post('/:id/students/bulk', auth, adminOrSuperAdmin, validateObjectId, async (req, res) => {
   try {

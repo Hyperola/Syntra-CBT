@@ -131,6 +131,20 @@ const resultSchema = new mongoose.Schema({
     type: String,
     trim: true,
     maxlength: [500, 'Remarks cannot exceed 500 characters']
+  },
+  // New visibility fields
+  isVisibleToParent: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  scheduledVisibility: {
+    type: Date,
+    default: null
+  },
+  updatedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
   }
 }, {
   timestamps: true
@@ -141,6 +155,7 @@ resultSchema.index({ userId: 1, subject: 1, class: 1, session: 1, term: 1 });
 resultSchema.index({ testId: 1, userId: 1 }, { unique: true }); // Prevent duplicate results
 resultSchema.index({ class: 1, subject: 1, session: 1, term: 1 });
 resultSchema.index({ session: 1, term: 1, isActive: 1 });
+resultSchema.index({ isVisibleToParent: 1, scheduledVisibility: 1 });
 
 // Pre-save middleware to calculate derived fields
 resultSchema.pre('save', async function(next) {
@@ -226,6 +241,191 @@ resultSchema.statics.getClassAverage = async function(classId, subject, session,
   } : { averageScore: 0, studentCount: 0 };
 };
 
+// New static method to get results visible to parents
+resultSchema.statics.getParentVisibleResults = function(studentId, session = null, term = null) {
+  const query = { 
+    userId: studentId, 
+    isActive: true,
+    isVisibleToParent: true,
+    $or: [
+      { scheduledVisibility: null },
+      { scheduledVisibility: { $lte: new Date() } }
+    ]
+  };
+  
+  if (session) query.session = session;
+  if (term) query.term = term;
+  
+  return this.find(query)
+    .populate('testId', 'title subject class totalMarks type')
+    .populate('class', 'name level')
+    .populate('updatedBy', 'name surname')
+    .sort({ submittedAt: -1 });
+};
+
+// New static method to update visibility for multiple results
+resultSchema.statics.updateVisibility = async function(resultIds, visibilityData, userId) {
+  const updateData = {
+    ...visibilityData,
+    updatedBy: userId,
+    updatedAt: new Date()
+  };
+
+  return this.updateMany(
+    { _id: { $in: resultIds } },
+    { $set: updateData }
+  );
+};
+
+// New static method to check and apply scheduled visibility
+resultSchema.statics.applyScheduledVisibility = async function() {
+  const now = new Date();
+  
+  return this.updateMany(
+    {
+      isVisibleToParent: false,
+      scheduledVisibility: { $lte: now, $ne: null }
+    },
+    {
+      $set: { 
+        isVisibleToParent: true,
+        updatedAt: now
+      }
+    }
+  );
+};
+
+
+// In models/Result.js, add these methods to the schema:
+
+// Instance method to check if visible to parent
+resultSchema.methods.isVisibleToParentNow = function() {
+  const now = new Date();
+  
+  if (!this.isVisibleToParent) {
+    return false;
+  }
+  
+  // Check if scheduled visibility has passed
+  if (this.scheduledVisibility && this.scheduledVisibility > now) {
+    return false;
+  }
+  
+  return true;
+};
+
+// Instance method to record parent access
+resultSchema.methods.recordParentAccess = async function(parentId, accessType, ipAddress = null, userAgent = null) {
+  try {
+    const ReportCardAccess = mongoose.model('ReportCardAccess');
+    
+    // Record the access
+    const accessRecord = new ReportCardAccess({
+      resultId: this._id,
+      studentId: this.userId,
+      parentId: parentId,
+      accessType: accessType,
+      ipAddress: ipAddress,
+      userAgent: userAgent,
+      metadata: {
+        score: this.score,
+        subject: this.subject,
+        session: this.session,
+        term: this.term
+      }
+    });
+    
+    await accessRecord.save();
+    
+    // Update result's download count if it's a download
+    if (accessType === 'downloaded') {
+      await this.updateDownloadCount(parentId, ipAddress, userAgent);
+    }
+    
+    return accessRecord;
+  } catch (error) {
+    console.error('Error recording parent access:', error);
+    throw error;
+  }
+};
+
+// Instance method to update download count in Result model
+resultSchema.methods.updateDownloadCount = async function(parentId, ipAddress, userAgent) {
+  try {
+    // Check if parent already downloaded
+    const existingDownload = this.reportCardDownloads?.find(
+      download => download.parentId?.toString() === parentId.toString()
+    );
+    
+    if (existingDownload) {
+      // Update existing download
+      existingDownload.downloadedAt = new Date();
+      existingDownload.downloadCount += 1;
+      existingDownload.ipAddress = ipAddress;
+      existingDownload.userAgent = userAgent;
+    } else {
+      // Add new download record
+      if (!this.reportCardDownloads) {
+        this.reportCardDownloads = [];
+      }
+      
+      this.reportCardDownloads.push({
+        parentId: parentId,
+        downloadedAt: new Date(),
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        downloadCount: 1
+      });
+    }
+    
+    this.updatedAt = new Date();
+    await this.save();
+    
+    return this.reportCardDownloads;
+  } catch (error) {
+    console.error('Error updating download count:', error);
+    throw error;
+  }
+};
+
+// Static method to get visible results for parent
+resultSchema.statics.getVisibleResultsForParent = async function(studentId, session = null, term = null) {
+  const query = {
+    userId: studentId,
+    isActive: true,
+    isVisibleToParent: true,
+    $or: [
+      { scheduledVisibility: null },
+      { scheduledVisibility: { $lte: new Date() } }
+    ]
+  };
+  
+  if (session) query.session = session;
+  if (term) query.term = term;
+  
+  return this.find(query)
+    .populate('testId', 'title subject class totalMarks type')
+    .populate('class', 'name level')
+    .populate('updatedBy', 'name surname')
+    .sort({ submittedAt: -1 });
+};
+
+// Static method for admin bulk visibility update
+resultSchema.statics.updateBulkVisibility = async function(resultIds, visibilityData, adminId) {
+  const updateData = {
+    isVisibleToParent: visibilityData.isVisible,
+    scheduledVisibility: visibilityData.scheduledDate || null,
+    updatedBy: adminId,
+    updatedAt: new Date()
+  };
+
+  return this.updateMany(
+    { _id: { $in: resultIds } },
+    { $set: updateData }
+  );
+};
+
+
 // Instance method to get detailed result analysis
 resultSchema.methods.getAnalysis = function() {
   const correctAnswers = Array.from(this.correctness.values()).filter(Boolean).length;
@@ -241,7 +441,9 @@ resultSchema.methods.getAnalysis = function() {
     percentage: this.percentage,
     grade: this.grade,
     timeSpent: this.timeSpent,
-    submittedAt: this.submittedAt
+    submittedAt: this.submittedAt,
+    isVisibleToParent: this.isVisibleToParent,
+    scheduledVisibility: this.scheduledVisibility
   };
 };
 
@@ -253,7 +455,12 @@ resultSchema.virtual('displayInfo').get(function() {
     subject: this.subject,
     className: this.class?.name || 'Unknown Class',
     session: this.session,
-    term: this.term
+    term: this.term,
+    visibility: {
+      isVisibleToParent: this.isVisibleToParent,
+      scheduledVisibility: this.scheduledVisibility,
+      updatedBy: this.updatedBy
+    }
   };
 });
 

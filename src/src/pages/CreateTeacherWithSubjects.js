@@ -1,4 +1,4 @@
-// pages/CreateTeacherWithSubjects.js - UPDATED WITH SINGLE REQUEST PROFILE IMAGE UPLOAD
+// pages/CreateTeacherWithSubjects.js - UPDATED WITH CORRECT SUBJECT FETCHING
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -36,7 +36,7 @@ const CreateTeacherWithSubjects = () => {
     age: '',
   });
   
-  // Image upload state - UPDATED WITH SINGLE REQUEST APPROACH
+  // Image upload state
   const [profileImage, setProfileImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -111,6 +111,7 @@ const CreateTeacherWithSubjects = () => {
     }
   };
 
+  // UPDATED: Fetch subjects for a specific class using correct endpoint
   const fetchAssignmentSubjects = async (classId) => {
     if (!classId) {
       setAvailableSubjectsForAssignment([]);
@@ -121,65 +122,51 @@ const CreateTeacherWithSubjects = () => {
     try {
       const authToken = token || localStorage.getItem('token');
       
+      console.log('🔍 Fetching subjects for class:', classId);
+      
+      // FIXED: Use the correct class-subjects endpoint
+      const res = await axios.get(`http://localhost:5000/api/class-subjects/class/${classId}`, {
+        headers: { Authorization: `Bearer ${authToken}` }
+      });
+      
+      console.log('📚 Subjects API response:', res.data);
+      
       let subjectsList = [];
       
-      try {
-        const res = await axios.get(`http://localhost:5000/api/users/assignment/classes/${classId}/subjects`, {
-          headers: { Authorization: `Bearer ${authToken}` }
-        });
-        
-        if (res.data && Array.isArray(res.data.subjects)) {
-          subjectsList = res.data.subjects;
-        } else if (res.data && res.data.success && Array.isArray(res.data.data)) {
-          subjectsList = res.data.data;
-        }
-      } catch (firstErr) {
-        console.warn('Assignment subjects API failed, trying alternative...');
-        try {
-          const res = await axios.get(`http://localhost:5000/api/classes/${classId}/subjects`, {
-            headers: { Authorization: `Bearer ${authToken}` }
-          });
-          
-          if (res.data && Array.isArray(res.data.subjects)) {
-            subjectsList = res.data.subjects;
-          } else if (res.data && res.data.success && Array.isArray(res.data.data)) {
-            subjectsList = res.data.data;
-          }
-        } catch (secondErr) {
-          console.warn('Second API failed, trying all subjects...');
-          const res = await axios.get('http://localhost:5000/api/subjects', {
-            headers: { Authorization: `Bearer ${authToken}` }
-          });
-          
-          if (res.data && Array.isArray(res.data.subjects)) {
-            subjectsList = res.data.subjects.filter(sub => 
-              sub.classId === classId || sub.class === classId || 
-              (sub.classes && sub.classes.includes(classId))
-            );
-          } else if (res.data && res.data.success && Array.isArray(res.data.data)) {
-            subjectsList = res.data.data.filter(sub => 
-              sub.classId === classId || sub.class === classId || 
-              (sub.classes && sub.classes.includes(classId))
-            );
-          } else if (Array.isArray(res.data)) {
-            subjectsList = res.data.filter(sub => 
-              sub.classId === classId || sub.class === classId || 
-              (sub.classes && sub.classes.includes(classId))
-            );
-          }
-        }
+      // Handle different response formats
+      if (res.data && Array.isArray(res.data.subjects)) {
+        subjectsList = res.data.subjects;
+      } else if (res.data && Array.isArray(res.data)) {
+        subjectsList = res.data;
+      } else if (res.data && res.data.data && Array.isArray(res.data.data)) {
+        subjectsList = res.data.data;
       }
       
-      const formattedSubjects = subjectsList.map(sub => ({
-        id: sub._id || sub.id || sub.subjectId,
-        _id: sub._id || sub.id || sub.subjectId,
-        name: sub.name || sub.displayName || sub.subjectName || sub.subject?.name || 'Unknown Subject',
-        code: sub.code || sub.subjectCode || '',
-        isCore: sub.isCore || false
-      })).filter(Boolean);
+      console.log('📦 Extracted subjects list:', subjectsList);
+      
+      // Format subjects properly
+      const formattedSubjects = subjectsList.map(subjectItem => {
+        // Extract subject data from different response structures
+        const subject = subjectItem.subject || subjectItem;
+        const assignmentId = subjectItem._id || subjectItem.id;
+        
+        return {
+          id: assignmentId, // Use the assignment ID for tracking
+          subjectId: subject?._id || subject?.id, // The actual subject ID
+          name: subject?.name || subjectItem.name || 'Unknown Subject',
+          code: subject?.code || subjectItem.code || '',
+          isCompulsory: subjectItem.isCompulsory || false,
+          isCore: subjectItem.isCore || subjectItem.isCompulsory || false,
+          periodCount: subjectItem.periodCount || 0,
+          teacher: subjectItem.teacher
+        };
+      }).filter(sub => sub.id && sub.name);
+      
+      console.log('✨ Formatted subjects:', formattedSubjects);
       
       setAvailableSubjectsForAssignment(formattedSubjects);
       
+      // Update cache
       const newCache = { ...subjectCache };
       formattedSubjects.forEach(sub => {
         if (sub.id && sub.name) {
@@ -189,9 +176,45 @@ const CreateTeacherWithSubjects = () => {
       setSubjectCache(newCache);
       
     } catch (err) {
-      console.error('Error fetching assignment subjects:', err);
-      setError('Failed to load subjects for assignment.');
-      setAvailableSubjectsForAssignment([]);
+      console.error('❌ Error fetching assignment subjects:', err);
+      
+      // Try alternative endpoint as fallback
+      try {
+        const authToken = token || localStorage.getItem('token');
+        const res = await axios.get(`http://localhost:5000/api/classes/${classId}/subjects`, {
+          headers: { Authorization: `Bearer ${authToken}` }
+        });
+        
+        let subjectsList = [];
+        if (res.data && Array.isArray(res.data.subjects)) {
+          subjectsList = res.data.subjects;
+        } else if (res.data && Array.isArray(res.data)) {
+          subjectsList = res.data;
+        }
+        
+        const formattedSubjects = subjectsList.map(subject => ({
+          id: subject._id || subject.id || subject.subject?._id || subject.subjectId,
+          subjectId: subject.subject?._id || subject.subjectId,
+          name: subject.name || subject.subject?.name || 'Unknown Subject',
+          code: subject.code || subject.subject?.code || '',
+          isCore: subject.isCore || false
+        })).filter(Boolean);
+        
+        setAvailableSubjectsForAssignment(formattedSubjects);
+        
+        const newCache = { ...subjectCache };
+        formattedSubjects.forEach(sub => {
+          if (sub.id && sub.name) {
+            newCache[sub.id] = sub.name;
+          }
+        });
+        setSubjectCache(newCache);
+        
+      } catch (fallbackErr) {
+        console.error('❌ Fallback also failed:', fallbackErr);
+        setError('Failed to load subjects for this class.');
+        setAvailableSubjectsForAssignment([]);
+      }
     } finally {
       setLoadingAssignmentSubjects(false);
     }
@@ -224,14 +247,14 @@ const CreateTeacherWithSubjects = () => {
     await fetchAssignmentSubjects(classId);
   };
 
-  const handleAssignmentSubjectToggle = (subjectId) => {
+  const handleAssignmentSubjectToggle = (subjectAssignmentId) => {
     setTeacherAssignmentModal(prev => {
-      const isSelected = prev.selectedSubjects.includes(subjectId);
+      const isSelected = prev.selectedSubjects.includes(subjectAssignmentId);
       return {
         ...prev,
         selectedSubjects: isSelected 
-          ? prev.selectedSubjects.filter(id => id !== subjectId)
-          : [...prev.selectedSubjects, subjectId]
+          ? prev.selectedSubjects.filter(id => id !== subjectAssignmentId)
+          : [...prev.selectedSubjects, subjectAssignmentId]
       };
     });
   };
@@ -247,37 +270,46 @@ const CreateTeacherWithSubjects = () => {
 
     try {
       const authToken = token || localStorage.getItem('token');
-      const subjectPromises = teacherAssignmentModal.selectedSubjects.map(async (subjectId) => {
-        try {
-          const res = await axios.get(`http://localhost:5000/api/subjects/${subjectId}`, {
-            headers: { Authorization: `Bearer ${authToken}` }
-          });
-          
-          if (res.data && res.data.subject) {
-            return {
-              id: subjectId,
-              name: res.data.subject.name || res.data.subject.displayName || 'Unknown Subject'
-            };
-          }
-        } catch (err) {
-          console.warn(`Could not fetch subject ${subjectId}:`, err.message);
+      
+      // Get subject details for selected assignment IDs
+      const subjectPromises = teacherAssignmentModal.selectedSubjects.map(async (assignmentId) => {
+        const subjectInfo = availableSubjectsForAssignment.find(sub => sub.id === assignmentId);
+        
+        if (subjectInfo) {
           return {
-            id: subjectId,
-            name: subjectCache[subjectId] || `Subject ${subjectId}`
+            id: assignmentId, // This is the class-subject assignment ID
+            subjectId: subjectInfo.subjectId, // The actual subject ID
+            name: subjectInfo.name,
+            isCompulsory: subjectInfo.isCompulsory,
+            isCore: subjectInfo.isCore
           };
         }
+        
+        // Fallback if subject info not in cache
+        return {
+          id: assignmentId,
+          subjectId: assignmentId,
+          name: subjectCache[assignmentId] || `Subject ${assignmentId.substring(0, 4)}...`,
+          isCompulsory: false,
+          isCore: false
+        };
       });
 
-      const subjectsWithNames = await Promise.all(subjectPromises);
+      const subjectsWithDetails = await Promise.all(subjectPromises);
 
       const newAssignment = {
         class: teacherAssignmentModal.selectedClass,
-        subjects: subjectsWithNames.map(subject => ({
-          subject: subject.id,
-          subjectName: subject.name
+        className: selectedClass.name,
+        subjects: subjectsWithDetails.map(subject => ({
+          assignmentId: subject.id, // The class-subject assignment ID
+          subjectId: subject.subjectId, // The actual subject ID
+          subjectName: subject.name,
+          isCompulsory: subject.isCompulsory,
+          isCore: subject.isCore
         }))
       };
 
+      // Check if this class already has assignments
       const existingIndex = teacherAssignments.findIndex(
         assignment => assignment.class === teacherAssignmentModal.selectedClass
       );
@@ -287,9 +319,10 @@ const CreateTeacherWithSubjects = () => {
         updatedAssignments = [...teacherAssignments];
         const existingAssignment = updatedAssignments[existingIndex];
         
-        const existingSubjectIds = existingAssignment.subjects.map(s => s.subject);
+        // Check for duplicate subjects
+        const existingSubjectIds = existingAssignment.subjects.map(s => s.assignmentId);
         const newSubjects = newAssignment.subjects.filter(
-          subject => !existingSubjectIds.includes(subject.subject)
+          subject => !existingSubjectIds.includes(subject.assignmentId)
         );
         
         if (newSubjects.length > 0) {
@@ -308,12 +341,12 @@ const CreateTeacherWithSubjects = () => {
       setTeacherAssignments(updatedAssignments);
       closeTeacherAssignmentModal();
       
-      setSuccess(`Added ${subjectsWithNames.length} subject(s) to ${selectedClass.name}`);
+      setSuccess(`Added ${subjectsWithDetails.length} subject(s) to ${selectedClass.name}`);
       setTimeout(() => setSuccess(null), 3000);
       
     } catch (err) {
       console.error('Error adding assignment:', err);
-      setError('Failed to fetch subject details. Please try again.');
+      setError('Failed to process assignment. Please try again.');
     }
   };
 
@@ -323,7 +356,7 @@ const CreateTeacherWithSubjects = () => {
     );
   };
 
-  // Helper function to convert image to base64 - FROM CREATEADMIN.JS
+  // Helper function to convert image to base64
   const convertImageToBase64 = (file) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -333,11 +366,10 @@ const CreateTeacherWithSubjects = () => {
     });
   };
 
-  // UPDATED: Handle image upload with base64 conversion
+  // Handle image upload with base64 conversion
   const handleImageUpload = async (file) => {
     if (!file) return;
     
-    // Validate file
     const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
     const maxSize = 5 * 1024 * 1024; // 5MB
     
@@ -433,7 +465,7 @@ const CreateTeacherWithSubjects = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  // UPDATED: Handle submit with single request including base64 image
+  // Handle submit with single request including base64 image
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -462,19 +494,20 @@ const CreateTeacherWithSubjects = () => {
           console.log('✅ Image converted to base64, length:', profileImageBase64.length);
         } catch (imageErr) {
           console.warn('⚠️ Could not convert image to base64:', imageErr);
-          // Continue without image - don't fail the whole request
         }
       }
       
-      // Format teacher assignments correctly
+      // Format teacher assignments correctly for backend
       const formattedAssignments = teacherAssignments.map(assignment => {
         const classObj = classes.find(c => c._id === assignment.class);
-        const className = classObj ? classObj.name : 'Unknown Class';
         
         return {
           class: assignment.class,
           subjects: assignment.subjects.map(subject => ({
-            subject: subject.subject,
+            // Send the class-subject assignment ID
+            assignmentId: subject.assignmentId,
+            // Also send the subject ID
+            subjectId: subject.subjectId,
             subjectName: subject.subjectName
           }))
         };
@@ -503,13 +536,13 @@ const CreateTeacherWithSubjects = () => {
         ...(profileImageBase64 && { profileImage: profileImageBase64 })
       };
       
-      console.log('📤 Creating teacher with data (SINGLE REQUEST):', {
+      console.log('📤 Creating teacher with data:', {
         ...teacherDataToSend,
         password: '***',
         profileImage: profileImageBase64 ? 'BASE64_IMAGE_INCLUDED' : 'NO_IMAGE',
       });
       
-      // SINGLE REQUEST: Create teacher with profile image in one request
+      // Create teacher in one request
       const response = await axios.post('http://localhost:5000/api/users', 
         teacherDataToSend, 
         {
@@ -566,15 +599,13 @@ const CreateTeacherWithSubjects = () => {
       if (err.response) {
         console.error('📡 Response error details:', {
           status: err.response.status,
-          data: err.response.data,
-          headers: err.response.headers
+          data: err.response.data
         });
         
         if (err.response.status === 400) {
           const errorMsg = err.response.data.message || 'Validation error. Please check the form.';
           setError(errorMsg);
           
-          // Handle validation errors
           if (err.response.data.errors) {
             const validationErrors = {};
             err.response.data.errors.forEach(errorMsg => {
@@ -598,7 +629,6 @@ const CreateTeacherWithSubjects = () => {
           setError(err.response.data?.message || `Server error: ${err.response.status}`);
         }
       } else if (err.request) {
-        console.error('🌐 Network error details:', err.request);
         setError('Network error. Please check your connection and try again.');
       } else {
         setError('An unexpected error occurred. Please try again.');
@@ -635,7 +665,7 @@ const CreateTeacherWithSubjects = () => {
 
   if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) {
     return (
-      <div style={styles.authRequired}>
+      <div style={styles.container}>
         <div style={styles.errorMessage}>
           <FiAlertTriangle /> Access Denied - Admin access required
         </div>
@@ -675,7 +705,7 @@ const CreateTeacherWithSubjects = () => {
       )}
 
       <form onSubmit={handleSubmit} style={styles.form}>
-        {/* Profile Image Upload Section - UPDATED */}
+        {/* Profile Image Upload Section */}
         <div style={styles.imageUploadSection}>
           <h3 style={styles.sectionTitle}>Profile Image (Optional)</h3>
           <p style={styles.imageUploadHelp}>
@@ -1010,7 +1040,7 @@ const CreateTeacherWithSubjects = () => {
                   <div style={styles.assignmentSubjects}>
                     {assignment.subjects.map((subject, subIndex) => (
                       <span key={subIndex} style={styles.assignmentSubjectBadge}>
-                        {subject.subjectName || getSubjectName(subject.subject)}
+                        {subject.subjectName || getSubjectName(subject.assignmentId)}
                       </span>
                     ))}
                   </div>
@@ -1102,17 +1132,28 @@ const CreateTeacherWithSubjects = () => {
                               {subject.name} 
                               {subject.code && ` (${subject.code})`}
                               {subject.isCore && <span style={styles.coreBadge}>Core</span>}
+                              {subject.teacher && (
+                                <span style={styles.teacherBadge}>Already has teacher</span>
+                              )}
                             </span>
                           </label>
                         ))}
                       </div>
                       <small style={{ color: '#718096', fontSize: '12px' }}>
                         {teacherAssignmentModal.selectedSubjects.length} subject(s) selected
+                        {teacherAssignmentModal.selectedSubjects.length > 0 && 
+                          availableSubjectsForAssignment.some(sub => 
+                            teacherAssignmentModal.selectedSubjects.includes(sub.id) && sub.teacher
+                          ) && 
+                          <span style={{ color: '#D69E2E', marginLeft: '10px' }}>
+                            ⚠️ Some subjects already have teachers assigned
+                          </span>
+                        }
                       </small>
                     </>
                   ) : (
                     <div style={styles.noSubjectsMessage}>
-                      <p>No subjects available for this class.</p>
+                      <p>No subjects available for this class. Please add subjects to the class first.</p>
                     </div>
                   )}
                 </div>
@@ -1164,7 +1205,7 @@ const styles = {
     fontSize: '14px',
     fontWeight: '500',
     transition: 'all 0.2s',
-    '&:hover': {
+    ':hover': {
       backgroundColor: '#4A5568',
       transform: 'translateY(-2px)'
     }
@@ -1179,14 +1220,6 @@ const styles = {
     color: '#718096',
     margin: 0,
     fontSize: '16px'
-  },
-  authRequired: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: '100vh',
-    padding: '24px',
-    backgroundColor: '#F5F7FA'
   },
   errorMessage: {
     backgroundColor: '#FED7D7',
@@ -1223,7 +1256,7 @@ const styles = {
     padding: '4px',
     borderRadius: '4px',
     transition: 'background-color 0.2s',
-    '&:hover': {
+    ':hover': {
       backgroundColor: 'rgba(0,0,0,0.1)'
     }
   },
@@ -1258,7 +1291,7 @@ const styles = {
     borderBottom: '2px solid #D69E2E',
     paddingBottom: '8px'
   },
-  // Image Upload Styles - UPDATED
+  // Image Upload Styles
   imageUploadSection: {
     marginBottom: '32px',
     padding: '20px',
@@ -1275,10 +1308,7 @@ const styles = {
   imageUploadContainer: {
     display: 'flex',
     alignItems: 'center',
-    gap: '20px',
-    '@media (max-width: 768px)': {
-      flexDirection: 'column'
-    }
+    gap: '20px'
   },
   imagePreviewArea: {
     width: '150px',
@@ -1328,11 +1358,11 @@ const styles = {
     justifyContent: 'center',
     transition: 'all 0.2s',
     width: 'fit-content',
-    '&:hover:not(:disabled)': {
+    ':hover': {
       backgroundColor: '#2C5282',
       transform: 'translateY(-2px)'
     },
-    '&:disabled': {
+    ':disabled': {
       opacity: 0.5,
       cursor: 'not-allowed'
     }
@@ -1352,11 +1382,11 @@ const styles = {
     justifyContent: 'center',
     transition: 'all 0.2s',
     width: 'fit-content',
-    '&:hover:not(:disabled)': {
+    ':hover': {
       backgroundColor: '#FEB2B2',
       transform: 'translateY(-2px)'
     },
-    '&:disabled': {
+    ':disabled': {
       opacity: 0.5,
       cursor: 'not-allowed'
     }
@@ -1400,12 +1430,12 @@ const styles = {
     transition: 'border-color 0.2s, box-shadow 0.2s',
     backgroundColor: 'white',
     color: '#2D3748',
-    '&:focus': {
+    ':focus': {
       outline: 'none',
       borderColor: '#3182CE',
       boxShadow: '0 0 0 3px rgba(49, 130, 206, 0.1)'
     },
-    '&:disabled': {
+    ':disabled': {
       backgroundColor: '#F5F7FA',
       cursor: 'not-allowed'
     }
@@ -1425,12 +1455,12 @@ const styles = {
     color: '#2D3748',
     transition: 'border-color 0.2s',
     cursor: 'pointer',
-    '&:focus': {
+    ':focus': {
       outline: 'none',
       borderColor: '#3182CE',
       boxShadow: '0 0 0 3px rgba(49, 130, 206, 0.1)'
     },
-    '&:disabled': {
+    ':disabled': {
       backgroundColor: '#F5F7FA',
       cursor: 'not-allowed'
     }
@@ -1459,11 +1489,11 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     transition: 'all 0.2s',
-    '&:hover:not(:disabled)': {
+    ':hover': {
       backgroundColor: '#3A4218',
       transform: 'translateY(-2px)'
     },
-    '&:disabled': {
+    ':disabled': {
       opacity: 0.6,
       cursor: 'not-allowed'
     }
@@ -1504,11 +1534,11 @@ const styles = {
     padding: '4px',
     borderRadius: '4px',
     transition: 'all 0.2s',
-    '&:hover:not(:disabled)': {
+    ':hover': {
       backgroundColor: '#FED7D7',
       transform: 'translateY(-2px)'
     },
-    '&:disabled': {
+    ':disabled': {
       opacity: 0.6,
       cursor: 'not-allowed'
     }
@@ -1548,7 +1578,7 @@ const styles = {
     cursor: 'pointer',
     color: '#2D3748',
     transition: 'all 0.2s',
-    '&:hover': {
+    ':hover': {
       backgroundColor: '#F0F4F8',
       borderColor: '#CBD5E0'
     }
@@ -1557,6 +1587,15 @@ const styles = {
     fontSize: '10px',
     color: '#22543D',
     backgroundColor: '#C6F6D5',
+    padding: '2px 6px',
+    borderRadius: '10px',
+    marginLeft: '4px',
+    fontWeight: '500'
+  },
+  teacherBadge: {
+    fontSize: '10px',
+    color: '#D69E2E',
+    backgroundColor: '#FFF3CD',
     padding: '2px 6px',
     borderRadius: '10px',
     marginLeft: '4px',
@@ -1619,11 +1658,11 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     transition: 'all 0.2s',
-    '&:hover:not(:disabled)': {
+    ':hover': {
       backgroundColor: '#4A5568',
       transform: 'translateY(-2px)'
     },
-    '&:disabled': {
+    ':disabled': {
       opacity: 0.5,
       cursor: 'not-allowed'
     }
@@ -1641,12 +1680,12 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     transition: 'all 0.2s',
-    '&:hover:not(:disabled)': {
+    ':hover': {
       backgroundColor: '#B7791F',
       transform: 'translateY(-2px)',
       color: 'white'
     },
-    '&:disabled': {
+    ':disabled': {
       opacity: 0.5,
       cursor: 'not-allowed',
       backgroundColor: '#D69E2E'
@@ -1688,7 +1727,7 @@ const styles = {
     cursor: 'pointer',
     padding: '4px',
     borderRadius: '4px',
-    '&:hover': {
+    ':hover': {
       backgroundColor: '#F5F7FA'
     }
   },
@@ -1715,12 +1754,12 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     transition: 'all 0.2s',
-    '&:hover:not(:disabled)': {
+    ':hover': {
       backgroundColor: '#B7791F',
       transform: 'translateY(-2px)',
       color: 'white'
     },
-    '&:disabled': {
+    ':disabled': {
       opacity: 0.6,
       cursor: 'not-allowed'
     }
@@ -1734,7 +1773,7 @@ const styles = {
     cursor: 'pointer',
     fontSize: '14px',
     transition: 'all 0.2s',
-    '&:hover': {
+    ':hover': {
       backgroundColor: '#4A5568',
       transform: 'translateY(-2px)'
     }
@@ -1747,28 +1786,6 @@ styleSheet.textContent = `
   @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
-  }
-  
-  button:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
-    transition: all 0.2s ease;
-  }
-  
-  button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-    transform: none !important;
-  }
-  
-  input[type="checkbox"] {
-    cursor: pointer;
-    accent-color: #3182CE;
-  }
-  
-  .subjectCheckbox input[type="checkbox"]:checked + span {
-    font-weight: 600;
-    color: #2D3748;
   }
   
   @media (max-width: 768px) {

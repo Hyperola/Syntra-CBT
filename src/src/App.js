@@ -18,6 +18,7 @@ import { AuthProvider } from './context/AuthContext';
 import AdminLayout from './components/AdminLayout';
 import CreateAdmin from './pages/CreateAdmin';
 import CreateSuperAdmin from './pages/CreateSuperAdmin';
+import CreateParent from './pages/CreateParent'; // NEW IMPORT
 import ManageClasses from './pages/ManageClasses';
 import ManageSubjects from './pages/ManageSubjects';
 import ManageUsers from './pages/ManageUsers';
@@ -53,6 +54,17 @@ import PreviewTest from './pages/PreviewTest';
 
 // ADD THIS IMPORT - Make sure the path is correct
 import AnalyticsPage from './pages/AnalyticsPage'; // Admin analytics page
+
+// PARENT PORTAL COMPONENTS
+import ParentDashboard from './pages/parent/ParentDashboard';
+import ParentChildren from './pages/parent/ParentChildren';
+import ParentChildResults from './pages/parent/ParentChildResults';
+import ParentFeedback from './pages/parent/ParentFeedback';
+import ParentProfile from './pages/parent/ParentProfile';
+
+// IMPORT THE NEW ADMIN PAGES FOR PARENT FEEDBACK AND RESULT VISIBILITY
+import ParentFeedbackAdmin from './pages/ParentFeedbackAdmin';
+import ResultVisibility from './pages/ResultVisibilityControl';
 
 // Simple components that don't use AuthContext
 const RootRedirect = () => {
@@ -178,14 +190,69 @@ const AppContent = () => {
         
         {/* Teacher Analytics route (keep this for teachers) */}
         <Route
-  path="/teacher/analytics"
-  element={
-    <ProtectedRoute requiredRole="teacher">
-      <TeacherHome><TeacherAnalytics /></TeacherHome> {/* Updated component */}
-    </ProtectedRoute>
-  }
-/>
+          path="/teacher/analytics"
+          element={
+            <ProtectedRoute requiredRole="teacher">
+              <TeacherHome><TeacherAnalytics /></TeacherHome> {/* Updated component */}
+            </ProtectedRoute>
+          }
+        />
 
+        {/* PARENT PORTAL ROUTES */}
+        <Route
+          path="/parent/dashboard"
+          element={
+            <ProtectedRoute requiredRole="parent">
+              <ParentDashboard />
+            </ProtectedRoute>
+          }
+        />
+        
+        <Route
+          path="/parent/children"
+          element={
+            <ProtectedRoute requiredRole="parent">
+              <ParentChildren />
+            </ProtectedRoute>
+          }
+        />
+        
+        <Route
+          path="/parent/child/:studentId/results"
+          element={
+            <ProtectedRoute requiredRole="parent">
+              <ParentChildResults />
+            </ProtectedRoute>
+          }
+        />
+        
+        <Route
+          path="/parent/feedback"
+          element={
+            <ProtectedRoute requiredRole="parent">
+              <ParentFeedback />
+            </ProtectedRoute>
+          }
+        />
+        
+        <Route
+          path="/parent/profile"
+          element={
+            <ProtectedRoute requiredRole="parent">
+              <ParentProfile />
+            </ProtectedRoute>
+          }
+        />
+        
+        {/* Redirect /parent to /parent/dashboard */}
+        <Route
+          path="/parent"
+          element={
+            <ProtectedRoute requiredRole="parent">
+              <Navigate to="/parent/dashboard" replace />
+            </ProtectedRoute>
+          }
+        />
         
         {/* Admin routes */}
         <Route
@@ -234,6 +301,16 @@ const AppContent = () => {
           }
         />
         
+        {/* CREATE PARENT ROUTE */}
+        <Route
+          path="/admin/users/create-parent"
+          element={
+            <ProtectedRoute requiredRoles={['admin', 'super_admin']}>
+              <AdminLayout><CreateParent /></AdminLayout>
+            </ProtectedRoute>
+          }
+        />
+        
         {/* CREATE TEACHER ROUTE */}
         <Route
           path="/admin/users/create-teacher"
@@ -267,13 +344,13 @@ const AppContent = () => {
         {/* Transcript and Promotion Route */}
 
         <Route
-  path="/admin/transcripts"
-  element={
-    <ProtectedRoute requiredRoles={['admin', 'super_admin']}>
-      <AdminLayout><StudentTranscriptPage /></AdminLayout>
-    </ProtectedRoute>
-  }
-/>
+          path="/admin/transcripts"
+          element={
+            <ProtectedRoute requiredRoles={['admin', 'super_admin']}>
+              <AdminLayout><StudentTranscriptPage /></AdminLayout>
+            </ProtectedRoute>
+          }
+        />
         
         {/* Class Subjects Management Route (Legacy - redirects to new structure) */}
         <Route
@@ -428,6 +505,26 @@ const AppContent = () => {
           element={
             <ProtectedRoute requiredRoles={['admin', 'super_admin']}>
               <AdminLayout><PromotionPanel /></AdminLayout>
+            </ProtectedRoute>
+          }
+        />
+        
+        {/* Parent Feedback Admin Route - NEW */}
+        <Route
+          path="/admin/parent-feedback"
+          element={
+            <ProtectedRoute requiredRoles={['admin', 'super_admin']}>
+              <AdminLayout><ParentFeedbackAdmin /></AdminLayout>
+            </ProtectedRoute>
+          }
+        />
+        
+        {/* Result Visibility Route - NEW */}
+        <Route
+          path="/admin/result-visibility"
+          element={
+            <ProtectedRoute requiredRoles={['admin', 'super_admin']}>
+              <AdminLayout><ResultVisibility /></AdminLayout>
             </ProtectedRoute>
           }
         />

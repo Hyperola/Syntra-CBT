@@ -1,4 +1,4 @@
-// pages/CreateStudentWithSubjects.js - UPDATED WITH SINGLE REQUEST PROFILE IMAGE UPLOAD
+// pages/CreateStudentWithSubjects.js - UPDATED WITH CORRECT SUBJECT FORMATTING
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -38,7 +38,7 @@ const CreateStudentWithSubjects = () => {
     active: true,
   });
   
-  // Image upload state - UPDATED WITH SINGLE REQUEST APPROACH
+  // Image upload state
   const [profileImage, setProfileImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -112,72 +112,120 @@ const CreateStudentWithSubjects = () => {
     }
   };
 
+  // UPDATED: Fetch subjects for a specific class
   const fetchClassSubjects = async (classId) => {
     try {
       const authToken = token || localStorage.getItem('token');
       
+      console.log('🔍 Fetching subjects for class:', classId);
+      
+      // Try multiple endpoints to get subjects
       let subjectsList = [];
       
       try {
-        const res = await axios.get(`http://localhost:5000/api/classes/${classId}/subjects`, {
+        // First try the subjects-by-class endpoint
+        const res = await axios.get(`http://localhost:5000/api/subjects/class/${classId}`, {
           headers: { Authorization: `Bearer ${authToken}` }
         });
         
+        console.log('📚 Subjects API response:', res.data);
+        
+        // Handle different response formats
         if (res.data && Array.isArray(res.data.subjects)) {
           subjectsList = res.data.subjects;
-        } else if (res.data && res.data.success && Array.isArray(res.data.data)) {
-          subjectsList = res.data.data;
-        } else if (Array.isArray(res.data)) {
+        } else if (res.data && Array.isArray(res.data)) {
           subjectsList = res.data;
+        } else if (res.data && res.data.data && Array.isArray(res.data.data)) {
+          subjectsList = res.data.data;
+        } else if (res.data && res.data.success && Array.isArray(res.data.subjects)) {
+          subjectsList = res.data.subjects;
         }
       } catch (firstErr) {
-        const res = await axios.get('http://localhost:5000/api/subjects', {
+        console.log('First endpoint failed, trying class-subjects endpoint:', firstErr.message);
+        
+        // Try class-subjects endpoint as fallback
+        const res2 = await axios.get(`http://localhost:5000/api/class-subjects/class/${classId}`, {
           headers: { Authorization: `Bearer ${authToken}` }
         });
         
-        if (res.data && Array.isArray(res.data.subjects)) {
-          subjectsList = res.data.subjects.filter(sub => 
-            sub.classId === classId || sub.class === classId || 
-            (sub.classes && sub.classes.includes(classId))
-          );
-        } else if (res.data && res.data.success && Array.isArray(res.data.data)) {
-          subjectsList = res.data.data.filter(sub => 
-            sub.classId === classId || sub.class === classId || 
-            (sub.classes && sub.classes.includes(classId))
-          );
-        } else if (Array.isArray(res.data)) {
-          subjectsList = res.data.filter(sub => 
-            sub.classId === classId || sub.class === classId || 
-            (sub.classes && sub.classes.includes(classId))
-          );
+        if (res2.data && Array.isArray(res2.data.subjects)) {
+          subjectsList = res2.data.subjects;
+        } else if (res2.data && Array.isArray(res2.data)) {
+          subjectsList = res2.data;
         }
       }
       
-      const subjectsListFormatted = subjectsList.map(sub => ({
-        id: sub._id || sub.id || sub.subjectId,
-        _id: sub._id || sub.id || sub.subjectId,
-        name: sub.name || sub.displayName || 'Unknown Subject',
-        code: sub.code || '',
-        isCore: sub.isCore || false
-      }));
+      console.log('📦 Extracted subjects list:', subjectsList);
+      
+      // Process subjects - get actual subject data
+      const subjectsListFormatted = subjectsList.map(item => {
+        // Extract subject from the item
+        const subject = item.subject || item;
+        
+        return {
+          id: subject._id || subject.id, // Use the actual subject ID
+          name: subject.name || 'Unknown Subject',
+          code: subject.code || '',
+          isCompulsory: item.isCompulsory || item.isCore || false,
+          isCore: item.isCore || item.isCompulsory || false,
+          periodCount: item.periodCount || 0,
+          teacher: item.teacher
+        };
+      }).filter(sub => sub.id && sub.name);
+      
+      console.log('✨ Formatted subjects for student enrollment:', subjectsListFormatted);
       
       setClassSubjects(subjectsListFormatted);
       
-      // Auto-select core subjects
-      const coreSubjectIds = subjectsListFormatted
-        .filter(subject => subject.isCore)
+      // Auto-select compulsory subjects (core subjects)
+      const compulsorySubjectIds = subjectsListFormatted
+        .filter(subject => subject.isCompulsory || subject.isCore)
         .map(subject => subject.id);
       
-      // Start with core subjects selected
-      setSelectedSubjects(coreSubjectIds);
+      // Start with compulsory subjects selected
+      setSelectedSubjects(compulsorySubjectIds);
+      
     } catch (err) {
-      console.error('Error fetching class subjects:', err);
-      setClassSubjects([]);
-      setSelectedSubjects([]);
+      console.error('❌ Error fetching class subjects:', err);
+      
+      // If all endpoints fail, try to get subjects from all subjects list
+      try {
+        const authToken = token || localStorage.getItem('token');
+        const allSubjectsRes = await axios.get('http://localhost:5000/api/subjects', {
+          headers: { Authorization: `Bearer ${authToken}` }
+        });
+        
+        let allSubjects = [];
+        if (allSubjectsRes.data && Array.isArray(allSubjectsRes.data.subjects)) {
+          allSubjects = allSubjectsRes.data.subjects;
+        } else if (allSubjectsRes.data && Array.isArray(allSubjectsRes.data)) {
+          allSubjects = allSubjectsRes.data;
+        } else if (allSubjectsRes.data && allSubjectsRes.data.success && Array.isArray(allSubjectsRes.data.data)) {
+          allSubjects = allSubjectsRes.data.data;
+        }
+        
+        // Just show some subjects (can't know which are for this class)
+        const subjectsListFormatted = allSubjects.map(subject => ({
+          id: subject._id || subject.id,
+          name: subject.name || 'Subject',
+          code: subject.code || '',
+          isCompulsory: false,
+          isCore: false,
+          periodCount: 0
+        }));
+        
+        setClassSubjects(subjectsListFormatted);
+        setSelectedSubjects([]);
+        
+      } catch (fallbackErr) {
+        console.error('❌ Fallback also failed:', fallbackErr);
+        setClassSubjects([]);
+        setSelectedSubjects([]);
+      }
     }
   };
 
-  // Helper function to convert image to base64 - FROM CREATEADMIN.JS
+  // Helper function to convert image to base64
   const convertImageToBase64 = (file) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -187,11 +235,10 @@ const CreateStudentWithSubjects = () => {
     });
   };
 
-  // UPDATED: Handle image upload with base64 conversion
+  // Handle image upload with base64 conversion
   const handleImageUpload = async (file) => {
     if (!file) return;
     
-    // Validate file
     const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
     const maxSize = 5 * 1024 * 1024; // 5MB
     
@@ -229,8 +276,8 @@ const CreateStudentWithSubjects = () => {
 
   const toggleSubjectSelection = (subjectId) => {
     const subject = classSubjects.find(s => s.id === subjectId);
-    if (subject && subject.isCore) {
-      // Core subjects cannot be deselected
+    if (subject && (subject.isCompulsory || subject.isCore)) {
+      // Compulsory/core subjects cannot be deselected
       return;
     }
     
@@ -314,7 +361,7 @@ const CreateStudentWithSubjects = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  // UPDATED: Handle submit with single request including base64 image
+  // UPDATED: Handle submit with correct subject format
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -340,21 +387,28 @@ const CreateStudentWithSubjects = () => {
       if (profileImage) {
         try {
           profileImageBase64 = await convertImageToBase64(profileImage);
-          console.log('✅ Image converted to base64, length:', profileImageBase64.length);
+          console.log('✅ Image converted to base64, length:', profileImageBase64?.length || 0);
         } catch (imageErr) {
           console.warn('⚠️ Could not convert image to base64:', imageErr);
-          // Continue without image - don't fail the whole request
         }
       }
       
-      // Get core and elective subjects
-      const coreSubjects = classSubjects.filter(subject => subject.isCore);
-      const electiveSubjects = classSubjects.filter(subject => !subject.isCore);
+      // Get compulsory (core) and elective subjects
+      const compulsorySubjects = classSubjects.filter(subject => subject.isCompulsory || subject.isCore);
+      const electiveSubjects = classSubjects.filter(subject => !subject.isCompulsory && !subject.isCore);
       
       // Only include selected elective subjects
       const electiveSubjectIds = electiveSubjects
         .filter(subject => selectedSubjects.includes(subject.id))
-        .map(subject => subject.id);
+        .map(subject => subject.id); // Send just the subject ID
+      
+      // Combine compulsory and selected elective subjects - FIXED: Send subject IDs only
+      const allSelectedSubjectIds = [
+        ...compulsorySubjects.map(subject => subject.id),
+        ...electiveSubjectIds
+      ];
+      
+      console.log('📤 Formatted subjects for backend:', allSelectedSubjectIds);
       
       // Build student data with profile image as base64
       const studentDataToSend = {
@@ -375,20 +429,21 @@ const CreateStudentWithSubjects = () => {
         active: studentData.active,
         parentEmail: studentData.parentEmail?.trim() || undefined,
         parentPhoneNumber: studentData.parentPhoneNumber?.trim() || undefined,
-        // Send only elective subjects - backend will add core subjects automatically
-        enrolledSubjects: electiveSubjectIds,
+        // FIXED: Send enrolledSubjects as array of subject IDs only (not objects)
+        enrolledSubjects: allSelectedSubjectIds,
         // Add profile image as base64 if available
         ...(profileImageBase64 && { profileImage: profileImageBase64 })
       };
       
-      console.log('📤 Creating student with data (SINGLE REQUEST):', {
+      console.log('📤 Creating student with data:', {
         ...studentDataToSend,
         password: '***',
         profileImage: profileImageBase64 ? 'BASE64_IMAGE_INCLUDED' : 'NO_IMAGE',
-        enrolledSubjects: studentDataToSend.enrolledSubjects
+        enrolledSubjects: studentDataToSend.enrolledSubjects.length,
+        enrolledSubjectsSample: studentDataToSend.enrolledSubjects.slice(0, 3)
       });
       
-      // SINGLE REQUEST: Create student with profile image in one request
+      // Create student in one request
       const response = await axios.post('http://localhost:5000/api/users', 
         studentDataToSend, 
         {
@@ -402,13 +457,14 @@ const CreateStudentWithSubjects = () => {
       
       console.log('✅ Student creation response:', {
         success: response.data.success,
-        userId: response.data.user?._id || response.data.data?._id
+        userId: response.data.user?._id || response.data.data?._id,
+        message: response.data.message
       });
       
       if (response.data.success) {
-        const coreCount = coreSubjects.length;
+        const compulsoryCount = compulsorySubjects.length;
         const electiveCount = electiveSubjectIds.length;
-        setSuccess(`Student created successfully with profile image! Enrolled in ${coreCount} core subjects and ${electiveCount} elective subjects. Redirecting...`);
+        setSuccess(`Student created successfully with profile image! Enrolled in ${compulsoryCount} compulsory subjects and ${electiveCount} elective subjects. Redirecting...`);
         
         // Reset form
         setStudentData({
@@ -449,15 +505,13 @@ const CreateStudentWithSubjects = () => {
       if (err.response) {
         console.error('📡 Response error details:', {
           status: err.response.status,
-          data: err.response.data,
-          headers: err.response.headers
+          data: err.response.data
         });
         
         if (err.response.status === 400) {
           const errorMsg = err.response.data.message || 'Validation error. Please check the form.';
           setError(errorMsg);
           
-          // Handle validation errors
           if (err.response.data.errors) {
             const validationErrors = {};
             err.response.data.errors.forEach(errorMsg => {
@@ -478,11 +532,14 @@ const CreateStudentWithSubjects = () => {
           setError('Permission denied. You do not have access to create students.');
         } else if (err.response.status === 409) {
           setError('User with this username or email already exists.');
+        } else if (err.response.status === 500) {
+          // Show more detailed error for 500
+          const serverError = err.response.data?.error || err.response.data?.message;
+          setError(`Server error: ${serverError || 'Internal server error. Please check server logs.'}`);
         } else {
           setError(err.response.data?.message || `Server error: ${err.response.status}`);
         }
       } else if (err.request) {
-        console.error('🌐 Network error details:', err.request);
         setError('Network error. Please check your connection and try again.');
       } else {
         setError('An unexpected error occurred. Please try again.');
@@ -508,17 +565,17 @@ const CreateStudentWithSubjects = () => {
     }
   };
 
-  const getCoreSubjects = () => {
-    return classSubjects.filter(subject => subject.isCore);
+  const getCompulsorySubjects = () => {
+    return classSubjects.filter(subject => subject.isCompulsory || subject.isCore);
   };
 
   const getElectiveSubjects = () => {
-    return classSubjects.filter(subject => !subject.isCore);
+    return classSubjects.filter(subject => !subject.isCompulsory && !subject.isCore);
   };
 
   if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) {
     return (
-      <div style={styles.authRequired}>
+      <div style={styles.container}>
         <div style={styles.errorMessage}>
           <FiAlertCircle /> Access Denied - Admin access required
         </div>
@@ -558,7 +615,7 @@ const CreateStudentWithSubjects = () => {
       )}
 
       <form onSubmit={handleSubmit} style={styles.form}>
-        {/* Profile Image Upload Section - UPDATED */}
+        {/* Profile Image Upload Section */}
         <div style={styles.imageUploadSection}>
           <h3 style={styles.sectionTitle}>Profile Image (Optional)</h3>
           <p style={styles.imageUploadHelp}>
@@ -924,20 +981,23 @@ const CreateStudentWithSubjects = () => {
             <div style={styles.classInfo}>
               <h4 style={styles.className}>{classes.find(c => c._id === studentData.class)?.name}</h4>
               <p style={styles.classDescription}>
-                Core subjects are automatically enrolled. Select elective subjects below.
+                Compulsory subjects are automatically enrolled. Select elective subjects below.
               </p>
             </div>
             
-            {/* Core Subjects (Auto-enrolled) */}
-            {getCoreSubjects().length > 0 && (
+            {/* Compulsory Subjects (Auto-enrolled) */}
+            {getCompulsorySubjects().length > 0 && (
               <div style={styles.subjectGroup}>
-                <h4 style={styles.subjectGroupTitle}>Core Subjects (Required)</h4>
-                <div style={styles.coreSubjectsList}>
-                  {getCoreSubjects().map(subject => (
-                    <div key={subject.id} style={styles.coreSubjectItem}>
+                <h4 style={styles.subjectGroupTitle}>Compulsory Subjects (Required)</h4>
+                <div style={styles.compulsorySubjectsList}>
+                  {getCompulsorySubjects().map(subject => (
+                    <div key={subject.id} style={styles.compulsorySubjectItem}>
                       <span style={styles.subjectName}>
                         {subject.name}
                         {subject.code && ` (${subject.code})`}
+                        {subject.teacher && (
+                          <span style={styles.teacherInfo}> - Teacher: {subject.teacher?.firstName || subject.teacher?.username || 'Not Assigned'}</span>
+                        )}
                       </span>
                       <span style={styles.requiredBadge}>Required</span>
                     </div>
@@ -958,18 +1018,26 @@ const CreateStudentWithSubjects = () => {
                         checked={selectedSubjects.includes(subject.id)}
                         onChange={() => toggleSubjectSelection(subject.id)}
                         style={styles.checkbox}
-                        disabled={subject.isCore || loading}
+                        disabled={loading}
                       />
                       <div style={styles.subjectCheckboxContent}>
                         <span style={styles.subjectName}>{subject.name}</span>
                         {subject.code && (
                           <span style={styles.subjectCode}>{subject.code}</span>
                         )}
+                        {subject.teacher && (
+                          <span style={styles.teacherInfo}>
+                            Teacher: {subject.teacher?.firstName || subject.teacher?.username || 'Not Assigned'}
+                          </span>
+                        )}
                         <span style={styles.electiveBadge}>Elective</span>
                       </div>
                     </label>
                   ))}
                 </div>
+                <small style={styles.electiveHelpText}>
+                  Select elective subjects. All compulsory subjects are automatically selected.
+                </small>
               </div>
             )}
             
@@ -982,13 +1050,13 @@ const CreateStudentWithSubjects = () => {
                   <span style={styles.summaryValue}>{selectedSubjects.length}</span>
                 </div>
                 <div style={styles.summaryStat}>
-                  <span style={styles.summaryLabel}>Core Subjects:</span>
-                  <span style={styles.summaryValue}>{getCoreSubjects().length}</span>
+                  <span style={styles.summaryLabel}>Compulsory:</span>
+                  <span style={styles.summaryValue}>{getCompulsorySubjects().length}</span>
                 </div>
                 <div style={styles.summaryStat}>
-                  <span style={styles.summaryLabel}>Elective Subjects:</span>
+                  <span style={styles.summaryLabel}>Elective:</span>
                   <span style={styles.summaryValue}>
-                    {selectedSubjects.length - getCoreSubjects().length}
+                    {selectedSubjects.length - getCompulsorySubjects().length}
                   </span>
                 </div>
               </div>
@@ -1061,7 +1129,7 @@ const styles = {
     fontSize: '14px',
     fontWeight: '500',
     transition: 'all 0.2s',
-    '&:hover': {
+    ':hover': {
       backgroundColor: '#4A5568',
       transform: 'translateY(-2px)'
     }
@@ -1076,14 +1144,6 @@ const styles = {
     color: '#718096',
     margin: 0,
     fontSize: '16px'
-  },
-  authRequired: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: '100vh',
-    padding: '24px',
-    backgroundColor: '#F5F7FA'
   },
   errorMessage: {
     backgroundColor: '#FED7D7',
@@ -1120,7 +1180,7 @@ const styles = {
     padding: '4px',
     borderRadius: '4px',
     transition: 'background-color 0.2s',
-    '&:hover': {
+    ':hover': {
       backgroundColor: 'rgba(0,0,0,0.1)'
     }
   },
@@ -1147,7 +1207,7 @@ const styles = {
     borderBottom: '2px solid #D69E2E',
     paddingBottom: '8px'
   },
-  // Image Upload Styles - UPDATED
+  // Image Upload Styles
   imageUploadSection: {
     marginBottom: '32px',
     padding: '20px',
@@ -1214,11 +1274,11 @@ const styles = {
     justifyContent: 'center',
     transition: 'all 0.2s',
     width: 'fit-content',
-    '&:hover:not(:disabled)': {
+    ':hover': {
       backgroundColor: '#2C5282',
       transform: 'translateY(-2px)'
     },
-    '&:disabled': {
+    ':disabled': {
       opacity: 0.5,
       cursor: 'not-allowed'
     }
@@ -1238,11 +1298,11 @@ const styles = {
     justifyContent: 'center',
     transition: 'all 0.2s',
     width: 'fit-content',
-    '&:hover:not(:disabled)': {
+    ':hover': {
       backgroundColor: '#FEB2B2',
       transform: 'translateY(-2px)'
     },
-    '&:disabled': {
+    ':disabled': {
       opacity: 0.5,
       cursor: 'not-allowed'
     }
@@ -1280,12 +1340,12 @@ const styles = {
     transition: 'border-color 0.2s, box-shadow 0.2s',
     backgroundColor: 'white',
     color: '#2D3748',
-    '&:focus': {
+    ':focus': {
       outline: 'none',
       borderColor: '#3182CE',
       boxShadow: '0 0 0 3px rgba(49, 130, 206, 0.1)'
     },
-    '&:disabled': {
+    ':disabled': {
       backgroundColor: '#F5F7FA',
       cursor: 'not-allowed'
     }
@@ -1305,12 +1365,12 @@ const styles = {
     color: '#2D3748',
     cursor: 'pointer',
     transition: 'border-color 0.2s',
-    '&:focus': {
+    ':focus': {
       outline: 'none',
       borderColor: '#3182CE',
       boxShadow: '0 0 0 3px rgba(49, 130, 206, 0.1)'
     },
-    '&:disabled': {
+    ':disabled': {
       backgroundColor: '#F5F7FA',
       cursor: 'not-allowed'
     }
@@ -1353,13 +1413,13 @@ const styles = {
     color: '#2D3748',
     margin: '0 0 16px 0'
   },
-  coreSubjectsList: {
+  compulsorySubjectsList: {
     display: 'flex',
     flexDirection: 'column',
     gap: '10px',
     marginBottom: '24px'
   },
-  coreSubjectItem: {
+  compulsorySubjectItem: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1371,6 +1431,11 @@ const styles = {
   },
   subjectName: {
     fontWeight: '500'
+  },
+  teacherInfo: {
+    fontSize: '12px',
+    color: '#718096',
+    fontStyle: 'italic'
   },
   requiredBadge: {
     padding: '4px 8px',
@@ -1395,7 +1460,7 @@ const styles = {
     transition: 'all 0.2s',
     backgroundColor: 'white',
     color: '#2D3748',
-    '&:hover': {
+    ':hover': {
       borderColor: '#CBD5E0',
       backgroundColor: '#F7FAFC'
     }
@@ -1425,6 +1490,12 @@ const styles = {
     alignSelf: 'flex-start',
     marginTop: '4px',
     fontWeight: '500'
+  },
+  electiveHelpText: {
+    color: '#718096',
+    fontSize: '13px',
+    marginTop: '8px',
+    display: 'block'
   },
   summary: {
     backgroundColor: '#F5F7FA',
@@ -1496,11 +1567,11 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     transition: 'all 0.2s',
-    '&:hover:not(:disabled)': {
+    ':hover': {
       backgroundColor: '#4A5568',
       transform: 'translateY(-2px)'
     },
-    '&:disabled': {
+    ':disabled': {
       opacity: 0.5,
       cursor: 'not-allowed'
     }
@@ -1518,12 +1589,12 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     transition: 'all 0.2s',
-    '&:hover:not(:disabled)': {
+    ':hover': {
       backgroundColor: '#B7791F',
       transform: 'translateY(-2px)',
       color: 'white'
     },
-    '&:disabled': {
+    ':disabled': {
       opacity: 0.5,
       cursor: 'not-allowed'
     }

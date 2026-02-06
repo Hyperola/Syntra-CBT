@@ -7,21 +7,25 @@ import {
   FiTrendingUp, FiUserCheck, FiAlertTriangle, FiRefreshCw,
   FiEye, FiCheck, FiSettings, FiBarChart2, FiClock,
   FiChevronRight, FiDatabase, FiFileText, FiUser,
-  FiActivity, FiLayers, FiZap, FiAward, FiTarget
+  FiActivity, FiLayers, FiZap, FiAward, FiTarget,
+  FiUserPlus, FiLink
 } from 'react-icons/fi';
 
 const AdminDashboard = () => {
   const { user } = useContext(AuthContext);
   const navigate = useNavigate();
   const [data, setData] = useState({
-    stats: { classes: 0, students: 0, teachers: 0, tests: 0, sessions: 0 },
+    stats: { classes: 0, students: 0, teachers: 0, tests: 0, sessions: 0, parents: 0, childrenLinked: 0 },
     recentTests: [],
     upcomingSessions: [],
     userStats: {
       total: 0,
       byRole: {},
       active: 0,
-      inactive: 0
+      inactive: 0,
+      parents: 0,
+      activeParents: 0,
+      childrenLinked: 0
     }
   });
   const [loading, setLoading] = useState(true);
@@ -140,7 +144,7 @@ const AdminDashboard = () => {
     return 'All Classes';
   };
 
-  // Fetch dashboard data - FIXED TESTS API CALL
+  // Fetch dashboard data - UPDATED WITH PARENT STATS
   const fetchDashboardData = useCallback(async () => {
     if (!user || !['admin', 'super_admin'].includes(user.role)) {
       setLoading(false);
@@ -176,7 +180,7 @@ const AdminDashboard = () => {
         console.error('❌ Classes fetch error:', err.message);
       }
 
-      // 2. Fetch user statistics
+      // 2. Fetch user statistics - UPDATED TO INCLUDE PARENTS
       try {
         const usersRes = await axios.get(`${API_BASE_URL}/api/users?limit=1000`, { 
           headers,
@@ -199,20 +203,32 @@ const AdminDashboard = () => {
           // Calculate statistics from the user data
           const students = users.filter(u => u?.role === 'student').length;
           const teachers = users.filter(u => u?.role === 'teacher').length;
+          const parents = users.filter(u => u?.role === 'parent').length; // NEW
           const admins = users.filter(u => u?.role === 'admin' || u?.role === 'super_admin').length;
           const activeUsers = users.filter(u => u?.active === true).length;
           const inactiveUsers = users.filter(u => u?.active === false).length;
+          
+          // Calculate children linked to parents - NEW
+          let totalChildrenLinked = 0;
+          users.forEach(u => {
+            if (u?.role === 'parent' && u.children && Array.isArray(u.children)) {
+              totalChildrenLinked += u.children.length;
+            }
+          });
           
           userStats = {
             total: users.length,
             students,
             teachers,
+            parents, // NEW
             admins,
             active: activeUsers,
             inactive: inactiveUsers,
+            childrenLinked: totalChildrenLinked, // NEW
             byRole: {
               student: students,
               teacher: teachers,
+              parent: parents, // NEW
               admin: admins
             }
           };
@@ -222,12 +238,15 @@ const AdminDashboard = () => {
             total: 0,
             students: 0,
             teachers: 0,
+            parents: 0, // NEW
             admins: 0,
             active: 0,
             inactive: 0,
+            childrenLinked: 0, // NEW
             byRole: {
               student: 0,
               teacher: 0,
+              parent: 0, // NEW
               admin: 0
             }
           };
@@ -241,22 +260,24 @@ const AdminDashboard = () => {
           total: 0,
           students: 0,
           teachers: 0,
+          parents: 0, // NEW
           admins: 0,
           active: 0,
           inactive: 0,
+          childrenLinked: 0, // NEW
           byRole: {
             student: 0,
             teacher: 0,
+            parent: 0, // NEW
             admin: 0
           }
         };
       }
 
-      // 3. Fetch tests - FIXED WITH CORRECT ENDPOINT
+      // 3. Fetch tests
       try {
         console.log('🔍 Fetching tests from:', `${API_BASE_URL}/api/tests`);
         
-        // Use the correct endpoint from your routes
         const testsRes = await axios.get(`${API_BASE_URL}/api/tests`, { 
           headers,
           timeout: 8000 
@@ -274,16 +295,6 @@ const AdminDashboard = () => {
         tests = extractDataFromResponse(testsRes, 'tests');
         
         console.log('✅ Tests fetched:', tests.length);
-        if (tests.length > 0) {
-          console.log('📝 Sample test:', {
-            id: tests[0]._id,
-            title: tests[0].title,
-            class: tests[0].class,
-            classType: typeof tests[0].class,
-            classKeys: tests[0].class ? Object.keys(tests[0].class) : 'null'
-          });
-        }
-        
       } catch (err) {
         console.error('❌ Tests fetch error:', {
           message: err.message,
@@ -309,7 +320,8 @@ const AdminDashboard = () => {
       // Calculate statistics from fetched data
       const students = userStats.students || 0;
       const teachers = userStats.teachers || 0;
-      const totalUsers = userStats.total || (students + teachers);
+      const parents = userStats.parents || 0; // NEW
+      const totalUsers = userStats.total || (students + teachers + parents);
 
       // Get upcoming sessions (next 30 days)
       const now = new Date();
@@ -335,7 +347,7 @@ const AdminDashboard = () => {
         .slice(0, 5)
         : [];
 
-      // Get recent tests (last 5) - FIXED SORTING
+      // Get recent tests (last 5)
       const recentTests = Array.isArray(tests) ? tests
         .sort((a, b) => {
           try {
@@ -359,7 +371,9 @@ const AdminDashboard = () => {
           students, 
           teachers, 
           tests: Array.isArray(tests) ? tests.length : 0, 
-          sessions: Array.isArray(sessions) ? sessions.length : 0 
+          sessions: Array.isArray(sessions) ? sessions.length : 0,
+          parents, // NEW
+          childrenLinked: userStats.childrenLinked || 0 // NEW
         },
         recentTests,
         upcomingSessions: upcoming,
@@ -367,12 +381,15 @@ const AdminDashboard = () => {
           total: totalUsers,
           students,
           teachers,
+          parents, // NEW
           admins: userStats.admins || 0,
           active: userStats.active || 0,
           inactive: userStats.inactive || 0,
+          childrenLinked: userStats.childrenLinked || 0, // NEW
           byRole: {
             student: students,
             teacher: teachers,
+            parent: parents, // NEW
             admin: userStats.admins || 0
           }
         }
@@ -565,7 +582,7 @@ const AdminDashboard = () => {
           </div>
         </div>
 
-        {/* Stats Cards */}
+        {/* Stats Cards - UPDATED WITH PARENT STATS */}
         <div style={styles.statsGrid}>
           {[
             { 
@@ -594,6 +611,24 @@ const AdminDashboard = () => {
               description: 'Teaching staff',
               change: '+5%',
               trend: 'up'
+            },
+            { 
+              label: 'Parents', 
+              value: data.stats.parents, 
+              icon: FiUser, 
+              color: '#805AD5',
+              description: 'Registered parents',
+              change: data.stats.parents > 0 ? '+5%' : '0%',
+              trend: data.stats.parents > 0 ? 'up' : 'neutral'
+            },
+            { 
+              label: 'Linked Children', 
+              value: data.stats.childrenLinked, 
+              icon: FiLink, 
+              color: '#00B5D8',
+              description: 'Children linked',
+              change: data.stats.childrenLinked > 0 ? '+8%' : '0%',
+              trend: data.stats.childrenLinked > 0 ? 'up' : 'neutral'
             },
             { 
               label: 'Tests', 
@@ -638,9 +673,10 @@ const AdminDashboard = () => {
                 <button 
                   onClick={() => {
                     if (stat.label === 'Classes') navigate('/admin/classes');
-                    if (stat.label === 'Students' || stat.label === 'Teachers') navigate('/admin/users');
+                    if (stat.label === 'Students' || stat.label === 'Teachers' || stat.label === 'Parents') navigate('/admin/users');
                     if (stat.label === 'Tests') navigate('/admin/tests');
                     if (stat.label === 'Sessions') navigate('/admin/sessions');
+                    if (stat.label === 'Linked Children') navigate('/admin/users?role=parent');
                   }}
                   style={styles.statCardButton}
                 >
@@ -651,7 +687,7 @@ const AdminDashboard = () => {
           ))}
         </div>
 
-        {/* Quick Actions */}
+        {/* Quick Actions - UPDATED WITH PARENT ACTIONS */}
         <div style={styles.section}>
           <div style={styles.sectionHeader}>
             <div style={styles.sectionTitleRow}>
@@ -669,6 +705,21 @@ const AdminDashboard = () => {
                 description: 'Add, edit, and manage all users',
                 color: '#2563EB',
                 count: data.userStats.total
+              },
+              { 
+                title: 'Manage Parents', 
+                icon: FiUser, 
+                path: '/admin/users?role=parent', 
+                description: 'View and manage parent accounts',
+                color: '#805AD5',
+                count: data.userStats.byRole.parent || 0
+              },
+              { 
+                title: 'Create Parent', 
+                icon: FiUserPlus, 
+                path: '/admin/users/create-parent', 
+                description: 'Create new parent account',
+                color: '#9F7AEA'
               },
               { 
                 title: 'Manage Classes', 
@@ -928,7 +979,7 @@ const AdminDashboard = () => {
           </div>
         </div>
 
-        {/* System Summary */}
+        {/* System Summary - UPDATED WITH PARENT DISTRIBUTION */}
         <div style={styles.summary}>
           <div style={styles.summaryHeader}>
             <div style={styles.summaryTitleRow}>
@@ -966,6 +1017,19 @@ const AdminDashboard = () => {
                         ...styles.distributionBar,
                         width: `${((data.userStats.byRole.teacher || 0) / Math.max(data.userStats.total, 1)) * 100}%`,
                         backgroundColor: '#059669'
+                      }}
+                    />
+                  </div>
+                </div>
+                <div style={styles.distributionItem}>
+                  <span style={styles.distributionLabel}>Parents:</span>
+                  <span style={styles.distributionValue}>{data.userStats.byRole.parent || 0}</span>
+                  <div style={styles.distributionBarContainer}>
+                    <div 
+                      style={{
+                        ...styles.distributionBar,
+                        width: `${((data.userStats.byRole.parent || 0) / Math.max(data.userStats.total, 1)) * 100}%`,
+                        backgroundColor: '#805AD5'
                       }}
                     />
                   </div>
@@ -1019,6 +1083,12 @@ const AdminDashboard = () => {
                     {Object.values(data.stats).reduce((a, b) => a + b, 0).toLocaleString()}
                   </span>
                 </div>
+                <div style={styles.statusItem}>
+                  <span style={styles.statusLabel}>Children Linked:</span>
+                  <span style={styles.statusValue}>
+                    {data.stats.childrenLinked.toLocaleString()}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -1048,11 +1118,11 @@ const AdminDashboard = () => {
                 </div>
                 <div style={styles.quickStat}>
                   <div style={styles.quickStatIconContainer}>
-                    <FiCalendar style={styles.quickStatIcon} />
+                    <FiUser style={styles.quickStatIcon} />
                   </div>
                   <div style={styles.quickStatContent}>
-                    <span style={styles.quickStatValue}>{data.stats.sessions}</span>
-                    <span style={styles.quickStatLabel}>Sessions</span>
+                    <span style={styles.quickStatValue}>{data.stats.parents}</span>
+                    <span style={styles.quickStatLabel}>Parents</span>
                   </div>
                 </div>
               </div>
@@ -1951,7 +2021,7 @@ const styles = {
   errorBanner: {
     marginBottom: '24px',
     padding: '16px 20px',
-    backgroundColor: '#FEF2F2',
+    backgroundColor: '#FED7D7',
     border: '1px solid #FECACA',
     borderRadius: '12px',
     display: 'flex',

@@ -332,7 +332,15 @@ const DataExports = () => {
       });
       
       if (res.data && res.data.success) {
-        setUsers(res.data.users || []);
+        const usersData = res.data.users || [];
+        // Ensure students have firstName and lastName like in your users.js
+        const formattedUsers = usersData.map(user => ({
+          ...user,
+          firstName: user.firstName || user.name || '',
+          lastName: user.lastName || user.surname || '',
+          fullName: `${user.firstName || user.name || ''} ${user.lastName || user.surname || ''}`.trim(),
+        }));
+        setUsers(formattedUsers);
       } else {
         setUsers([]);
       }
@@ -529,8 +537,8 @@ const DataExports = () => {
       
       const data = filteredUsers.map(user => ({
         username: user.username || 'N/A',
-        name: user.name || 'N/A',
-        surname: user.surname || 'N/A',
+        firstName: user.firstName || 'N/A',
+        lastName: user.lastName || 'N/A',
         class: user.class ? (user.class.name || user.class) : 'N/A',
         subjects: user.enrolledSubjects?.map(s => s.subject ? (s.subject.name || s.subject) : 'N/A').join(';') || 'N/A',
         dateOfBirth: user.dateOfBirth ? new Date(user.dateOfBirth).toLocaleDateString('en-GB') : 'N/A',
@@ -538,7 +546,7 @@ const DataExports = () => {
         age: user.age || 'N/A',
         address: user.address || 'N/A',
         phoneNumber: user.phoneNumber || 'N/A',
-        picture: user.picture || 'N/A',
+        profileImage: user.profileImage || 'N/A',
       }));
       
       if (data.length === 0) {
@@ -558,6 +566,7 @@ const DataExports = () => {
     }
   };
 
+  // FIXED: Updated exportResults function with proper session/term handling
   const exportResults = async () => {
     setExporting(true);
     setError(null);
@@ -571,14 +580,14 @@ const DataExports = () => {
       let endpoint = `${API_BASE_URL}/api/results`;
       
       if (filters.resultType === 'class' && filters.resultClass) {
-        // Get results for the entire class for a specific term
+        // Get results for the entire class
         const classObj = classes.find(c => c.name === filters.resultClass);
         if (!classObj) {
           setError('Class not found.');
           return;
         }
         
-        // Build query parameters
+        // Build query parameters - FIXED: Handle session and term together
         const params = {
           class: classObj._id,
           limit: 1000
@@ -594,17 +603,31 @@ const DataExports = () => {
           params.subject = filters.resultSubject;
         }
         
-        // Add session filter if selected
+        // Check if we have a combined session (session + term) or just session
         if (filters.reportSession && filters.reportSession !== '') {
-          // Try to extract just the session part (before the term)
+          // If it's a combined session (e.g., "2025/2026 First Term"), split it
           const sessionParts = filters.reportSession.split(' ');
-          if (sessionParts.length > 2) {
-            // If it's in format "2025/2026 First Term", extract just "2025/2026"
-            params.session = sessionParts.slice(0, -2).join(' ');
+          
+          // Check if it contains a term
+          const termInSession = terms.find(term => 
+            filters.reportSession.includes(term)
+          );
+          
+          if (termInSession) {
+            // It's a combined session+term, extract both
+            const sessionName = filters.reportSession.replace(termInSession, '').trim();
+            params.session = sessionName;
+            // Use the term from the combined value if no separate term selected
+            if (!filters.resultTerm || filters.resultTerm === '') {
+              params.term = termInSession;
+            }
           } else {
+            // It's just a session name
             params.session = filters.reportSession;
           }
         }
+        
+        console.log('Fetching results with params:', params);
         
         const res = await axios.get(endpoint, {
           headers: { Authorization: `Bearer ${token}` },
@@ -628,11 +651,19 @@ const DataExports = () => {
           params.term = filters.resultTerm;
         }
         
-        // Add session filter if selected
+        // Handle combined session
         if (filters.reportSession && filters.reportSession !== '') {
           const sessionParts = filters.reportSession.split(' ');
-          if (sessionParts.length > 2) {
-            params.session = sessionParts.slice(0, -2).join(' ');
+          const termInSession = terms.find(term => 
+            filters.reportSession.includes(term)
+          );
+          
+          if (termInSession) {
+            const sessionName = filters.reportSession.replace(termInSession, '').trim();
+            params.session = sessionName;
+            if (!filters.resultTerm || filters.resultTerm === '') {
+              params.term = termInSession;
+            }
           } else {
             params.session = filters.reportSession;
           }
@@ -658,20 +689,23 @@ const DataExports = () => {
       }
       
       // Format results for CSV
-      const csvData = results.map(result => ({
-        Student: result.userId?.name || 'N/A',
-        'Student ID': result.userId?.studentId || 'N/A',
-        Class: result.class?.name || result.class || 'N/A',
-        Subject: result.subject || 'N/A',
-        Test: result.testId?.title || 'N/A',
-        Score: result.score || 0,
-        'Total Marks': result.totalMarks || 0,
-        Percentage: result.percentage || 0,
-        Grade: result.grade || 'N/A',
-        Session: result.session || 'N/A',
-        Term: result.term || 'N/A',
-        'Submitted At': result.submittedAt ? new Date(result.submittedAt).toLocaleString() : 'N/A'
-      }));
+      const csvData = results.map(result => {
+        const student = result.userId || {};
+        return {
+          'Student Name': `${student.firstName || ''} ${student.lastName || ''}`.trim() || student.name || 'N/A',
+          'Student ID': student.studentId || 'N/A',
+          Class: result.class?.name || result.class || 'N/A',
+          Subject: result.subject || 'N/A',
+          Test: result.testId?.title || 'N/A',
+          Score: result.score || 0,
+          'Total Marks': result.totalMarks || 0,
+          Percentage: result.percentage || 0,
+          Grade: result.grade || 'N/A',
+          Session: result.session || 'N/A',
+          Term: result.term || 'N/A',
+          'Submitted At': result.submittedAt ? new Date(result.submittedAt).toLocaleString() : 'N/A'
+        };
+      });
       
       const csv = Papa.unparse(csvData);
       const filename = `results_${filters.resultType}_${filters.resultClass || filters.resultStudent}_${filters.resultTerm || 'all'}_${new Date().getTime()}.csv`;
@@ -705,7 +739,7 @@ const DataExports = () => {
     }
   };
 
-  // FIXED REPORT CARD EXPORT FUNCTION
+  // FIXED: Updated report card export function
   const exportReportCard = async () => {
     setExporting(true);
     try {
@@ -804,12 +838,25 @@ const DataExports = () => {
       
       const params = {
         class: classObj._id,
-        term: term,
         limit: 1000
       };
       
+      if (term) {
+        params.term = term;
+      }
+      
       if (session) {
-        params.session = session;
+        // Handle combined session
+        const termInSession = terms.find(t => session.includes(t));
+        if (termInSession) {
+          const sessionName = session.replace(termInSession, '').trim();
+          params.session = sessionName;
+          if (!term || term === '') {
+            params.term = termInSession;
+          }
+        } else {
+          params.session = session;
+        }
       }
       
       const res = await axios.get(`${API_BASE_URL}/api/results`, {
@@ -840,18 +887,21 @@ const DataExports = () => {
     try {
       const results = await exportClassResultsByTerm(filters.resultClass, term, filters.reportSession);
       if (results.length > 0) {
-        const csvData = results.map(result => ({
-          Student: result.userId?.name || 'N/A',
-          'Student ID': result.userId?.studentId || 'N/A',
-          Class: result.class?.name || result.class || 'N/A',
-          Subject: result.subject || 'N/A',
-          Score: result.score || 0,
-          'Total Marks': result.totalMarks || 0,
-          Percentage: result.percentage || 0,
-          Grade: result.grade || 'N/A',
-          Term: result.term || 'N/A',
-          Session: result.session || 'N/A'
-        }));
+        const csvData = results.map(result => {
+          const student = result.userId || {};
+          return {
+            'Student Name': `${student.firstName || ''} ${student.lastName || ''}`.trim() || student.name || 'N/A',
+            'Student ID': student.studentId || 'N/A',
+            Class: result.class?.name || result.class || 'N/A',
+            Subject: result.subject || 'N/A',
+            Score: result.score || 0,
+            'Total Marks': result.totalMarks || 0,
+            Percentage: result.percentage || 0,
+            Grade: result.grade || 'N/A',
+            Term: result.term || 'N/A',
+            Session: result.session || 'N/A'
+          };
+        });
         
         const csv = Papa.unparse(csvData);
         downloadCSV(csv, `results_${filters.resultClass}_${term.replace(/\s/g, '_')}_${new Date().getTime()}.csv`);
@@ -1357,7 +1407,11 @@ const DataExports = () => {
                               style={inputStyle}
                             >
                               <option value="">All Sessions</option>
-                              {sessions.length > 0 ? (
+                              {combinedSessions.length > 0 ? (
+                                combinedSessions.map((session, index) => (
+                                  <option key={index} value={session.value}>{session.label}</option>
+                                ))
+                              ) : sessions.length > 0 ? (
                                 sessions.map((session, index) => (
                                   <option key={index} value={session}>{session}</option>
                                 ))
@@ -1365,6 +1419,9 @@ const DataExports = () => {
                                 <option value="" disabled>No sessions available</option>
                               )}
                             </select>
+                            <p style={{ fontSize: '0.75rem', color: colors.gray500, marginTop: '0.25rem' }}>
+                              Select session (e.g., "2025/2026 First Term")
+                            </p>
                           </div>
                           
                           <div>
@@ -1375,7 +1432,7 @@ const DataExports = () => {
                               color: colors.gray700,
                               marginBottom: '0.25rem',
                             }}>
-                              Term
+                              Term (Optional - use if session doesn't include term)
                             </label>
                             <select
                               name="resultTerm"
@@ -1482,7 +1539,7 @@ const DataExports = () => {
                                 getFilteredStudentsByClass(filters.resultClass).length > 0 ? (
                                   getFilteredStudentsByClass(filters.resultClass).map(user => (
                                     <option key={user._id} value={user._id}>
-                                      {`${user.name || 'N/A'} ${user.surname || 'N/A'}`}
+                                      {`${user.firstName || 'N/A'} ${user.lastName || 'N/A'}`}
                                     </option>
                                   ))
                                 ) : (
@@ -1511,7 +1568,13 @@ const DataExports = () => {
                               style={inputStyle}
                             >
                               <option value="">Select Session</option>
-                              {sessions.length > 0 ? (
+                              {combinedSessions.length > 0 ? (
+                                combinedSessions.map((session, index) => (
+                                  <option key={index} value={session.value}>
+                                    {session.label}
+                                  </option>
+                                ))
+                              ) : sessions.length > 0 ? (
                                 sessions.map((session, index) => (
                                   <option key={index} value={session}>{session}</option>
                                 ))
@@ -1529,7 +1592,7 @@ const DataExports = () => {
                               color: colors.gray700,
                               marginBottom: '0.25rem',
                             }}>
-                              Term
+                              Term (Optional - use if session doesn't include term)
                             </label>
                             <select
                               name="resultTerm"
@@ -1578,11 +1641,11 @@ const DataExports = () => {
                       onClick={exportResults}
                       disabled={exporting || 
                         (filters.resultType === 'class' && !filters.resultClass) ||
-                        (filters.resultType === 'student' && (!filters.resultStudent || !filters.reportSession || !filters.resultTerm))}
+                        (filters.resultType === 'student' && (!filters.resultStudent || !filters.reportSession))}
                       style={{
                         ...buttonStyle('white', exporting || 
                           (filters.resultType === 'class' && !filters.resultClass) ||
-                          (filters.resultType === 'student' && (!filters.resultStudent || !filters.reportSession || !filters.resultTerm))),
+                          (filters.resultType === 'student' && (!filters.resultStudent || !filters.reportSession))),
                         width: '100%',
                         color: colors.blue,
                       }}
@@ -1692,7 +1755,7 @@ const DataExports = () => {
                             getFilteredStudentsByClass(filters.reportClass).length > 0 ? (
                               getFilteredStudentsByClass(filters.reportClass).map(user => (
                                 <option key={user._id} value={user._id}>
-                                  {`${user.name || 'N/A'} ${user.surname || 'N/A'}`}
+                                  {`${user.firstName || 'N/A'} ${user.lastName || 'N/A'}`}
                                 </option>
                               ))
                             ) : (
@@ -1712,7 +1775,7 @@ const DataExports = () => {
                           color: colors.gray700,
                           marginBottom: '0.25rem',
                         }}>
-                          Session
+                          Session (Includes Term)
                         </label>
                         <select
                           name="reportSession"

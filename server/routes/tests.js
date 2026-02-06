@@ -2896,4 +2896,334 @@ router.get('/:testId/submission-stats', [auth, validateObjectId('testId')], asyn
   }
 });
 
+// ==================== PARENT ACCESS ENDPOINTS ====================
+
+// Get upcoming tests for parent's children
+router.get('/parent/upcoming-tests', auth, async (req, res) => {
+  try {
+    console.log('👪 Tests route - Parent fetching upcoming tests for children:', { 
+      parentId: req.user.id,
+      username: req.user.username 
+    });
+
+    // Check if user is a parent
+    if (req.user.role !== 'parent') {
+      console.log('❌ Tests route - Access denied: Not a parent', { role: req.user.role });
+      return res.status(403).json({ 
+        success: false,
+        error: 'Only parents can access this endpoint.' 
+      });
+    }
+
+    // Get parent with children
+    const parent = await User.findById(req.user.id)
+      .select('children')
+      .populate({
+        path: 'children',
+        select: '_id firstName lastName studentId className',
+        match: { isActive: true }
+      })
+      .lean();
+
+    if (!parent) {
+      console.log('❌ Tests route - Parent not found:', { parentId: req.user.id });
+      return res.status(404).json({ 
+        success: false,
+        error: 'Parent not found.' 
+      });
+    }
+
+    const children = parent.children || [];
+    
+    if (children.length === 0) {
+      console.log('⚠️ Tests route - No children linked to parent:', { parentId: req.user.id });
+      return res.json({
+        success: true,
+        message: 'No children linked to your account.',
+        upcomingTests: [],
+        count: 0,
+        children: []
+      });
+    }
+
+    // Get child IDs
+    const childIds = children.map(child => child._id);
+    
+    // Build filter for tests where any of the children are assigned
+    const now = new Date();
+    const twoWeeksFromNow = new Date(now.getTime() + (14 * 24 * 60 * 60 * 1000)); // Next 2 weeks
+    
+    // Query for scheduled tests with batches containing these children
+    const upcomingTests = await Test.find({
+      status: 'scheduled',
+      'batches.students': { $in: childIds },
+      'batches.schedule.start': { $gte: now, $lte: twoWeeksFromNow },
+      'batches.isActive': true
+    })
+    .populate('class', 'name shortName')
+    .populate('createdBy', 'username name')
+    .populate({
+      path: 'questions',
+      select: '_id',
+      match: { isActive: true }
+    })
+    .select('title subject class duration totalMarks passingMarks batches createdAt')
+    .sort({ 'batches.schedule.start': 1 })
+    .lean();
+
+    // Process the results to format for parent view
+    const formattedTests = [];
+    const testMap = new Map(); // To avoid duplicates
+    
+    upcomingTests.forEach(test => {
+      // Check each batch for child assignments
+      test.batches.forEach(batch => {
+        if (!batch.students || batch.students.length === 0) return;
+        
+        // Find which children are in this batch
+        const assignedChildren = children.filter(child => 
+          batch.students.some(studentId => 
+            studentId && studentId.toString() === child._id.toString()
+          )
+        );
+        
+        if (assignedChildren.length > 0) {
+          // Format test data
+          const testKey = `${test._id}_${batch.name}`;
+          
+          const formattedTest = {
+            testId: test._id,
+            batchName: batch.name,
+            title: test.title,
+            subject: test.subject,
+            class: test.class,
+            duration: test.duration,
+            totalMarks: test.totalMarks,
+            passingMarks: test.passingMarks,
+            questionCount: test.questions ? test.questions.length : 0,
+            schedule: {
+              start: batch.schedule.start,
+              end: batch.schedule.end,
+              durationHours: Math.round((new Date(batch.schedule.end) - new Date(batch.schedule.start)) / (1000 * 60 * 60))
+            },
+            assignedChildren: assignedChildren.map(child => ({
+              id: child._id,
+              name: `${child.firstName} ${child.lastName}`,
+              studentId: child.studentId,
+              className: child.className
+            })),
+            daysUntil: Math.ceil((new Date(batch.schedule.start) - now) / (1000 * 60 * 60 * 24)),
+            isUpcoming: new Date(batch.schedule.start) > now,
+            testCreated: test.createdAt
+          };
+          
+          testMap.set(testKey, formattedTest);
+        }
+      });
+    });
+
+    // Convert map to array and sort by start date
+    const allUpcomingTests = Array.from(testMap.values()).sort((a, b) => 
+      new Date(a.schedule.start) - new Date(b.schedule.start)
+    );
+
+    // Group by child for summary
+    const childSummary = children.map(child => {
+      const childTests = allUpcomingTests.filter(test => 
+        test.assignedChildren.some(c => c.id.toString() === child._id.toString())
+      );
+      
+      return {
+        childId: child._id,
+        childName: `${child.firstName} ${child.lastName}`,
+        studentId: child.studentId,
+        className: child.className,
+        upcomingCount: childTests.length,
+        nextTest: childTests.length > 0 ? {
+          subject: childTests[0].subject,
+          title: childTests[0].title,
+          date: childTests[0].schedule.start,
+          daysUntil: childTests[0].daysUntil
+        } : null
+      };
+    });
+
+    // Count total upcoming tests
+    const totalUpcomingTests = allUpcomingTests.length;
+
+    console.log('✅ Tests route - Parent upcoming tests fetched:', {
+      parentId: req.user.id,
+      childrenCount: children.length,
+      upcomingTestsCount: totalUpcomingTests,
+      childSummary: childSummary.map(c => ({ name: c.childName, count: c.upcomingCount }))
+    });
+    
+    res.json({
+      success: true,
+      message: `Found ${totalUpcomingTests} upcoming test(s) for your ${children.length} child(ren)`,
+      summary: {
+        totalChildren: children.length,
+        totalUpcomingTests,
+        childSummary
+      },
+      upcomingTests: allUpcomingTests,
+      count: totalUpcomingTests,
+      fetchedAt: new Date()
+    });
+  } catch (error) {
+    console.error('💥 Tests route - Error fetching parent upcoming tests:', {
+      error: error.message,
+      parentId: req.user.id,
+      stack: error.stack
+    });
+    res.status(500).json({ 
+      success: false,
+      error: 'Server error fetching upcoming tests' 
+    });
+  }
+});
+
+// Get specific child's upcoming tests
+router.get('/parent/child/:childId/upcoming-tests', auth, async (req, res) => {
+  try {
+    const { childId } = req.params;
+    
+    console.log('👦 Tests route - Parent fetching upcoming tests for specific child:', { 
+      parentId: req.user.id,
+      childId 
+    });
+
+    // Check if user is a parent
+    if (req.user.role !== 'parent') {
+      return res.status(403).json({ 
+        success: false,
+        error: 'Only parents can access this endpoint.' 
+      });
+    }
+
+    // Verify parent has access to this child
+    const parent = await User.findById(req.user.id).select('children').lean();
+    if (!parent || !parent.children) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Parent not found.' 
+      });
+    }
+
+    const hasAccess = parent.children.some(child => 
+      child.toString() === childId
+    );
+
+    if (!hasAccess) {
+      return res.status(403).json({ 
+        success: false,
+        error: 'You do not have access to this child.' 
+      });
+    }
+
+    // Get child details
+    const child = await User.findById(childId)
+      .select('firstName lastName studentId className')
+      .lean();
+
+    if (!child) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Child not found.' 
+      });
+    }
+
+    // Build filter for tests where this child is assigned
+    const now = new Date();
+    const twoWeeksFromNow = new Date(now.getTime() + (14 * 24 * 60 * 60 * 1000));
+    
+    // Query for scheduled tests
+    const upcomingTests = await Test.find({
+      status: 'scheduled',
+      'batches.students': childId,
+      'batches.schedule.start': { $gte: now, $lte: twoWeeksFromNow },
+      'batches.isActive': true
+    })
+    .populate('class', 'name shortName')
+    .populate('createdBy', 'username name')
+    .populate({
+      path: 'questions',
+      select: '_id',
+      match: { isActive: true }
+    })
+    .select('title subject class duration totalMarks passingMarks instructions batches')
+    .sort({ 'batches.schedule.start': 1 })
+    .lean();
+
+    // Format the tests
+    const formattedTests = upcomingTests.map(test => {
+      // Find the specific batch this child is in
+      const childBatch = test.batches.find(batch => 
+        batch.students && batch.students.some(student => 
+          student && student.toString() === childId
+        )
+      );
+
+      return {
+        testId: test._id,
+        title: test.title,
+        subject: test.subject,
+        class: test.class,
+        duration: test.duration,
+        totalMarks: test.totalMarks,
+        passingMarks: test.passingMarks,
+        questionCount: test.questions ? test.questions.length : 0,
+        instructions: test.instructions,
+        schedule: childBatch ? {
+          batchName: childBatch.name,
+          start: childBatch.schedule.start,
+          end: childBatch.schedule.end,
+          durationMinutes: Math.round((new Date(childBatch.schedule.end) - new Date(childBatch.schedule.start)) / (1000 * 60))
+        } : null,
+        daysUntil: childBatch ? Math.ceil((new Date(childBatch.schedule.start) - now) / (1000 * 60 * 60 * 24)) : null,
+        isUpcoming: childBatch ? new Date(childBatch.schedule.start) > now : false
+      };
+    });
+
+    console.log('✅ Tests route - Child upcoming tests fetched:', {
+      parentId: req.user.id,
+      childId,
+      childName: `${child.firstName} ${child.lastName}`,
+      upcomingTestsCount: formattedTests.length
+    });
+    
+    res.json({
+      success: true,
+      child: {
+        id: child._id,
+        name: `${child.firstName} ${child.lastName}`,
+        studentId: child.studentId,
+        className: child.className
+      },
+      upcomingTests: formattedTests,
+      count: formattedTests.length,
+      summary: {
+        total: formattedTests.length,
+        bySubject: formattedTests.reduce((acc, test) => {
+          acc[test.subject] = (acc[test.subject] || 0) + 1;
+          return acc;
+        }, {}),
+        nextTest: formattedTests.length > 0 ? formattedTests[0] : null
+      },
+      fetchedAt: new Date()
+    });
+  } catch (error) {
+    console.error('💥 Tests route - Error fetching child upcoming tests:', {
+      error: error.message,
+      childId: req.params.childId,
+      parentId: req.user.id,
+      stack: error.stack
+    });
+    res.status(500).json({ 
+      success: false,
+      error: 'Server error fetching child upcoming tests' 
+    });
+  }
+});
+
 module.exports = router;

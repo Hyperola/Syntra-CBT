@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 
 // FIXED: Login route - Updated for new schema
@@ -129,6 +130,17 @@ router.post('/login', async (req, res) => {
       userResponse.enrolledSubjects = updatedUser.enrolledSubjects;
     }
 
+    // Handle parent's children if parent role
+    if (updatedUser.role === 'parent' && updatedUser.children && updatedUser.children.length > 0) {
+      // Populate children details
+      const populatedChildren = await User.find({ 
+        _id: { $in: updatedUser.children },
+        role: 'student'
+      }).select('name surname username email class studentId');
+      
+      userResponse.children = populatedChildren;
+    }
+
     res.json({
       success: true,
       token,
@@ -151,6 +163,438 @@ router.post('/login', async (req, res) => {
     res.status(500).json({ 
       success: false,
       message: 'Server error during login' 
+    });
+  }
+});
+
+// PARENT REGISTRATION: Endpoint for parents to register
+router.post('/parent/register', async (req, res) => {
+  try {
+    const { 
+      name, 
+      surname, 
+      email, 
+      phone, 
+      password, 
+      confirmPassword,
+      studentUsernames = [], // Array of student usernames to link
+      relationship 
+    } = req.body;
+
+    console.log('👨‍👩‍👧‍👦 POST /api/auth/parent/register - Attempting parent registration:', { 
+      name, surname, email, phone, studentUsernames 
+    });
+
+    // Validate required fields
+    if (!name || !surname || !email || !phone || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, surname, email, phone, and password are required'
+      });
+    }
+
+    // Check if passwords match
+    if (password !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Passwords do not match'
+      });
+    }
+
+    // Validate password strength
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters long'
+      });
+    }
+
+    // Check if email already exists
+    const existingEmail = await User.findOne({ 
+      email: email.toLowerCase().trim(),
+      role: { $ne: 'student' } // Allow same email for students but not for parents/admins
+    });
+    
+    if (existingEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email already registered'
+      });
+    }
+
+    // Check if phone already exists
+    const existingPhone = await User.findOne({ 
+      phone: phone.trim(),
+      role: 'parent' // Phone should be unique for parents
+    });
+    
+    if (existingPhone) {
+      return res.status(400).json({
+        success: false,
+        message: 'Phone number already registered'
+      });
+    }
+
+    // Generate username from email
+    const username = email.toLowerCase().trim().split('@')[0];
+    
+    // Check if username already exists
+    const existingUsername = await User.findOne({ username });
+    if (existingUsername) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username already exists. Please use a different email.'
+      });
+    }
+
+    // Find students by usernames
+    const linkedStudents = [];
+    if (studentUsernames && studentUsernames.length > 0) {
+      for (const studentUsername of studentUsernames) {
+        const student = await User.findOne({ 
+          username: studentUsername.trim(),
+          role: 'student'
+        });
+        
+        if (!student) {
+          return res.status(400).json({
+            success: false,
+            message: `Student with username "${studentUsername}" not found`
+          });
+        }
+        
+        // Check if student already has a parent
+        if (student.parent && student.parent.length > 0) {
+          return res.status(400).json({
+            success: false,
+            message: `Student "${studentUsername}" is already linked to another parent`
+          });
+        }
+        
+        linkedStudents.push(student._id);
+      }
+    }
+
+    // Create parent user
+    const parentData = {
+      name: name.trim(),
+      surname: surname.trim(),
+      email: email.toLowerCase().trim(),
+      phone: phone.trim(),
+      username,
+      password,
+      role: 'parent',
+      active: true, // Parents are active by default
+      blocked: false,
+      isEmailVerified: false,
+      parentInfo: {
+        relationship: relationship || 'Parent',
+        occupation: req.body.occupation || '',
+        address: req.body.address || ''
+      },
+      notificationPreferences: {
+        emailNotifications: true,
+        smsNotifications: true,
+        pushNotifications: true,
+        weeklyReports: true,
+        examResults: true,
+        attendanceAlerts: true,
+        feeReminders: true
+      }
+    };
+
+    // Add children if any
+    if (linkedStudents.length > 0) {
+      parentData.children = linkedStudents;
+    }
+
+    const parent = new User(parentData);
+    await parent.save();
+
+    console.log('✅ POST /api/auth/parent/register - Parent created:', parent._id);
+
+    // Link parent to students
+    if (linkedStudents.length > 0) {
+      await User.updateMany(
+        { _id: { $in: linkedStudents }, role: 'student' },
+        { $addToSet: { parent: parent._id } }
+      );
+      console.log('✅ Linked parent to', linkedStudents.length, 'students');
+    }
+
+    // Create token for auto-login
+    const token = jwt.sign(
+      {
+        id: parent._id.toString(),
+        userId: parent._id.toString(),
+        role: 'parent',
+      },
+      process.env.JWT_SECRET || 'waec-cbt-secret-123',
+      { expiresIn: '24h' }
+    );
+
+    // Get user without password
+    const userResponse = await User.findById(parent._id)
+      .select('-password -loginAttempts -lockUntil')
+      .lean();
+
+    // Format response
+    const formattedUser = {
+      ...userResponse,
+      id: userResponse._id,
+      fullName: `${userResponse.name} ${userResponse.surname}`.trim()
+    };
+
+    delete formattedUser.__v;
+
+    res.status(201).json({
+      success: true,
+      message: 'Parent registration successful',
+      token,
+      user: formattedUser,
+      permissions: [] // Parents have basic permissions
+    });
+
+  } catch (error) {
+    console.error('💥 POST /api/auth/parent/register - Error:', error.message);
+    console.error('💥 Stack trace:', error.stack);
+    
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        details: messages
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Server error during parent registration'
+    });
+  }
+});
+
+// PARENT LOGIN: Separate login for parents (optional, can use main login)
+router.post('/parent/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    console.log('👨‍👩‍👧‍👦 POST /api/auth/parent/login - Attempting parent login:', email);
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email and password are required'
+      });
+    }
+
+    // Find parent by email
+    const parent = await User.findOne({
+      email: email.toLowerCase().trim(),
+      role: 'parent'
+    }).select('+password');
+
+    if (!parent) {
+      console.log('❌ Parent not found:', email);
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid email or password'
+      });
+    }
+
+    // Check if parent is active
+    if (!parent.active || parent.blocked) {
+      return res.status(403).json({
+        success: false,
+        message: 'Parent account is disabled. Please contact administrator.'
+      });
+    }
+
+    // Check password
+    const isMatch = await parent.comparePassword(password);
+    if (!isMatch) {
+      console.log('❌ Password mismatch for parent:', email);
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid email or password'
+      });
+    }
+
+    // Update last login
+    await User.updateOne(
+      { _id: parent._id },
+      {
+        $set: {
+          lastLogin: new Date(),
+          loginAttempts: 0
+        },
+        $unset: { lockUntil: 1 }
+      }
+    );
+
+    // Create token
+    const token = jwt.sign(
+      {
+        id: parent._id.toString(),
+        userId: parent._id.toString(),
+        role: 'parent',
+      },
+      process.env.JWT_SECRET || 'waec-cbt-secret-123',
+      { expiresIn: '24h' }
+    );
+
+    // Get parent with populated children
+    const parentWithChildren = await User.findById(parent._id)
+      .select('-password -loginAttempts -lockUntil')
+      .populate({
+        path: 'children',
+        select: 'name surname username email class studentId active',
+        populate: {
+          path: 'class',
+          select: 'name level shortName'
+        }
+      })
+      .lean();
+
+    // Format response
+    const formattedUser = {
+      ...parentWithChildren,
+      id: parentWithChildren._id,
+      fullName: `${parentWithChildren.name} ${parentWithChildren.surname}`.trim()
+    };
+
+    delete formattedUser.__v;
+
+    console.log('✅ Parent login successful:', parentWithChildren.email);
+
+    res.json({
+      success: true,
+      message: 'Parent login successful',
+      token,
+      user: formattedUser,
+      permissions: [] // Parents have basic permissions
+    });
+
+  } catch (error) {
+    console.error('💥 POST /api/auth/parent/login - Error:', error.message);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Server error during parent login'
+    });
+  }
+});
+
+// LINK STUDENT: Endpoint for parents to link additional students
+router.post('/parent/link-student', async (req, res) => {
+  try {
+    const { parentId, studentUsername, relationship } = req.body;
+
+    console.log('🔗 POST /api/auth/parent/link-student - Linking student:', {
+      parentId, studentUsername, relationship
+    });
+
+    if (!parentId || !studentUsername) {
+      return res.status(400).json({
+        success: false,
+        message: 'Parent ID and student username are required'
+      });
+    }
+
+    // Find parent
+    const parent = await User.findOne({
+      _id: parentId,
+      role: 'parent'
+    });
+
+    if (!parent) {
+      return res.status(404).json({
+        success: false,
+        message: 'Parent not found'
+      });
+    }
+
+    // Find student
+    const student = await User.findOne({
+      username: studentUsername.trim(),
+      role: 'student'
+    });
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: 'Student not found'
+      });
+    }
+
+    // Check if student is already linked to this parent
+    if (parent.children && parent.children.includes(student._id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Student is already linked to this parent'
+      });
+    }
+
+    // Check if student already has a parent
+    if (student.parent && student.parent.length > 0) {
+      // Check if it's the same parent trying to link again
+      if (student.parent.includes(parent._id)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Student is already linked to this parent'
+        });
+      }
+      
+      // Check if we should allow multiple parents
+      const allowMultipleParents = false; // Set this based on your policy
+      if (!allowMultipleParents) {
+        return res.status(400).json({
+          success: false,
+          message: 'Student is already linked to another parent'
+        });
+      }
+    }
+
+    // Link student to parent
+    parent.children.push(student._id);
+    await parent.save();
+
+    // Link parent to student
+    if (!student.parent) {
+      student.parent = [];
+    }
+    student.parent.push(parent._id);
+    await student.save();
+
+    // Update parent info if relationship provided
+    if (relationship && parent.parentInfo) {
+      // You might want to store relationship per child
+      // For simplicity, updating the general relationship
+      parent.parentInfo.relationship = relationship;
+      await parent.save();
+    }
+
+    console.log('✅ Student linked successfully');
+
+    res.json({
+      success: true,
+      message: 'Student linked successfully',
+      student: {
+        id: student._id,
+        name: student.name,
+        surname: student.surname,
+        username: student.username,
+        class: student.class
+      }
+    });
+
+  } catch (error) {
+    console.error('💥 POST /api/auth/parent/link-student - Error:', error.message);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Server error linking student'
     });
   }
 });
@@ -214,6 +658,16 @@ router.get('/me', async (req, res) => {
     delete userResponse.__v;
     delete userResponse.loginAttempts;
     delete userResponse.lockUntil;
+
+    // Populate children for parent role
+    if (user.role === 'parent' && user.children && user.children.length > 0) {
+      const children = await User.find({
+        _id: { $in: user.children },
+        role: 'student'
+      }).select('name surname username email class studentId active');
+      
+      userResponse.children = children;
+    }
 
     res.json({
       success: true,
@@ -342,6 +796,37 @@ router.get('/debug/users', async (req, res) => {
         role: u.role,
         active: u.active,
         blocked: u.blocked
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
+  }
+});
+
+// Debug endpoint to check parents
+router.get('/debug/parents', async (req, res) => {
+  try {
+    const parents = await User.find({ role: 'parent' })
+      .select('name surname email phone username children parentInfo')
+      .populate('children', 'name surname username')
+      .lean();
+    
+    res.json({
+      success: true,
+      count: parents.length,
+      parents: parents.map(p => ({
+        id: p._id,
+        name: p.name,
+        surname: p.surname,
+        email: p.email,
+        phone: p.phone,
+        username: p.username,
+        childrenCount: p.children ? p.children.length : 0,
+        children: p.children,
+        parentInfo: p.parentInfo
       }))
     });
   } catch (error) {

@@ -87,7 +87,12 @@ const auth = async (req, res, next) => {
       permissions: user.permissions || [],
       adminPermissions: user.adminPermissions || [], // NEW: Include admin permissions
       lastLogin: user.lastLogin,
-      isLocked: user.isLocked || false
+      isLocked: user.isLocked || false,
+      // Parent-specific fields (if applicable)
+      children: user.children || [],
+      phoneNumber: user.phoneNumber,
+      address: user.address,
+      occupation: user.occupation
     };
 
     console.log('Auth middleware - Authentication successful', {
@@ -96,6 +101,7 @@ const auth = async (req, res, next) => {
       role: user.role,
       permissions: user.permissions?.length || 0,
       adminPermissions: user.adminPermissions?.length || 0, // NEW: Log admin permissions
+      childrenCount: user.children?.length || 0, // NEW: Log children count for parents
       ip: req.ip,
       path: req.path
     });
@@ -201,11 +207,15 @@ const superAdminOnly = createRoleMiddleware('super_admin', 'SuperAdminOnly');
 const adminOnly = createRoleMiddleware('admin', 'AdminOnly');
 const teacherOnly = createRoleMiddleware('teacher', 'TeacherOnly');
 const studentOnly = createRoleMiddleware('student', 'StudentOnly');
+const parentOnly = createRoleMiddleware('parent', 'ParentOnly');
 
 // Combined role middlewares
 const adminOrTeacher = createRoleMiddleware(['admin', 'teacher'], 'AdminOrTeacher');
 const teacherOrStudent = createRoleMiddleware(['teacher', 'student'], 'TeacherOrStudent');
 const adminOrSuperAdmin = createRoleMiddleware(['admin', 'super_admin'], 'AdminOrSuperAdmin');
+const adminOrParent = createRoleMiddleware(['admin', 'parent'], 'AdminOrParent');
+const teacherOrParent = createRoleMiddleware(['teacher', 'parent'], 'TeacherOrParent');
+const parentOrStudent = createRoleMiddleware(['parent', 'student'], 'ParentOrStudent');
 
 // NEW: Admin with specific permission middleware
 const adminWithPermission = (permissionName) => {
@@ -269,6 +279,215 @@ const adminWithPermission = (permissionName) => {
 
     next();
   };
+};
+
+// Parent-only middleware (already exists - defined above)
+// const parentOnly = createRoleMiddleware('parent', 'ParentOnly');
+
+// Parent access to student middleware (NEW - comprehensive version)
+const parentAccessToStudent = async (req, res, next) => {
+  try {
+    console.log('Parent access to student middleware - Checking:', {
+      userId: req.user?.id,
+      username: req.user?.username,
+      studentId: req.params.studentId || req.body.studentId
+    });
+
+    if (!req.user) {
+      return res.status(401).json({ 
+        error: 'Authentication required.',
+        code: 'AUTH_REQUIRED'
+      });
+    }
+
+    const studentId = req.params.studentId || req.body.studentId;
+    
+    if (!studentId) {
+      console.warn('Parent access to student - No student ID provided');
+      return res.status(400).json({ 
+        error: 'Student ID is required.',
+        code: 'STUDENT_ID_REQUIRED'
+      });
+    }
+
+    // Super admin and admin bypass (for admin endpoints)
+    if (req.user.role === 'super_admin' || req.user.role === 'admin') {
+      console.log('Parent access to student - Admin bypass', {
+        userId: req.user.id,
+        username: req.user.username
+      });
+      return next();
+    }
+
+    // Check if user is parent
+    if (req.user.role !== 'parent') {
+      console.warn('Parent access to student - Not a parent', {
+        userId: req.user.id,
+        username: req.user.username,
+        role: req.user.role
+      });
+      return res.status(403).json({ 
+        error: 'Parent access required.',
+        code: 'PARENT_ACCESS_REQUIRED'
+      });
+    }
+
+    // Fetch fresh parent data to ensure we have current children list
+    const parent = await User.findById(req.user.id).select('children').lean();
+    
+    if (!parent.children || parent.children.length === 0) {
+      console.warn('Parent access to student - No children assigned', {
+        userId: req.user.id,
+        username: req.user.username
+      });
+      return res.status(403).json({ 
+        error: 'No children assigned to your account.',
+        code: 'NO_CHILDREN_ASSIGNED'
+      });
+    }
+
+    // Check if parent has access to this student
+    const hasAccess = parent.children.some(child => 
+      child.toString() === studentId.toString()
+    );
+
+    if (!hasAccess) {
+      console.warn('Parent access to student - Access denied', {
+        userId: req.user.id,
+        username: req.user.username,
+        requestedStudent: studentId,
+        parentChildren: parent.children
+      });
+      return res.status(403).json({ 
+        error: 'You do not have access to this student.',
+        code: 'STUDENT_ACCESS_DENIED'
+      });
+    }
+
+    // Verify student exists and is active
+    const student = await User.findOne({
+      _id: studentId,
+      role: 'student',
+      active: true
+    }).select('_id firstName lastName studentId').lean();
+
+    if (!student) {
+      console.warn('Parent access to student - Student not found or inactive', {
+        studentId: studentId
+      });
+      return res.status(404).json({ 
+        error: 'Student not found or inactive.',
+        code: 'STUDENT_NOT_FOUND'
+      });
+    }
+
+    // Store student info in request for later use
+    req.studentInfo = student;
+    req.studentId = studentId;
+
+    console.log('Parent access to student - Access granted', {
+      userId: req.user.id,
+      username: req.user.username,
+      studentId: studentId,
+      studentName: `${student.firstName} ${student.lastName}`
+    });
+
+    next();
+  } catch (error) {
+    console.error('Parent access to student - Error:', {
+      error: error.message,
+      userId: req.user?.id
+    });
+    res.status(500).json({ 
+      error: 'Server error while checking parent access.',
+      code: 'PARENT_ACCESS_ERROR'
+    });
+  }
+};
+
+// NEW: Parent-specific validation middleware
+const validateParentChildAccess = (req, res, next) => {
+  if (req.user.role !== 'parent') {
+    return next();
+  }
+
+  const childId = req.params.studentId || req.body.studentId || req.query.studentId;
+  
+  if (!childId) {
+    console.warn('Parent child access validation - No child ID provided', {
+      userId: req.user.id,
+      username: req.user.username,
+      path: req.path
+    });
+    
+    // If no child ID is specified, allow access but note that parent can only see their children
+    return next();
+  }
+
+  // Check if the requested child is in the parent's children list
+  const hasAccess = req.user.children?.some(child => 
+    child.toString() === childId.toString()
+  );
+
+  if (!hasAccess) {
+    console.warn('Parent child access validation - Attempt to access non-child student', {
+      userId: req.user.id,
+      username: req.user.username,
+      attemptedAccess: childId,
+      parentChildren: req.user.children || []
+    });
+
+    return res.status(403).json({ 
+      error: 'You can only access data for your own children.',
+      code: 'PARENT_CHILD_ACCESS_DENIED'
+    });
+  }
+
+  console.log('Parent child access validation - Access granted', {
+    userId: req.user.id,
+    username: req.user.username,
+    childId: childId
+  });
+
+  next();
+};
+
+// NEW: Parent or self-access validation
+const validateParentOrStudentAccess = (req, res, next) => {
+  const studentId = req.params.studentId || req.body.studentId || req.query.studentId;
+  
+  if (!studentId) {
+    return next();
+  }
+
+  // If user is student, can only access own data
+  if (req.user.role === 'student') {
+    if (studentId.toString() !== req.user.id.toString()) {
+      return res.status(403).json({ 
+        error: 'You can only access your own data.',
+        code: 'SELF_ACCESS_ONLY'
+      });
+    }
+    return next();
+  }
+
+  // If user is parent, can only access children's data
+  if (req.user.role === 'parent') {
+    const hasAccess = req.user.children?.some(child => 
+      child.toString() === studentId.toString()
+    );
+
+    if (!hasAccess) {
+      return res.status(403).json({ 
+        error: 'You can only access data for your own children.',
+        code: 'PARENT_CHILD_ACCESS_DENIED'
+      });
+    }
+    return next();
+  }
+
+  // Admin, teacher, and super_admin have full access
+  next();
 };
 
 // Subject assignment validation middleware
@@ -368,12 +587,19 @@ module.exports = {
   adminOnly,
   teacherOnly,
   studentOnly,
+  parentOnly,
   adminOrTeacher,
   teacherOrStudent,
   adminOrSuperAdmin,
-  adminWithPermission, // NEW: Export admin permission middleware
+  adminOrParent,
+  teacherOrParent,
+  parentOrStudent,
+  adminWithPermission,
   validateTeacherSubject,
   validateTeacherClass,
   validateStudentAccess,
+  validateParentChildAccess,
+  validateParentOrStudentAccess,
+  parentAccessToStudent, // NEW: Export the comprehensive parent access middleware
   createRoleMiddleware
 };

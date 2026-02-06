@@ -70,6 +70,9 @@ const teacherQuestionsRoutes = require('./routes/teacherQuestionsRoutes');
 // REPORT CARD ROUTE - FIXED: Changed from reportcards to reportcard
 const reportCardsRoutes = require('./routes/reportCard'); // CORRECTED
 
+// Add this import with your other route imports
+const parentRoutes = require('./routes/parents');
+
 const app = express();
 
 // Set timezone to West Africa Time
@@ -902,6 +905,7 @@ try {
   console.log('   ✅ teacherQuestionsRoutes:', !!teacherQuestionsRoutes);
   console.log('   ✅ promotionRoutes:', !!promotionRoutes);
   console.log('   ✅ reportCardsRoutes:', !!reportCardsRoutes);
+  console.log('   ✅ parentRoutes:', !!parentRoutes); // ADDED: Parent routes check
 } catch (error) {
   console.log('❌ Error checking routes:', error.message);
 }
@@ -933,6 +937,9 @@ app.use('/api/class-setup', classSetupRoutes);
 app.use('/api/class-subjects', classSubjectsRoutes);
 app.use('/api/reports', reportCardsRoutes);
 
+// Add this line with your other app.use() calls
+app.use('/api/parents', parentRoutes);
+
 console.log('✅ All routes mounted successfully');
 console.log('🎯 IMPORTANT: Promotion routes are now accessible at:');
 console.log('   📍 /api/promotions/status');
@@ -944,6 +951,12 @@ console.log('   📍 /api/teacher/questions');
 console.log('   📍 /api/teacher/questions/bulk');
 console.log('🎯 IMPORTANT: Report routes are now accessible at:');
 console.log('   📍 /api/reports/export/report/:studentId/:session');
+
+// Add this console log in your startup messages
+console.log('🎯 IMPORTANT: Parent routes are now accessible at:');
+console.log('   📍 /api/parents/dashboard');
+console.log('   📍 /api/parents/children');
+console.log('   📍 /api/parents/feedback');
 
 // ================================
 // TEMPORARY SUBJECTS ROUTE FOR TESTING
@@ -985,6 +998,11 @@ app.use('/api/*', (req, res) => {
         '/api/promotions/status',
         '/api/promotions/session-eligibility/:classId',
         '/api/promotions/bulk-promote'
+      ],
+      parents: [ // ADDED: Parent routes
+        '/api/parents/dashboard',
+        '/api/parents/children',
+        '/api/parents/feedback'
       ],
       auth: '/api/auth/*',
       users: '/api/users/*',
@@ -1063,6 +1081,7 @@ const connectDB = async (retryCount = 0) => {
       serverSelectionTimeoutMS: 10000,
       socketTimeoutMS: 45000,
       connectTimeoutMS: 10000,
+      autoIndex: false,  // ← ADDED THIS LINE
     });
     
     console.log('✅ MongoDB connected successfully');
@@ -1157,6 +1176,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`   📍 Teacher Test: http://localhost:${PORT}/api/users/teachers/test`);
   console.log(`   📍 Teacher Routes Debug: http://localhost:${PORT}/api/debug-teacher-routes`);
   console.log(`   📍 Promotion Test: http://localhost:${PORT}/api/promotions/test`);
+  console.log(`   📍 Parent Test: http://localhost:${PORT}/api/parents/dashboard`);
   console.log('');
   console.log('📚 TEACHER QUESTION ENDPOINTS (CRITICAL):');
   console.log(`   📍 Teacher Questions Test: http://localhost:${PORT}/api/teacher/questions-test`);
@@ -1167,6 +1187,11 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`   📍 Teacher Simple Test (POST): http://localhost:${PORT}/api/teacher/questions/simple-test`);
   console.log(`   📍 Teacher Classes: http://localhost:${PORT}/api/users/teachers/6931b8ec77ceafcb4e65b2f9/classes`);
   console.log(`   📍 Teacher Assignments: http://localhost:${PORT}/api/users/teachers/6931b8ec77ceafcb4e65b2f9/assignments`);
+  console.log('');
+  console.log('👪 PARENT ENDPOINTS:');
+  console.log(`   📍 Parent Dashboard: http://localhost:${PORT}/api/parents/dashboard`);
+  console.log(`   📍 Parent Children: http://localhost:${PORT}/api/parents/children`);
+  console.log(`   📍 Parent Feedback: http://localhost:${PORT}/api/parents/feedback`);
   console.log('');
   console.log('🎓 PROMOTION ENDPOINTS:');
   console.log(`   📍 Promotion Status: http://localhost:${PORT}/api/promotions/status`);
@@ -1183,9 +1208,10 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`   2. 📍 http://localhost:${PORT}/api/debug-teacher-routes`);
   console.log(`   3. Use POST to: http://localhost:${PORT}/api/teacher/questions/simple-test`);
   console.log(`   4. Test promotion: http://localhost:${PORT}/api/promotions/test`);
-  console.log(`   5. Test reports: http://localhost:${PORT}/api/reports/export/report/69340bb643e15fa3f5b42a6e/2025/2026?term=First Term`);
-  console.log(`   6. Test uploads: http://localhost:${PORT}/api/test-uploads`);
-  console.log(`   7. Test file serving: http://localhost:${PORT}/api/test-my-file/filename.jpg`);
+  console.log(`   5. Test parent: http://localhost:${PORT}/api/parents/dashboard`);
+  console.log(`   6. Test reports: http://localhost:${PORT}/api/reports/export/report/69340bb643e15fa3f5b42a6e/2025/2026?term=First Term`);
+  console.log(`   7. Test uploads: http://localhost:${PORT}/api/test-uploads`);
+  console.log(`   8. Test file serving: http://localhost:${PORT}/api/test-my-file/filename.jpg`);
   console.log('🎉 ================================');
 });
 

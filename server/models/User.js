@@ -1,4 +1,4 @@
-// models/User.js - COMPLETELY UPDATED TO MATCH FRONTEND
+// models/User.js - ADDED PARENT ROLE AND REPORT CARD VISIBILITY FIELDS
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
@@ -54,12 +54,12 @@ const userSchema = new mongoose.Schema({
     maxlength: [100, 'Last name cannot exceed 100 characters']
   },
   
-  // Role Information
+  // Role Information - ADDED 'parent' to enum
   role: {
     type: String,
     enum: {
-      values: ['super_admin', 'admin', 'teacher', 'student'],
-      message: 'Role must be super_admin, admin, teacher, or student'
+      values: ['super_admin', 'admin', 'teacher', 'student', 'parent'],
+      message: 'Role must be super_admin, admin, teacher, student, or parent'
     },
     required: [true, 'Role is required'],
     default: 'student'
@@ -94,7 +94,7 @@ const userSchema = new mongoose.Schema({
     trim: true
   },
   
-  // Parent Information (for students) - NEW
+  // Parent Information (for students)
   parentEmail: {
     type: String,
     trim: true,
@@ -108,6 +108,112 @@ const userSchema = new mongoose.Schema({
     trim: true,
     match: [/^\+?[\d\s\-()]+$/, 'Please enter a valid phone number']
   },
+  
+  // PARENT-SPECIFIC FIELDS
+  children: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
+  
+  // For students: Store which parents are linked
+  parents: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
+  
+  parentCode: {
+    type: String,
+    unique: true,
+    sparse: true,
+    trim: true,
+    uppercase: true
+  },
+  
+  // Notification preferences for parents
+  notificationPreferences: {
+    email: {
+      type: Boolean,
+      default: true
+    },
+    sms: {
+      type: Boolean,
+      default: false
+    },
+    push: {
+      type: Boolean,
+      default: true
+    },
+    frequency: {
+      type: String,
+      enum: ['immediate', 'daily', 'weekly'],
+      default: 'immediate'
+    }
+  },
+  
+  // Report Card Visibility Fields - NEW
+  reportCardVisibleToParent: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  reportCardScheduledVisibility: {
+    type: Date,
+    default: null,
+    index: true
+  },
+  reportCardVisibilityUpdatedAt: {
+    type: Date,
+    default: null
+  },
+  reportCardVisibilityUpdatedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  reportCardVisibilitySettings: [{
+    term: {
+      type: String,
+      enum: ['First Term', 'Second Term', 'Third Term', 'All Terms']
+    },
+    session: {
+      type: String,
+      match: [/^\d{4}\/\d{4}$/, 'Session must be in format YYYY/YYYY']
+    },
+    isVisibleToParent: {
+      type: Boolean,
+      default: false
+    },
+    scheduledVisibility: {
+      type: Date,
+      default: null
+    },
+    updatedAt: {
+      type: Date,
+      default: Date.now
+    },
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }
+  }],
+  
+  // For tracking report card downloads/access - NEW
+  reportCardDownloads: [{
+    parentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    downloadedAt: {
+      type: Date,
+      default: Date.now
+    },
+    ipAddress: String,
+    userAgent: String,
+    downloadCount: {
+      type: Number,
+      default: 1
+    }
+  }],
   
   // FIXED: Added subjects field for backward compatibility and teacher assignments
   subjects: [{
@@ -155,7 +261,7 @@ const userSchema = new mongoose.Schema({
       subjectName: {
         type: String,
         trim: true,
-        required: false  // FIXED: Changed from true to false
+        required: false
       },
       assignedAt: {
         type: Date,
@@ -178,7 +284,7 @@ const userSchema = new mongoose.Schema({
     subjectName: {
       type: String,
       trim: true,
-      required: false  // FIXED: Changed from true to false
+      required: false
     },
     class: {
       type: mongoose.Schema.Types.ObjectId,
@@ -213,7 +319,9 @@ const userSchema = new mongoose.Schema({
       'MANAGE_RESULTS',
       'SYSTEM_CONFIG',
       'VIEW_ANALYTICS',
-      'MANAGE_ADMINS'
+      'MANAGE_ADMINS',
+      'MANAGE_PARENTS',
+      'MANAGE_REPORT_CARD_VISIBILITY' // ADDED
     ]
   }],
   
@@ -302,18 +410,25 @@ const userSchema = new mongoose.Schema({
   collection: 'users'
 });
 
-// Indexes
+// Indexes - ADDED report card visibility indexes
 userSchema.index({ role: 1, active: 1 });
 userSchema.index({ adminPermissions: 1 });
 userSchema.index({ className: 1 });
-userSchema.index({ subjects: 1 }); // Added index for subjects
+userSchema.index({ subjects: 1 });
 userSchema.index({ 'teacherAssignments.class': 1 });
 userSchema.index({ 'teacherAssignments.subjects.subject': 1 });
 userSchema.index({ 'enrolledSubjects.class': 1 });
 userSchema.index({ 'enrolledSubjects.subject': 1 });
-userSchema.index({ firstName: 1, lastName: 1 }); // Added for search
+userSchema.index({ firstName: 1, lastName: 1 });
 userSchema.index({ email: 1 }, { unique: true });
 userSchema.index({ username: 1 }, { unique: true });
+userSchema.index({ parentCode: 1 }, { unique: true, sparse: true });
+userSchema.index({ children: 1 });
+userSchema.index({ parents: 1 });
+userSchema.index({ role: 1, 'notificationPreferences.email': 1 });
+userSchema.index({ reportCardVisibleToParent: 1 });
+userSchema.index({ reportCardScheduledVisibility: 1 });
+userSchema.index({ 'reportCardVisibilitySettings.term': 1, 'reportCardVisibilitySettings.session': 1 });
 
 // Virtual for full name (Updated for frontend)
 userSchema.virtual('fullName').get(function() {
@@ -330,7 +445,7 @@ userSchema.virtual('surname').get(function() {
   return this.lastName;
 });
 
-// Virtual for profileImageUrl (with fallback logic) - UPDATED: Simplified to use only profileImage
+// Virtual for profileImageUrl (with fallback logic)
 userSchema.virtual('profileImageUrl').get(function() {
   if (this.profileImage) {
     return `/uploads/profiles/${this.profileImage}`;
@@ -399,9 +514,356 @@ userSchema.virtual('assignedSubjects').get(function() {
   return subjects;
 });
 
+// NEW: Virtual to get parent's children details
+userSchema.virtual('childrenDetails').get(function() {
+  if (this.role !== 'parent') return [];
+  
+  // This will be populated when querying
+  return this.children;
+});
+
+// NEW: Virtual to get student's parents details
+userSchema.virtual('parentsDetails').get(function() {
+  if (this.role !== 'student') return [];
+  
+  // This will be populated when querying
+  return this.parents;
+});
+
+// NEW: Virtual to check if user is parent of specific student
+userSchema.virtual('isParentOf').get(function() {
+  return (studentId) => {
+    if (this.role !== 'parent') return false;
+    if (!this.children || !Array.isArray(this.children)) return false;
+    
+    return this.children.some(child => 
+      child.toString() === studentId.toString()
+    );
+  };
+});
+
+// NEW: Virtual to check if user is child of specific parent
+userSchema.virtual('isChildOf').get(function() {
+  return (parentId) => {
+    if (this.role !== 'student') return false;
+    if (!this.parents || !Array.isArray(this.parents)) return false;
+    
+    return this.parents.some(parent => 
+      parent.toString() === parentId.toString()
+    );
+  };
+});
+
+// NEW: Virtual to check if report card is visible to parents
+userSchema.virtual('isReportCardVisible').get(function() {
+  const now = new Date();
+  let isVisible = this.reportCardVisibleToParent || false;
+  
+  // Check scheduled visibility
+  if (this.reportCardScheduledVisibility && this.reportCardScheduledVisibility > now) {
+    isVisible = false;
+  }
+  
+  return isVisible;
+});
+
+// NEW: Method to add child to parent
+userSchema.methods.addChild = async function(studentId) {
+  if (this.role !== 'parent') {
+    throw new Error('Only parent users can add children');
+  }
+  
+  // Check if student exists
+  const User = mongoose.model('User');
+  const student = await User.findOne({
+    _id: studentId,
+    role: 'student',
+    active: true
+  });
+  
+  if (!student) {
+    throw new Error('Student not found or inactive');
+  }
+  
+  // Check if child already added
+  if (!this.children) this.children = [];
+  
+  const alreadyExists = this.children.some(child => 
+    child.toString() === studentId.toString()
+  );
+  
+  if (alreadyExists) {
+    throw new Error('Child already added to this parent');
+  }
+  
+  // Add child to parent
+  this.children.push(studentId);
+  
+  // Add parent to student's parents array
+  if (!student.parents) student.parents = [];
+  
+  const parentAlreadyAdded = student.parents.some(parent => 
+    parent.toString() === this._id.toString()
+  );
+  
+  if (!parentAlreadyAdded) {
+    student.parents.push(this._id);
+    await student.save();
+  }
+  
+  // Update student's parent information
+  if (!student.parentEmail && this.email) {
+    student.parentEmail = this.email;
+    await student.save();
+  }
+  
+  await this.save();
+  return this;
+};
+
+// NEW: Method to remove child from parent
+userSchema.methods.removeChild = async function(studentId) {
+  if (this.role !== 'parent') {
+    throw new Error('Only parent users can remove children');
+  }
+  
+  if (!this.children || this.children.length === 0) {
+    throw new Error('No children found');
+  }
+  
+  // Remove child from parent
+  const initialLength = this.children.length;
+  this.children = this.children.filter(child => 
+    child.toString() !== studentId.toString()
+  );
+  
+  if (this.children.length === initialLength) {
+    throw new Error('Child not found in parent\'s list');
+  }
+  
+  // Remove parent from student's parents array
+  const User = mongoose.model('User');
+  const student = await User.findById(studentId);
+  if (student && student.parents) {
+    student.parents = student.parents.filter(parent => 
+      parent.toString() !== this._id.toString()
+    );
+    await student.save();
+  }
+  
+  await this.save();
+  return this;
+};
+
+// NEW: Method to generate parent code
+userSchema.methods.generateParentCode = function() {
+  if (this.role !== 'parent') {
+    throw new Error('Only parent users can generate parent codes');
+  }
+  
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let code = 'PARENT-';
+  
+  for (let i = 0; i < 8; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  
+  this.parentCode = code;
+  return code;
+};
+
+// NEW: Method to get children's results summary
+userSchema.methods.getChildrenResultsSummary = async function(session = null, term = null) {
+  if (this.role !== 'parent') {
+    throw new Error('Only parent users can get children results');
+  }
+  
+  if (!this.children || this.children.length === 0) {
+    return {
+      childrenCount: 0,
+      results: []
+    };
+  }
+  
+  const Result = mongoose.model('Result');
+  const User = mongoose.model('User');
+  
+  // Get all children's results
+  const query = { 
+    userId: { $in: this.children },
+    isActive: true 
+  };
+  
+  if (session) query.session = session;
+  if (term) query.term = term;
+  
+  const results = await Result.find(query)
+    .populate('userId', 'firstName lastName studentId className')
+    .populate('class', 'name level')
+    .populate('testId', 'title type')
+    .sort({ submittedAt: -1 });
+  
+  // Get children details
+  const children = await User.find({
+    _id: { $in: this.children },
+    role: 'student',
+    active: true
+  }).select('firstName lastName studentId className class');
+  
+  // Organize results by child
+  const organizedResults = children.map(child => {
+    const childResults = results.filter(result => 
+      result.userId._id.toString() === child._id.toString()
+    );
+    
+    // Calculate averages
+    const totalScore = childResults.reduce((sum, result) => sum + result.score, 0);
+    const averageScore = childResults.length > 0 ? totalScore / childResults.length : 0;
+    
+    // Get unique subjects
+    const subjects = [...new Set(childResults.map(r => r.subject))];
+    
+    return {
+      child: {
+        id: child._id,
+        name: `${child.firstName} ${child.lastName}`,
+        studentId: child.studentId,
+        className: child.className
+      },
+      results: childResults,
+      summary: {
+        totalTests: childResults.length,
+        averageScore: Math.round(averageScore * 100) / 100,
+        subjects: subjects,
+        lastUpdated: childResults.length > 0 ? 
+          new Date(Math.max(...childResults.map(r => r.submittedAt))) : 
+          null
+      }
+    };
+  });
+  
+  return {
+    childrenCount: children.length,
+    children: organizedResults
+  };
+};
+
+// NEW: Method to record report card access/download
+userSchema.methods.recordReportCardAccess = async function(parentId, action = 'viewed', ipAddress = null, userAgent = null) {
+  if (this.role !== 'student') {
+    throw new Error('Only student users can have report card access records');
+  }
+  
+  if (!this.reportCardDownloads) {
+    this.reportCardDownloads = [];
+  }
+  
+  // Find existing download record for this parent
+  const existingRecordIndex = this.reportCardDownloads.findIndex(
+    record => record.parentId.toString() === parentId.toString()
+  );
+  
+  if (existingRecordIndex > -1) {
+    // Update existing record
+    const existingRecord = this.reportCardDownloads[existingRecordIndex];
+    existingRecord.downloadedAt = new Date();
+    existingRecord.downloadCount += 1;
+    if (ipAddress) existingRecord.ipAddress = ipAddress;
+    if (userAgent) existingRecord.userAgent = userAgent;
+  } else {
+    // Create new record
+    this.reportCardDownloads.push({
+      parentId,
+      downloadedAt: new Date(),
+      ipAddress,
+      userAgent,
+      downloadCount: 1
+    });
+  }
+  
+  await this.save();
+  return this;
+};
+
+// NEW: Method to update report card visibility
+userSchema.methods.updateReportCardVisibility = async function(isVisible, scheduledDate = null, updatedBy = null, term = null, session = null) {
+  if (this.role !== 'student') {
+    throw new Error('Only student users have report card visibility settings');
+  }
+  
+  // Update general visibility
+  this.reportCardVisibleToParent = isVisible;
+  this.reportCardScheduledVisibility = scheduledDate;
+  this.reportCardVisibilityUpdatedAt = new Date();
+  this.reportCardVisibilityUpdatedBy = updatedBy;
+  
+  // If term and session are provided, update specific term visibility
+  if (term && session) {
+    const settingIndex = this.reportCardVisibilitySettings.findIndex(
+      setting => setting.term === term && setting.session === session
+    );
+    
+    if (settingIndex > -1) {
+      // Update existing setting
+      this.reportCardVisibilitySettings[settingIndex].isVisibleToParent = isVisible;
+      this.reportCardVisibilitySettings[settingIndex].scheduledVisibility = scheduledDate;
+      this.reportCardVisibilitySettings[settingIndex].updatedAt = new Date();
+      this.reportCardVisibilitySettings[settingIndex].updatedBy = updatedBy;
+    } else {
+      // Add new setting
+      this.reportCardVisibilitySettings.push({
+        term,
+        session,
+        isVisibleToParent: isVisible,
+        scheduledVisibility: scheduledDate,
+        updatedAt: new Date(),
+        updatedBy: updatedBy
+      });
+    }
+  }
+  
+  await this.save();
+  return this;
+};
+
+// NEW: Method to check specific term visibility
+userSchema.methods.isTermVisibleToParent = function(term, session) {
+  // First check general visibility
+  const isGenerallyVisible = this.isReportCardVisible;
+  
+  if (!isGenerallyVisible) {
+    return false;
+  }
+  
+  // Check specific term visibility if exists
+  const termSetting = this.reportCardVisibilitySettings.find(
+    setting => setting.term === term && setting.session === session
+  );
+  
+  if (termSetting) {
+    const now = new Date();
+    let isTermVisible = termSetting.isVisibleToParent;
+    
+    // Check scheduled visibility for this term
+    if (termSetting.scheduledVisibility && termSetting.scheduledVisibility > now) {
+      isTermVisible = false;
+    }
+    
+    return isTermVisible;
+  }
+  
+  // If no specific term setting, return general visibility
+  return isGenerallyVisible;
+};
+
 // Pre-save middleware with enhanced subject handling
 userSchema.pre('save', async function(next) {
   console.log(`🔄 User pre-save: ${this.username}, role: ${this.role}`);
+  
+  // Generate parent code if not exists
+  if (this.role === 'parent' && !this.parentCode) {
+    this.parentCode = `PARENT-${Date.now().toString(36)}-${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
+  }
   
   // Calculate age from date of birth
   if (this.isModified('dateOfBirth') && this.dateOfBirth) {
@@ -542,7 +1004,7 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
   }
 };
 
-// UPDATED: Method to add teacher assignment (with backward compatibility)
+// Method to add teacher assignment (with backward compatibility)
 userSchema.methods.addTeacherAssignment = async function(classId, subjectIds) {
   if (this.role !== 'teacher') {
     throw new Error('Only teachers can have assignments');
@@ -654,7 +1116,7 @@ userSchema.methods.addTeacherAssignment = async function(classId, subjectIds) {
   return this.save();
 };
 
-// UPDATED: Method to get teacher's subjects (for backward compatibility)
+// Method to get teacher's subjects (for backward compatibility)
 userSchema.methods.getSubjects = function() {
   if (this.role !== 'teacher') return [];
   
@@ -679,7 +1141,7 @@ userSchema.methods.getSubjects = function() {
   return [];
 };
 
-// UPDATED: Method to get teacher's classes (unique classes they teach)
+// Method to get teacher's classes (unique classes they teach)
 userSchema.methods.getClasses = function() {
   if (this.role !== 'teacher') return [];
   
@@ -846,6 +1308,16 @@ userSchema.methods.hasPermission = function(permissionName) {
   );
 };
 
+// Method to check if user is parent of specific student
+userSchema.methods.isParentOfStudent = function(studentId) {
+  if (this.role !== 'parent') return false;
+  if (!this.children || !Array.isArray(this.children)) return false;
+  
+  return this.children.some(child => 
+    child.toString() === studentId.toString()
+  );
+};
+
 // Static method to fix all teachers' subjects (run once after updating model)
 userSchema.statics.fixTeacherSubjects = async function() {
   const teachers = await this.find({ role: 'teacher' });
@@ -896,7 +1368,89 @@ userSchema.statics.migrateTeacherAssignments = async function() {
   return migratedCount;
 };
 
-// NEW: Static method for pagination and search (for frontend)
+// Static method to find parents
+userSchema.statics.findParents = async function(filters = {}) {
+  const {
+    page = 1,
+    limit = 10,
+    search,
+    active = true
+  } = filters;
+  
+  const query = { role: 'parent', active };
+  
+  // Search functionality
+  if (search) {
+    query.$or = [
+      { username: { $regex: search, $options: 'i' } },
+      { firstName: { $regex: search, $options: 'i' } },
+      { lastName: { $regex: search, $options: 'i' } },
+      { email: { $regex: search, $options: 'i' } },
+      { parentCode: { $regex: search, $options: 'i' } }
+    ];
+  }
+  
+  const skip = (page - 1) * limit;
+  
+  const [parents, total] = await Promise.all([
+    this.find(query)
+      .select('-password -loginAttempts -lockUntil -__v')
+      .populate({
+        path: 'children',
+        select: 'firstName lastName studentId className',
+        match: { active: true, role: 'student' }
+      })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
+    this.countDocuments(query)
+  ]);
+  
+  return {
+    parents: parents.map(parent => {
+      const parentObj = parent.toObject();
+      parentObj.childrenCount = parent.children ? parent.children.length : 0;
+      return parentObj;
+    }),
+    pagination: {
+      currentPage: page,
+      totalPages: Math.ceil(total / limit),
+      totalParents: total,
+      limit
+    }
+  };
+};
+
+// Static method to find parent by code
+userSchema.statics.findByParentCode = async function(parentCode, includeChildren = true) {
+  const query = { parentCode, role: 'parent', active: true };
+  
+  let parentQuery = this.findOne(query).select('-password -loginAttempts -lockUntil -__v');
+  
+  if (includeChildren) {
+    parentQuery = parentQuery.populate({
+      path: 'children',
+      select: 'firstName lastName studentId className class',
+      match: { active: true, role: 'student' },
+      populate: {
+        path: 'class',
+        select: 'name level'
+      }
+    });
+  }
+  
+  const parent = await parentQuery;
+  
+  if (parent && includeChildren) {
+    const parentObj = parent.toObject();
+    parentObj.childrenCount = parent.children ? parent.children.length : 0;
+    return parentObj;
+  }
+  
+  return parent;
+};
+
+// Static method for pagination and search (for frontend)
 userSchema.statics.findWithFilters = async function(filters = {}) {
   const {
     page = 1,
@@ -921,7 +1475,8 @@ userSchema.statics.findWithFilters = async function(filters = {}) {
       { firstName: { $regex: search, $options: 'i' } },
       { lastName: { $regex: search, $options: 'i' } },
       { email: { $regex: search, $options: 'i' } },
-      { studentId: { $regex: search, $options: 'i' } }
+      { studentId: { $regex: search, $options: 'i' } },
+      { parentCode: { $regex: search, $options: 'i' } }
     ];
   }
   
@@ -933,6 +1488,16 @@ userSchema.statics.findWithFilters = async function(filters = {}) {
       .populate('class', 'name fullName label level stream')
       .populate('teacherAssignments.subjects.subject', 'name displayName subjectName code')
       .populate('enrolledSubjects.subject', 'name displayName subjectName code')
+      .populate({
+        path: 'children',
+        select: 'firstName lastName studentId className',
+        match: { active: true }
+      })
+      .populate({
+        path: 'parents',
+        select: 'firstName lastName email phoneNumber parentCode',
+        match: { active: true, role: 'parent' }
+      })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit),
@@ -943,6 +1508,13 @@ userSchema.statics.findWithFilters = async function(filters = {}) {
   const usersWithFullName = users.map(user => {
     const userObj = user.toObject();
     userObj.fullName = `${userObj.firstName} ${userObj.middleName ? userObj.middleName + ' ' : ''}${userObj.lastName}`.trim();
+    if (userObj.role === 'parent') {
+      userObj.childrenCount = user.children ? user.children.length : 0;
+    } else if (userObj.role === 'student') {
+      userObj.parentsCount = user.parents ? user.parents.length : 0;
+      // Add report card visibility info for students
+      userObj.isReportCardVisible = user.isReportCardVisible;
+    }
     return userObj;
   });
   
@@ -957,10 +1529,10 @@ userSchema.statics.findWithFilters = async function(filters = {}) {
   };
 };
 
-// Ensure virtual fields are serialized - UPDATED: Simplified profile image logic
+// Ensure virtual fields are serialized
 userSchema.set('toJSON', {
   virtuals: true,
-  getters: true, // IMPORTANT: This enables getters
+  getters: true,
   transform: function(doc, ret) {
     // Remove sensitive fields
     delete ret.password;
@@ -980,6 +1552,25 @@ userSchema.set('toJSON', {
     // Ensure profileImageUrl is included
     if (ret.profileImage) {
       ret.profileImageUrl = `/uploads/profiles/${ret.profileImage}`;
+    }
+    
+    // Add children count for parents
+    if (ret.role === 'parent' && ret.children) {
+      ret.childrenCount = ret.children.length;
+    }
+    
+    // Add parents count and report card visibility for students
+    if (ret.role === 'student') {
+      if (ret.parents) {
+        ret.parentsCount = ret.parents.length;
+      }
+      // Add report card visibility status
+      const now = new Date();
+      ret.isReportCardVisible = ret.reportCardVisibleToParent || false;
+      if (ret.reportCardScheduledVisibility && new Date(ret.reportCardScheduledVisibility) > now) {
+        ret.isReportCardVisible = false;
+      }
+      ret.reportCardScheduledDate = ret.reportCardScheduledVisibility;
     }
     
     return ret;

@@ -74,6 +74,8 @@ const AdminLayout = ({ children }) => {
     { path: '/admin/promotion', label: 'Student Promotion' },
     { path: '/admin/transcripts', label: 'Transcripts & Promotion' },
     { path: '/admin/exports', label: 'Data Exports' },
+    { path: '/admin/parent-feedback', label: 'Parent Feedback' },
+    { path: '/admin/result-visibility', label: 'Result Visibility' },
     { path: '/admin/analytics', label: 'View Analytics' },
   ];
 

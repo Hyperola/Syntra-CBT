@@ -112,6 +112,7 @@ const addHeader = (doc, session, term) => {
   return LAYOUT.headerHeight + LAYOUT.sectionGap;
 };
 
+// UPDATED: Student info function with firstName, lastName, middleName, and profileImage
 const addStudentInfo = (doc, y, student, reportData, position, classSize, attendance) => {
   doc.font(TYPOGRAPHY.fonts.heading)
      .fontSize(TYPOGRAPHY.sizes.heading)
@@ -124,25 +125,49 @@ const addStudentInfo = (doc, y, student, reportData, position, classSize, attend
   const photoX = doc.page.width - LAYOUT.margin - 50;
   const photoY = contentY;
   
-  // Handle student picture
-  if (student.picture) {
+  // UPDATED: Handle student profile image with multiple path checks
+  if (student.profileImage) {
+    // Try multiple possible paths for the profile image
+    const possiblePaths = [
+      path.join(__dirname, '../../uploads/profiles', student.profileImage),
+      path.join(__dirname, '../../../uploads/profiles', student.profileImage),
+      path.join(__dirname, '../../Uploads', student.profileImage),
+      path.join(__dirname, '../../../Uploads', student.profileImage),
+      student.profileImage // In case it's already an absolute path
+    ];
+    
+    let imageFound = false;
+    for (const imagePath of possiblePaths) {
+      try {
+        if (fs.existsSync(imagePath)) {
+          doc.image(imagePath, photoX, photoY, { width: 50, height: 50 });
+          imageFound = true;
+          console.log(`✅ Profile image found at: ${imagePath}`);
+          break;
+        }
+      } catch (error) {
+        console.log(`❌ Error loading image from ${imagePath}:`, error.message);
+        continue;
+      }
+    }
+    
+    if (!imageFound) {
+      console.log(`❌ Profile image not found. Tried paths:`, possiblePaths);
+      drawPlaceholderPhoto(doc, photoX, photoY);
+    }
+  } else if (student.picture) {
+    // Fallback to old 'picture' field for backward compatibility
     const picturePath = path.join(__dirname, '../../Uploads', student.picture);
     if (fs.existsSync(picturePath)) {
       doc.image(picturePath, photoX, photoY, { width: 50, height: 50 });
     } else {
-      // Try alternative path if default doesn't work
-      const altPicturePath = path.join(__dirname, '../../../Uploads', student.picture);
-      if (fs.existsSync(altPicturePath)) {
-        doc.image(altPicturePath, photoX, photoY, { width: 50, height: 50 });
-      } else {
-        drawPlaceholderPhoto(doc, photoX, photoY);
-      }
+      drawPlaceholderPhoto(doc, photoX, photoY);
     }
   } else {
     drawPlaceholderPhoto(doc, photoX, photoY);
   }
   
-  // Get class name properly - handle both object and string
+  // UPDATED: Get class name properly - handle both object and string
   let className = 'N/A';
   if (student.class) {
     if (typeof student.class === 'object' && student.class.name) {
@@ -152,15 +177,23 @@ const addStudentInfo = (doc, y, student, reportData, position, classSize, attend
     }
   }
   
-  const studentName = `${student.name || ''} ${student.surname || ''}`.trim() || 'N/A';
+  // UPDATED: Build student name with firstName, middleName, and lastName
+  const studentNameParts = [];
+  if (student.firstName) studentNameParts.push(student.firstName);
+  if (student.middleName) studentNameParts.push(student.middleName);
+  if (student.lastName) studentNameParts.push(student.lastName);
+  
+  const studentName = studentNameParts.join(' ') || student.name || student.username || 'N/A';
+  
   const info = [
+    { label: 'Student ID:', value: student.studentId || 'N/A' },
     { label: 'Name:', value: studentName },
     { label: 'Class:', value: className },
     { label: 'Subjects:', value: reportData.numSubjects || 0 },
     { label: 'Position:', value: `${position} of ${classSize}` },
     { label: 'Attendance:', value: `${attendance.present || 0}/${attendance.totalDays || 0}` },
     { label: 'Date of Birth:', value: student.dateOfBirth ? new Date(student.dateOfBirth).toLocaleDateString('en-GB') : 'N/A' },
-    { label: 'Sex:', value: student.sex || 'N/A' },
+    { label: 'Gender:', value: student.sex || student.gender || 'N/A' },
     { label: 'Age:', value: student.age || 'N/A' },
   ];
   
@@ -184,7 +217,7 @@ const drawPlaceholderPhoto = (doc, x, y) => {
      .font(TYPOGRAPHY.fonts.body)
      .fontSize(TYPOGRAPHY.sizes.small)
      .fillColor(COLORS.textSecondary)
-     .text('Student Photo', x + 5, y + 20, { width: 40, align: 'center' });
+     .text('No Photo', x + 5, y + 20, { width: 40, align: 'center' });
 };
 
 const addPerformanceTable = (doc, y, reportData) => {
@@ -307,6 +340,7 @@ const addSummary = (doc, y, reportData, average, results) => {
     { label: 'Average:', value: `${averagePercentage}% (${gradeInfo.grade})`, color: gradeInfo.color },
     { label: 'Status:', value: promotion, color: averageNum >= 50 ? COLORS.excellent : COLORS.poor },
     { label: 'Subjects Passed:', value: `${reportData.numPasses || 0}/${reportData.numSubjects || 0}`, color: COLORS.textPrimary },
+    { label: 'Subjects Failed:', value: `${reportData.numFailures || 0}/${reportData.numSubjects || 0}`, color: reportData.numFailures > 0 ? COLORS.poor : COLORS.excellent },
   ];
   
   summary.forEach((item, index) => {
@@ -454,13 +488,14 @@ const buildSessionQuery = (sessionName, termName) => {
   };
 };
 
-// Main report card endpoint with term parameter
+// UPDATED: Main report card endpoint with improved student data fetching
 router.get('/export/report/:studentId/:session', auth, async (req, res) => {
   try {
     console.log('GET /api/reports/export/report/:studentId/:session - Request:', {
       params: req.params,
       query: req.query,
       user: req.user.username,
+      role: req.user.role,
       timestamp: new Date().toISOString()
     });
     
@@ -488,24 +523,167 @@ router.get('/export/report/:studentId/:session', auth, async (req, res) => {
       session: sessionName,
       term: termName,
       fullSession,
-      user: req.user.username
+      user: req.user.username,
+      userRole: req.user.role
     });
     
-    // Get student with proper class population
+    // UPDATED: Get student with proper class population and all necessary fields
     const student = await User.findById(studentId)
       .populate({
         path: 'class',
-        select: 'name level'
+        select: 'name level shortName fullName'
       })
+      .select('firstName lastName middleName username studentId dateOfBirth sex age address phoneNumber email profileImage picture parents class reportCardVisibleToParent reportCardScheduledVisibility reportCardVisibilitySettings')
       .lean();
     
     if (!student) {
       return res.status(404).json({ error: 'Student not found' });
     }
     
-    // Check permissions
+    // UPDATED: Log student information for debugging
+    console.log('📋 Student data retrieved:', {
+      id: student._id,
+      firstName: student.firstName,
+      lastName: student.lastName,
+      middleName: student.middleName,
+      studentId: student.studentId,
+      class: student.class,
+      profileImage: student.profileImage,
+      picture: student.picture,
+      parents: student.parents,
+      reportCardVisibleToParent: student.reportCardVisibleToParent,
+      reportCardScheduledVisibility: student.reportCardScheduledVisibility
+    });
+    
+    // Check permissions - UPDATED with visibility check
     if (req.user.role === 'student' && req.user._id.toString() !== studentId) {
       return res.status(403).json({ error: 'Students can only view their own report cards' });
+    }
+    
+    // ✅ ADDED: Check if report card is visible to parent (if requester is parent)
+    if (req.user.role === 'parent') {
+      console.log('👨‍👩‍👧 Parent access attempt for student:', {
+        parentId: req.user._id,
+        studentId: studentId,
+        studentName: `${student.firstName} ${student.lastName}`
+      });
+      
+      // Get student's parents if not already populated
+      let studentWithParents = student;
+      if (!student.parents) {
+        studentWithParents = await User.findById(studentId).select('parents reportCardVisibleToParent reportCardScheduledVisibility reportCardVisibilitySettings');
+      }
+      
+      if (!studentWithParents) {
+        return res.status(404).json({ error: 'Student not found' });
+      }
+      
+      // Check if parent is linked to this student
+      const isParentLinked = studentWithParents.parents?.some(parentId => 
+        parentId.toString() === req.user._id.toString()
+      );
+      
+      console.log('🔗 Parent link check:', {
+        parents: studentWithParents.parents,
+        isParentLinked,
+        requestingParentId: req.user._id
+      });
+      
+      if (!isParentLinked) {
+        return res.status(403).json({ 
+          error: 'You are not authorized to view this report card',
+          details: 'You are not listed as a parent for this student'
+        });
+      }
+      
+      // Check report card visibility
+      const now = new Date();
+      let isVisible = studentWithParents.reportCardVisibleToParent || false;
+      
+      // Check scheduled visibility
+      if (studentWithParents.reportCardScheduledVisibility && 
+          new Date(studentWithParents.reportCardScheduledVisibility) > now) {
+        console.log('⏰ Scheduled visibility check failed:', {
+          scheduled: studentWithParents.reportCardScheduledVisibility,
+          now: now
+        });
+        isVisible = false;
+      }
+      
+      // Check specific term visibility if settings exist
+      if (studentWithParents.reportCardVisibilitySettings && 
+          studentWithParents.reportCardVisibilitySettings.length > 0) {
+        
+        const termSetting = studentWithParents.reportCardVisibilitySettings.find(
+          setting => setting.term === termName && setting.session === sessionName
+        );
+        
+        if (termSetting) {
+          console.log('📋 Found term-specific visibility setting:', termSetting);
+          isVisible = termSetting.isVisibleToParent || false;
+          
+          // Check scheduled visibility for this term
+          if (termSetting.scheduledVisibility && 
+              new Date(termSetting.scheduledVisibility) > now) {
+            console.log('⏰ Term-specific scheduled visibility check failed:', {
+              scheduled: termSetting.scheduledVisibility,
+              now: now
+            });
+            isVisible = false;
+          }
+        }
+      }
+      
+      if (!isVisible) {
+        let message = 'Report card is not visible to parents at this time';
+        let details = 'Contact school administration for access';
+        
+        if (studentWithParents.reportCardScheduledVisibility) {
+          const scheduledDate = new Date(studentWithParents.reportCardScheduledVisibility);
+          details = `Scheduled for release on: ${scheduledDate.toLocaleDateString()} ${scheduledDate.toLocaleTimeString()}`;
+        }
+        
+        console.log('🚫 Report card access denied for parent:', {
+          studentId,
+          parentId: req.user._id,
+          isVisible,
+          scheduledDate: studentWithParents.reportCardScheduledVisibility,
+          termSetting: studentWithParents.reportCardVisibilitySettings?.find(
+            s => s.term === termName && s.session === sessionName
+          )
+        });
+        
+        return res.status(403).json({ 
+          error: message,
+          details: details,
+          scheduledDate: studentWithParents.reportCardScheduledVisibility
+        });
+      }
+      
+      console.log('✅ Parent access granted for report card:', {
+        studentId,
+        parentId: req.user._id,
+        isVisible
+      });
+      
+      // Record access
+      try {
+        await User.findByIdAndUpdate(studentId, {
+          $push: {
+            reportCardDownloads: {
+              parentId: req.user._id,
+              downloadedAt: new Date(),
+              ipAddress: req.ip,
+              userAgent: req.headers['user-agent'],
+              downloadCount: 1
+            }
+          }
+        });
+        console.log('📝 Recorded report card access for parent');
+      } catch (recordError) {
+        console.error('Error recording report card access:', recordError);
+        // Don't fail the request if recording fails
+      }
     }
     
     // FIXED: Build query to fetch results for SPECIFIC term only
@@ -519,7 +697,7 @@ router.get('/export/report/:studentId/:session', auth, async (req, res) => {
     
     console.log('🔍 Querying results with:', JSON.stringify(query, null, 2));
     
-    const results = await Result.find(query)
+    let results = await Result.find(query)
       .populate('testId', 'title type subject totalMarks')
       .populate({
         path: 'class',
@@ -549,8 +727,10 @@ router.get('/export/report/:studentId/:session', auth, async (req, res) => {
         .lean();
       
       if (alternativeResults.length === 0) {
+        // UPDATED: Use proper student name
+        const studentName = `${student.firstName || ''} ${student.lastName || ''}`.trim() || 'Student';
         return res.status(404).json({ 
-          error: `No results found for ${student.name || 'Student'} in ${fullSession}` 
+          error: `No results found for ${studentName} in ${fullSession}` 
         });
       }
       
@@ -558,19 +738,12 @@ router.get('/export/report/:studentId/:session', auth, async (req, res) => {
     }
     
     console.log('✅ Found results for specific term:', results.length);
-    console.log('Sample results with session info:', results.slice(0, 3).map(r => ({
-      subject: r.subject,
-      score: r.score,
-      session: r.session,
-      term: r.term,
-      testType: r.testId?.type,
-      testTitle: r.testId?.title
-    })));
     
-    // Process results - FIXED: Improved exam score detection
+    // UPDATED: Process results with improved student name handling
+    const studentName = `${student.firstName || ''} ${student.lastName || ''}`.trim() || student.username || 'Unknown Student';
     const reportData = {
-      student: `${student.name || ''} ${student.surname || ''}`.trim() || 'Unknown Student',
-      class: student.class?.name || 'N/A',
+      student: studentName,
+      class: student.class?.name || student.class?.shortName || student.class?.fullName || 'N/A',
       session: fullSession,
       term: termName,
       subjects: {},
@@ -600,7 +773,7 @@ router.get('/export/report/:studentId/:session', auth, async (req, res) => {
         };
       }
       
-      // Categorize based on test type AND title - FIXED: More comprehensive detection
+      // Categorize based on test type AND title
       let isExam = false;
       
       // Check if it's an exam by type
@@ -663,9 +836,9 @@ router.get('/export/report/:studentId/:session', auth, async (req, res) => {
     
     console.log('📊 Processed report data for term:', {
       term: termName,
+      studentName: studentName,
       numSubjects: reportData.numSubjects,
       subjects: Object.keys(reportData.subjects),
-      sampleSubjectData: reportData.subjects[Object.keys(reportData.subjects)[0]],
       totalScore: reportData.totalScore,
       totalPossible: reportData.totalPossible
     });
@@ -687,7 +860,7 @@ router.get('/export/report/:studentId/:session', auth, async (req, res) => {
     console.log('📊 Calculating position with query for term:', JSON.stringify(classQuery, null, 2));
     
     const classResults = await Result.find(classQuery)
-      .populate('userId', 'name surname')
+      .populate('userId', 'firstName lastName username')
       .lean();
     
     // Calculate position - improved logic
@@ -751,22 +924,25 @@ router.get('/export/report/:studentId/:session', auth, async (req, res) => {
       size: 'A4',
       margin: LAYOUT.margin,
       info: {
-        Title: `Report Card - ${reportData.student} - ${termName}`,
+        Title: `Report Card - ${studentName} - ${termName}`,
         Author: 'Sanniville Academy',
         Subject: `Academic Report - ${fullSession}`,
+        Keywords: `report card, academic, ${studentName}, ${termName}, ${sessionName}`,
+        Creator: 'Sanniville Academy Report System',
+        CreationDate: new Date(),
       },
     });
     
     // Set response headers
     res.setHeader('Content-Type', 'application/pdf');
-    const filename = `report_${student.name || 'student'}_${sessionName.replace(/\//g, '_')}_${termName.replace(/\s/g, '_')}.pdf`;
+    const filename = `report_${student.firstName || 'student'}_${sessionName.replace(/\//g, '_')}_${termName.replace(/\s/g, '_')}.pdf`;
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     
     doc.pipe(res);
     
     // Add content to PDF
     addWatermark(doc);
-    let currentY = addHeader(doc, sessionName, termName); // Now includes term in header
+    let currentY = addHeader(doc, sessionName, termName);
     currentY = addStudentInfo(doc, currentY, student, reportData, position, classSize, attendance);
     currentY = addPerformanceTable(doc, currentY, reportData);
     currentY = addSummary(doc, currentY, reportData, average, results);
@@ -777,15 +953,14 @@ router.get('/export/report/:studentId/:session', auth, async (req, res) => {
     
     console.log('✅ Report card generated successfully:', {
       studentId,
-      studentName: student.name,
+      studentName: studentName,
       session: sessionName,
       term: termName,
-      fullSession,
       filename,
       numSubjects: reportData.numSubjects,
       position: `${position}/${classSize}`,
-      examScoresFound: Object.keys(reportData.subjects).some(subject => reportData.subjects[subject].exam > 0),
-      totalScore: reportData.totalScore
+      requestedBy: req.user.username,
+      role: req.user.role
     });
     
   } catch (error) {
@@ -806,7 +981,7 @@ router.get('/export/report/:studentId/:session', auth, async (req, res) => {
   }
 });
 
-// New endpoint to match your results.js route pattern
+// UPDATED: New endpoint to match your results.js route pattern
 router.get('/export/report/:studentId/:session/:term', auth, async (req, res) => {
   try {
     const { studentId, session, term } = req.params;
@@ -834,7 +1009,7 @@ router.get('/export/report/:studentId/:session/:term', auth, async (req, res) =>
   }
 });
 
-// Alternative endpoint with combined session/term parameter
+// UPDATED: Alternative endpoint with combined session/term parameter
 router.get('/export/report/combined/:studentId/:fullSession', auth, async (req, res) => {
   try {
     const { studentId, fullSession } = req.params;
@@ -866,7 +1041,7 @@ router.get('/export/report/combined/:studentId/:fullSession', auth, async (req, 
   }
 });
 
-// Debug endpoint to check data - IMPROVED VERSION
+// UPDATED: Debug endpoint to check data - IMPROVED VERSION
 router.get('/debug/:studentId/:session', auth, async (req, res) => {
   try {
     const { studentId, session: sessionName } = req.params;
@@ -874,9 +1049,15 @@ router.get('/debug/:studentId/:session', auth, async (req, res) => {
     const termName = term || 'First Term';
     const fullSession = `${sessionName} ${termName}`;
     
+    // UPDATED: Get student with all relevant fields
     const student = await User.findById(studentId)
-      .populate('class', 'name')
+      .populate('class', 'name shortName fullName level')
+      .select('firstName lastName middleName username studentId dateOfBirth sex age address phoneNumber email profileImage picture parents class reportCardVisibleToParent reportCardScheduledVisibility reportCardVisibilitySettings')
       .lean();
+    
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
     
     // Try different query approaches
     const queries = [
@@ -970,10 +1151,20 @@ router.get('/debug/:studentId/:session', auth, async (req, res) => {
     
     res.json({
       student: {
-        name: student.name,
-        surname: student.surname,
+        id: student._id,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        middleName: student.middleName,
+        username: student.username,
+        studentId: student.studentId,
+        fullName: `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim(),
         class: student.class,
-        classType: typeof student.class
+        classType: typeof student.class,
+        profileImage: student.profileImage,
+        picture: student.picture,
+        reportCardVisibleToParent: student.reportCardVisibleToParent,
+        reportCardScheduledVisibility: student.reportCardScheduledVisibility,
+        parents: student.parents
       },
       query: {
         studentId,
@@ -1014,7 +1205,7 @@ router.get('/debug/:studentId/:session', auth, async (req, res) => {
   }
 });
 
-// Test type identification endpoint
+// UPDATED: Test type identification endpoint
 router.get('/test-types/:studentId', auth, async (req, res) => {
   try {
     const { studentId } = req.params;
@@ -1047,6 +1238,545 @@ router.get('/test-types/:studentId', auth, async (req, res) => {
   } catch (error) {
     console.error('Test types error:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// UPDATED: New endpoint to get student profile image
+router.get('/student/:studentId/profile-image', auth, async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    
+    console.log('GET /api/reports/student/:studentId/profile-image - Request:', {
+      studentId,
+      user: req.user.username
+    });
+    
+    const student = await User.findById(studentId)
+      .select('profileImage picture firstName lastName username')
+      .lean();
+    
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+    
+    // Check permissions
+    if (req.user.role === 'student' && req.user._id.toString() !== studentId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    // Try to find the profile image file
+    const imagePaths = [
+      path.join(__dirname, '../../uploads/profiles', student.profileImage || ''),
+      path.join(__dirname, '../../../uploads/profiles', student.profileImage || ''),
+      path.join(__dirname, '../../Uploads', student.picture || ''),
+      path.join(__dirname, '../../../Uploads', student.picture || ''),
+    ];
+    
+    let imagePath = null;
+    for (const path of imagePaths) {
+      if (fs.existsSync(path)) {
+        imagePath = path;
+        break;
+      }
+    }
+    
+    if (imagePath) {
+      res.setHeader('Content-Type', 'image/jpeg');
+      fs.createReadStream(imagePath).pipe(res);
+    } else {
+      // Return a default placeholder image
+      res.status(404).json({ 
+        error: 'Profile image not found',
+        message: 'Using default placeholder',
+        student: {
+          firstName: student.firstName,
+          lastName: student.lastName,
+          username: student.username
+        }
+      });
+    }
+    
+  } catch (error) {
+    console.error('Profile image error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================
+// SIGNATURE UPLOAD ENDPOINTS
+// ============================================================
+
+// Get all signatures
+router.get('/signatures', auth, adminOnly, async (req, res) => {
+  try {
+    console.log('GET /api/reports/signatures - Fetching all signatures');
+    
+    const signatures = await Signature.find()
+      .populate('class', 'name shortName level')
+      .populate('uploadedBy', 'firstName lastName username')
+      .sort({ updatedAt: -1 })
+      .lean();
+    
+    res.json({
+      success: true,
+      signatures,
+      total: signatures.length
+    });
+  } catch (error) {
+    console.error('Get signatures error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch signatures',
+      error: error.message
+    });
+  }
+});
+
+// Get signature for a specific class
+router.get('/signatures/class/:classId', auth, async (req, res) => {
+  try {
+    const { classId } = req.params;
+    
+    console.log('GET /api/reports/signatures/class/:classId - Fetching signature for class:', classId);
+    
+    const signature = await Signature.findOne({ class: classId })
+      .populate('class', 'name shortName level')
+      .populate('uploadedBy', 'firstName lastName username')
+      .lean();
+    
+    if (!signature) {
+      return res.status(404).json({
+        success: false,
+        message: 'No signature found for this class'
+      });
+    }
+    
+    res.json({
+      success: true,
+      signature
+    });
+  } catch (error) {
+    console.error('Get class signature error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch class signature',
+      error: error.message
+    });
+  }
+});
+
+// Upload/update signatures (Admin only)
+router.post('/signatures/upload', auth, adminOnly, async (req, res) => {
+  try {
+    console.log('POST /api/reports/signatures/upload - Uploading signature');
+    
+    // Check if files were uploaded
+    if (!req.files || (!req.files.teacherSignature && !req.files.principalSignature)) {
+      return res.status(400).json({
+        success: false,
+        message: 'No signature files uploaded'
+      });
+    }
+    
+    const { classId, className } = req.body;
+    
+    // Validate class
+    if (!classId && !className) {
+      return res.status(400).json({
+        success: false,
+        message: 'Class ID or Class Name is required'
+      });
+    }
+    
+    let classObj = null;
+    if (classId && mongoose.isValidObjectId(classId)) {
+      classObj = await Class.findById(classId);
+    } else if (className) {
+      classObj = await Class.findOne({ 
+        $or: [
+          { name: className },
+          { shortName: className }
+        ]
+      });
+    }
+    
+    if (!classObj && classId !== 'principal') {
+      return res.status(404).json({
+        success: false,
+        message: 'Class not found'
+      });
+    }
+    
+    // Handle file uploads
+    const uploadDir = path.join(__dirname, '../../Uploads');
+    
+    // Ensure upload directory exists
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    
+    const signatureData = {
+      uploadedBy: req.user._id,
+      updatedAt: new Date()
+    };
+    
+    // Upload teacher signature
+    if (req.files.teacherSignature) {
+      const teacherFile = req.files.teacherSignature;
+      const teacherExt = path.extname(teacherFile.name);
+      const teacherFileName = `teacher_signature_${classObj?._id || 'principal'}_${Date.now()}${teacherExt}`;
+      const teacherPath = path.join(uploadDir, teacherFileName);
+      
+      await teacherFile.mv(teacherPath);
+      signatureData.teacherSignature = teacherFileName;
+      console.log('✅ Teacher signature uploaded:', teacherFileName);
+    }
+    
+    // Upload principal signature
+    if (req.files.principalSignature) {
+      const principalFile = req.files.principalSignature;
+      const principalExt = path.extname(principalFile.name);
+      const principalFileName = `principal_signature_${Date.now()}${principalExt}`;
+      const principalPath = path.join(uploadDir, principalFileName);
+      
+      await principalFile.mv(principalPath);
+      signatureData.principalSignature = principalFileName;
+      console.log('✅ Principal signature uploaded:', principalFileName);
+    }
+    
+    // Find existing signature or create new
+    let signature;
+    if (classObj) {
+      signature = await Signature.findOne({ class: classObj._id });
+      
+      if (signature) {
+        // Update existing signature
+        if (signatureData.teacherSignature) signature.teacherSignature = signatureData.teacherSignature;
+        if (signatureData.principalSignature) signature.principalSignature = signatureData.principalSignature;
+        signature.uploadedBy = signatureData.uploadedBy;
+        signature.updatedAt = signatureData.updatedAt;
+        
+        await signature.save();
+      } else {
+        // Create new signature
+        signatureData.class = classObj._id;
+        signature = new Signature(signatureData);
+        await signature.save();
+      }
+    } else {
+      // Principal signature (global, not class-specific)
+      signature = await Signature.findOne({ class: null });
+      
+      if (signature) {
+        if (signatureData.principalSignature) signature.principalSignature = signatureData.principalSignature;
+        signature.uploadedBy = signatureData.uploadedBy;
+        signature.updatedAt = signatureData.updatedAt;
+        
+        await signature.save();
+      } else {
+        signatureData.class = null; // Global principal signature
+        signature = new Signature(signatureData);
+        await signature.save();
+      }
+    }
+    
+    // Populate response
+    const populatedSignature = await Signature.findById(signature._id)
+      .populate('class', 'name shortName level')
+      .populate('uploadedBy', 'firstName lastName username')
+      .lean();
+    
+    res.json({
+      success: true,
+      message: 'Signature uploaded successfully',
+      signature: populatedSignature
+    });
+    
+  } catch (error) {
+    console.error('Upload signature error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to upload signature',
+      error: error.message
+    });
+  }
+});
+
+// Delete signature (Admin only)
+router.delete('/signatures/:signatureId', auth, adminOnly, async (req, res) => {
+  try {
+    const { signatureId } = req.params;
+    
+    console.log('DELETE /api/reports/signatures/:signatureId - Deleting signature:', signatureId);
+    
+    const signature = await Signature.findById(signatureId);
+    
+    if (!signature) {
+      return res.status(404).json({
+        success: false,
+        message: 'Signature not found'
+      });
+    }
+    
+    // Delete signature files from uploads directory
+    const uploadDir = path.join(__dirname, '../../Uploads');
+    
+    if (signature.teacherSignature) {
+      const teacherPath = path.join(uploadDir, signature.teacherSignature);
+      if (fs.existsSync(teacherPath)) {
+        fs.unlinkSync(teacherPath);
+      }
+    }
+    
+    if (signature.principalSignature) {
+      const principalPath = path.join(uploadDir, signature.principalSignature);
+      if (fs.existsSync(principalPath)) {
+        fs.unlinkSync(principalPath);
+      }
+    }
+    
+    // Delete signature record
+    await Signature.findByIdAndDelete(signatureId);
+    
+    res.json({
+      success: true,
+      message: 'Signature deleted successfully'
+    });
+    
+  } catch (error) {
+    console.error('Delete signature error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete signature',
+      error: error.message
+    });
+  }
+});
+
+// Get global principal signature
+router.get('/signatures/principal', auth, async (req, res) => {
+  try {
+    console.log('GET /api/reports/signatures/principal - Fetching principal signature');
+    
+    const signature = await Signature.findOne({ class: null })
+      .populate('uploadedBy', 'firstName lastName username')
+      .lean();
+    
+    if (!signature) {
+      return res.status(404).json({
+        success: false,
+        message: 'Principal signature not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      signature
+    });
+  } catch (error) {
+    console.error('Get principal signature error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch principal signature',
+      error: error.message
+    });
+  }
+});
+
+// Preview signature image
+router.get('/signatures/preview/:filename', auth, async (req, res) => {
+  try {
+    const { filename } = req.params;
+    
+    console.log('GET /api/reports/signatures/preview/:filename - Previewing signature:', filename);
+    
+    const signaturePath = path.join(__dirname, '../../Uploads', filename);
+    
+    if (!fs.existsSync(signaturePath)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Signature file not found'
+      });
+    }
+    
+    // Determine content type based on file extension
+    const ext = path.extname(filename).toLowerCase();
+    let contentType = 'image/png'; // default
+    
+    if (ext === '.jpg' || ext === '.jpeg') {
+      contentType = 'image/jpeg';
+    } else if (ext === '.gif') {
+      contentType = 'image/gif';
+    } else if (ext === '.svg') {
+      contentType = 'image/svg+xml';
+    }
+    
+    res.setHeader('Content-Type', contentType);
+    fs.createReadStream(signaturePath).pipe(res);
+    
+  } catch (error) {
+    console.error('Preview signature error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to preview signature',
+      error: error.message
+    });
+  }
+});
+
+// Get signature statistics
+router.get('/signatures/stats', auth, adminOnly, async (req, res) => {
+  try {
+    console.log('GET /api/reports/signatures/stats - Fetching signature statistics');
+    
+    const stats = {
+      totalSignatures: await Signature.countDocuments(),
+      classSignatures: await Signature.countDocuments({ class: { $ne: null } }),
+      principalSignature: await Signature.exists({ class: null }),
+      recentUploads: await Signature.find()
+        .sort({ updatedAt: -1 })
+        .limit(5)
+        .populate('class', 'name')
+        .populate('uploadedBy', 'firstName lastName')
+        .select('teacherSignature principalSignature updatedAt')
+        .lean()
+    };
+    
+    res.json({
+      success: true,
+      stats
+    });
+  } catch (error) {
+    console.error('Get signature stats error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch signature statistics',
+      error: error.message
+    });
+  }
+});
+
+// ============================================================
+// BULK SIGNATURE MANAGEMENT
+// ============================================================
+
+// Bulk assign same teacher signature to multiple classes
+router.post('/signatures/bulk-assign', auth, adminOnly, async (req, res) => {
+  try {
+    const { classIds, teacherSignatureFile } = req.body;
+    
+    console.log('POST /api/reports/signatures/bulk-assign - Bulk assigning signature to classes:', {
+      classCount: classIds?.length,
+      hasFile: !!teacherSignatureFile
+    });
+    
+    if (!Array.isArray(classIds) || classIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Class IDs array is required'
+      });
+    }
+    
+    if (!teacherSignatureFile || !teacherSignatureFile.startsWith('data:image')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid base64 teacher signature image is required'
+      });
+    }
+    
+    const results = [];
+    const errors = [];
+    
+    // Process each class
+    for (const classId of classIds) {
+      try {
+        const classObj = await Class.findById(classId);
+        if (!classObj) {
+          errors.push({
+            classId,
+            error: 'Class not found'
+          });
+          continue;
+        }
+        
+        // Convert base64 to file
+        const matches = teacherSignatureFile.match(/^data:image\/(\w+);base64,/);
+        if (!matches) {
+          errors.push({
+            classId,
+            error: 'Invalid base64 image format'
+          });
+          continue;
+        }
+        
+        const mimeType = matches[1];
+        const extension = mimeType === 'jpeg' ? 'jpg' : mimeType;
+        const base64Data = teacherSignatureFile.replace(/^data:image\/\w+;base64,/, '');
+        const buffer = Buffer.from(base64Data, 'base64');
+        
+        const uploadDir = path.join(__dirname, '../../Uploads');
+        if (!fs.existsSync(uploadDir)) {
+          fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        
+        const fileName = `teacher_signature_${classId}_${Date.now()}.${extension}`;
+        const filePath = path.join(uploadDir, fileName);
+        
+        fs.writeFileSync(filePath, buffer);
+        
+        // Update or create signature record
+        let signature = await Signature.findOne({ class: classId });
+        if (signature) {
+          // Delete old file if exists
+          if (signature.teacherSignature) {
+            const oldPath = path.join(uploadDir, signature.teacherSignature);
+            if (fs.existsSync(oldPath)) {
+              fs.unlinkSync(oldPath);
+            }
+          }
+          
+          signature.teacherSignature = fileName;
+          signature.uploadedBy = req.user._id;
+          signature.updatedAt = new Date();
+          await signature.save();
+        } else {
+          signature = new Signature({
+            class: classId,
+            teacherSignature: fileName,
+            uploadedBy: req.user._id
+          });
+          await signature.save();
+        }
+        
+        results.push({
+          classId,
+          className: classObj.name,
+          success: true,
+          fileName
+        });
+        
+      } catch (error) {
+        errors.push({
+          classId,
+          error: error.message
+        });
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: `Bulk assignment completed: ${results.length} successful, ${errors.length} failed`,
+      results,
+      errors: errors.length > 0 ? errors : undefined
+    });
+    
+  } catch (error) {
+    console.error('Bulk assign signatures error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to bulk assign signatures',
+      error: error.message
+    });
   }
 });
 

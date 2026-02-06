@@ -9,6 +9,9 @@ const Class = require('../models/Class');
 const Subject = require('../models/Subject');
 const Permission = require('../models/Permission');
 const RolePermission = require('../models/RolePermission');
+const Result = require('../models/Result'); // Added Result model
+const Feedback = require('../models/ParentFeedback'); // Added Feedback model
+const Test = require('../models/Test'); // Added Test model
 const { auth } = require('../middleware/auth');
 const { checkPermission } = require('../middleware/permissions');
 
@@ -32,7 +35,7 @@ const validateUserInput = (req, res, next) => {
     });
   }
   
-  const validRoles = ['super_admin', 'admin', 'teacher', 'student'];
+  const validRoles = ['super_admin', 'admin', 'teacher', 'student', 'parent'];
   if (!validRoles.includes(role)) {
     return res.status(400).json({ 
       success: false,
@@ -113,6 +116,17 @@ const handleBase64Image = async (base64Data, userId, isUpdate = false, user = nu
     console.error('❌ Error saving base64 image:', imageError.message);
     return null;
   }
+};
+
+// Add adminAuth middleware (from your auth.js file)
+const adminAuth = (req, res, next) => {
+  if (!['admin', 'super_admin'].includes(req.user.role)) {
+    return res.status(403).json({
+      success: false,
+      message: 'Admin access required'
+    });
+  }
+  next();
 };
 
 // ============================================================
@@ -1024,8 +1038,8 @@ router.post('/', auth, checkPermission('create_users'), validateUserInput, async
         return res.status(400).json({ 
           success: false,
           message: 'Email already exists' 
-        });
-      }
+      });
+    }
     }
 
     // Prevent creating super_admin users unless current user is super_admin
@@ -3096,6 +3110,2153 @@ router.get('/dashboard/counts', auth, async (req, res) => {
     });
   }
 });
+
+// routes/users.js - ADD THESE ENDPOINTS
+
+// ============================================================
+// ADMIN PARENT CREATION ENDPOINTS
+// ============================================================
+
+// Admin: Create parent with children (MOST IMPORTANT - this is what your frontend needs)
+router.post('/admin/create-parent', auth, checkPermission('manage_users'), async (req, res) => {
+  try {
+    console.log('👨‍👧‍👦 POST /api/users/admin/create-parent - Creating parent with children:', req.body);
+    
+    const {
+      firstName,
+      lastName,
+      username,
+      email,
+      password,
+      phoneNumber,
+      address,
+      children = [], // Array of student IDs
+      notificationPreferences = {
+        email: true,
+        sms: false,
+        push: true,
+        frequency: 'immediate'
+      },
+      active = true
+    } = req.body;
+
+    // Validate required fields
+    if (!firstName || !lastName || !username || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'First name, last name, username, email, and password are required'
+      });
+    }
+
+    // Check if username or email already exists
+    const existingUser = await User.findOne({
+      $or: [
+        { username: username.toLowerCase() },
+        { email: email.toLowerCase() }
+      ]
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username or email already exists'
+      });
+    }
+
+    // Validate children exist and are students
+    const validChildren = [];
+    if (children && children.length > 0) {
+      try {
+        const childUsers = await User.find({
+          _id: { $in: children },
+          role: 'student',
+          active: true
+        });
+        
+        validChildren.push(...childUsers.map(child => child._id));
+        
+        if (validChildren.length !== children.length) {
+          console.warn('⚠️ Some children are invalid:', {
+            requested: children.length,
+            valid: validChildren.length,
+            invalid: children.length - validChildren.length
+          });
+        }
+      } catch (error) {
+        console.error('❌ Error validating children:', error);
+        // Continue with parent creation even if children validation fails
+      }
+    }
+
+    console.log('✅ Validated children:', {
+      requested: children.length,
+      valid: validChildren.length
+    });
+
+    // Create parent user
+    const parent = new User({
+      firstName,
+      lastName,
+      username: username.toLowerCase(),
+      email: email.toLowerCase(),
+      password,
+      phoneNumber: phoneNumber || '',
+      address: address || '',
+      role: 'parent',
+      active,
+      children: validChildren, // Set children during creation
+      notificationPreferences,
+      createdBy: req.user.id
+    });
+
+    await parent.save();
+    console.log('✅ Parent created successfully:', {
+      id: parent._id,
+      username: parent.username,
+      childrenCount: validChildren.length,
+      parentCode: parent.parentCode
+    });
+
+    // Link children to parent (update children's parents array)
+    if (validChildren.length > 0) {
+      try {
+        await User.updateMany(
+          { _id: { $in: validChildren }, role: 'student' },
+          { 
+            $addToSet: { parents: parent._id },
+            $set: { 
+              parentEmail: parent.email,
+              parentPhoneNumber: parent.phoneNumber 
+            }
+          }
+        );
+        console.log('✅ Linked', validChildren.length, 'children to parent');
+      } catch (linkError) {
+        console.error('❌ Error linking children:', linkError);
+        // Don't fail the whole request if linking fails
+      }
+    }
+
+    // Return the created parent with children populated
+    const populatedParent = await User.findById(parent._id)
+      .select('-password -loginAttempts -lockUntil -__v')
+      .populate({
+        path: 'children',
+        select: 'firstName lastName studentId className',
+        match: { active: true }
+      });
+
+    res.status(201).json({
+      success: true,
+      message: 'Parent created successfully',
+      parent: {
+        ...populatedParent.toObject(),
+        childrenCount: populatedParent.children?.length || 0,
+        parentCode: populatedParent.parentCode
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Parent creation error:', error);
+    
+    // Format validation errors
+    let errorMessages = [];
+    if (error.errors) {
+      errorMessages = Object.values(error.errors).map(err => err.message);
+    } else if (error.message) {
+      errorMessages = [error.message];
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create parent',
+      error: error.message,
+      errors: errorMessages
+    });
+  }
+});
+
+// Admin: Get all parents with children count
+router.get('/admin/parents', auth, checkPermission('view_users'), async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search = '', active = true } = req.query;
+    const skip = (page - 1) * limit;
+
+    console.log('📋 GET /api/users/admin/parents - Fetching parents:', {
+      search,
+      active,
+      page,
+      limit
+    });
+
+    // Build search query
+    const query = { role: 'parent' };
+    
+    if (active !== undefined) {
+      query.active = active === 'true';
+    }
+    
+    if (search) {
+      query.$or = [
+        { firstName: { $regex: search, $options: 'i' } },
+        { lastName: { $regex: search, $options: 'i' } },
+        { username: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { parentCode: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const [parents, total] = await Promise.all([
+      User.find(query)
+        .select('-password -loginAttempts -lockUntil -__v')
+        .populate({
+          path: 'children',
+          select: 'firstName lastName studentId className',
+          match: { active: true }
+        })
+        .populate('createdBy', 'firstName lastName username')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      User.countDocuments(query)
+    ]);
+
+    // Format response with children count
+    const formattedParents = parents.map(parent => ({
+      ...parent,
+      childrenCount: parent.children?.length || 0,
+      fullName: `${parent.firstName} ${parent.lastName}`,
+      createdByName: parent.createdBy ? 
+        `${parent.createdBy.firstName} ${parent.createdBy.lastName}` : 
+        'System'
+    }));
+
+    console.log('✅ Found', total, 'parents');
+
+    res.json({
+      success: true,
+      parents: formattedParents,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        totalParents: total,
+        limit: parseInt(limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Get parents error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch parents',
+      error: error.message
+    });
+  }
+});
+
+// Admin: Get parent details with children
+router.get('/admin/parents/:parentId', auth, checkPermission('view_users'), async (req, res) => {
+  try {
+    const { parentId } = req.params;
+    
+    console.log('👤 GET /api/users/admin/parents/:parentId - Fetching parent details:', parentId);
+
+    const parent = await User.findOne({
+      _id: parentId,
+      role: 'parent'
+    })
+      .select('-password -loginAttempts -lockUntil -__v')
+      .populate({
+        path: 'children',
+        select: 'firstName lastName studentId className dateOfBirth sex email phoneNumber address',
+        match: { active: true },
+        populate: {
+          path: 'class',
+          select: 'name level'
+        }
+      })
+      .populate('createdBy', 'firstName lastName username')
+      .populate('parents', 'firstName lastName username email') // If parent has parents (unlikely)
+      .lean();
+
+    if (!parent) {
+      return res.status(404).json({
+        success: false,
+        message: 'Parent not found'
+      });
+    }
+
+    // Format response
+    const formattedParent = {
+      ...parent,
+      childrenCount: parent.children?.length || 0,
+      fullName: `${parent.firstName} ${parent.lastName}`,
+      createdByName: parent.createdBy ? 
+        `${parent.createdBy.firstName} ${parent.createdBy.lastName}` : 
+        'System',
+      children: parent.children?.map(child => ({
+        ...child,
+        fullName: `${child.firstName} ${child.lastName}`,
+        className: child.className || child.class?.name || 'No Class'
+      })) || []
+    };
+
+    res.json({
+      success: true,
+      parent: formattedParent
+    });
+
+  } catch (error) {
+    console.error('❌ Get parent details error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch parent details',
+      error: error.message
+    });
+  }
+});
+
+// Admin: Update parent children (add/remove children)
+router.put('/admin/parents/:parentId/children', auth, checkPermission('manage_users'), async (req, res) => {
+  try {
+    const { parentId } = req.params;
+    const { children = [], action = 'set' } = req.body; // action: 'set', 'add', 'remove'
+    
+    console.log('🔄 PUT /api/users/admin/parents/:parentId/children - Updating parent children:', {
+      parentId,
+      action,
+      childrenCount: children.length
+    });
+
+    // Find parent
+    const parent = await User.findById(parentId);
+    if (!parent || parent.role !== 'parent') {
+      return res.status(404).json({
+        success: false,
+        message: 'Parent not found'
+      });
+    }
+
+    // Validate children are students
+    const validChildren = [];
+    if (children.length > 0) {
+      const childUsers = await User.find({
+        _id: { $in: children },
+        role: 'student',
+        active: true
+      });
+      
+      validChildren.push(...childUsers.map(child => child._id));
+      
+      if (validChildren.length !== children.length) {
+        console.warn('⚠️ Some children are invalid');
+      }
+    }
+
+    // Update children based on action
+    let updatedChildren = [];
+    let message = '';
+    
+    switch (action) {
+      case 'set':
+        // Replace all children
+        updatedChildren = validChildren;
+        message = 'Children set successfully';
+        break;
+        
+      case 'add':
+        // Add children to existing ones
+        const existingChildren = parent.children || [];
+        const newChildren = validChildren.filter(childId => 
+          !existingChildren.includes(childId)
+        );
+        updatedChildren = [...existingChildren, ...newChildren];
+        message = `Added ${newChildren.length} children`;
+        break;
+        
+      case 'remove':
+        // Remove specified children
+        const currentChildren = parent.children || [];
+        updatedChildren = currentChildren.filter(childId => 
+          !validChildren.includes(childId)
+        );
+        message = `Removed ${currentChildren.length - updatedChildren.length} children`;
+        break;
+        
+      default:
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid action. Use "set", "add", or "remove"'
+        });
+    }
+
+    // Update parent's children
+    parent.children = updatedChildren;
+    await parent.save();
+
+    // Update children's parents array
+    if (action === 'set' || action === 'add') {
+      // Add parent to children
+      await User.updateMany(
+        { _id: { $in: validChildren }, role: 'student' },
+        { 
+          $addToSet: { parents: parent._id },
+          $set: { 
+            parentEmail: parent.email,
+            parentPhoneNumber: parent.phoneNumber 
+          }
+        }
+      );
+    }
+    
+    if (action === 'remove' || action === 'set') {
+      // Remove parent from children no longer linked
+      const childrenToRemove = [];
+      if (action === 'remove') {
+        childrenToRemove.push(...validChildren);
+      } else if (action === 'set') {
+        const previousChildren = parent.children || [];
+        const removedChildren = previousChildren.filter(childId => 
+          !validChildren.includes(childId)
+        );
+        childrenToRemove.push(...removedChildren);
+      }
+      
+      if (childrenToRemove.length > 0) {
+        await User.updateMany(
+          { _id: { $in: childrenToRemove }, role: 'student' },
+          { 
+            $pull: { parents: parent._id }
+          }
+        );
+      }
+    }
+
+    // Get updated parent with children
+    const updatedParent = await User.findById(parentId)
+      .select('-password -loginAttempts -lockUntil -__v')
+      .populate({
+        path: 'children',
+        select: 'firstName lastName studentId className',
+        match: { active: true }
+      })
+      .lean();
+
+    res.json({
+      success: true,
+      message,
+      parent: {
+        ...updatedParent,
+        childrenCount: updatedParent.children?.length || 0
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Update parent children error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update parent children',
+      error: error.message
+    });
+  }
+});
+
+// ============================================================
+// ADMIN FEEDBACK & RESULT VISIBILITY MANAGEMENT
+// ============================================================
+
+// Get all parent feedbacks (Admin only)
+router.get('/admin/parent-feedbacks', auth, adminAuth, async (req, res) => {
+  try {
+    console.log('📝 GET /api/users/admin/parent-feedbacks - Fetching all parent feedbacks');
+    
+    const feedbacks = await Feedback.find()
+      .populate('parent', 'name email firstName lastName username profileImage')
+      .populate('student', 'name firstName lastName studentId className profileImage')
+      .populate('repliedBy', 'firstName lastName username')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    console.log('✅ Parent feedbacks fetched:', feedbacks.length);
+
+    res.json({ 
+      success: true,
+      feedbacks,
+      total: feedbacks.length 
+    });
+  } catch (error) {
+    console.error('❌ Get parent feedbacks error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
+  }
+});
+
+// Reply to feedback (Admin only)
+router.post('/admin/parent-feedbacks/:id/reply', auth, adminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reply } = req.body;
+    
+    console.log('📝 POST /api/users/admin/parent-feedbacks/:id/reply - Replying to feedback:', {
+      feedbackId: id,
+      replyLength: reply?.length
+    });
+
+    if (!reply || reply.trim() === '') {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Reply message is required' 
+      });
+    }
+
+    const feedback = await Feedback.findById(id)
+      .populate('parent', 'email firstName lastName')
+      .populate('student', 'name studentId');
+    
+    if (!feedback) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Feedback not found' 
+      });
+    }
+
+    feedback.reply = reply.trim();
+    feedback.status = 'replied';
+    feedback.repliedAt = new Date();
+    feedback.repliedBy = req.user._id;
+    
+    await feedback.save();
+
+    console.log('✅ Reply sent to feedback:', {
+      feedbackId: feedback._id,
+      parent: feedback.parent?.email,
+      status: feedback.status
+    });
+
+    // TODO: Uncomment and implement email notification
+    // if (feedback.parent?.email) {
+    //   await sendFeedbackReplyEmail(feedback);
+    // }
+
+    res.json({ 
+      success: true,
+      message: 'Reply sent successfully', 
+      feedback 
+    });
+  } catch (error) {
+    console.error('❌ Reply to feedback error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
+  }
+});
+
+// Archive/Unarchive feedback (Admin only)
+router.put('/admin/parent-feedbacks/:id/archive', auth, adminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action } = req.body; // 'archive' or 'unarchive'
+    
+    console.log('📝 PUT /api/users/admin/parent-feedbacks/:id/archive - Archive action:', {
+      feedbackId: id,
+      action
+    });
+
+    const feedback = await Feedback.findById(id);
+    if (!feedback) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Feedback not found' 
+      });
+    }
+
+    if (action === 'archive') {
+      feedback.status = 'archived';
+    } else if (action === 'unarchive') {
+      feedback.status = feedback.previousStatus || 'pending';
+    } else {
+      // Toggle if no action specified
+      feedback.status = feedback.status === 'archived' ? 'pending' : 'archived';
+    }
+    
+    await feedback.save();
+
+    console.log('✅ Feedback status updated:', {
+      feedbackId: feedback._id,
+      newStatus: feedback.status
+    });
+
+    res.json({ 
+      success: true,
+      message: `Feedback ${feedback.status === 'archived' ? 'archived' : 'unarchived'} successfully`, 
+      feedback 
+    });
+  } catch (error) {
+    console.error('❌ Archive feedback error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
+  }
+});
+
+// Get all parent feedbacks (Admin only)
+router.get('/admin/parent-feedbacks', auth, adminAuth, async (req, res) => {
+  try {
+    console.log('📝 GET /api/users/admin/parent-feedbacks - Fetching all parent feedbacks');
+    
+    const feedbacks = await Feedback.find()
+      .populate('parent', 'email firstName lastName username profileImage')
+      .populate('student', 'firstName lastName studentId className profileImage')
+      .populate('repliedBy', 'firstName lastName username')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    console.log('✅ Parent feedbacks fetched:', feedbacks.length);
+
+    res.json({ 
+      success: true,
+      feedbacks,
+      total: feedbacks.length 
+    });
+  } catch (error) {
+    console.error('❌ Get parent feedbacks error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
+  }
+});
+
+// Reply to feedback (Admin only)
+router.post('/admin/parent-feedbacks/:id/reply', auth, adminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reply } = req.body;
+    
+    console.log('📝 POST /api/users/admin/parent-feedbacks/:id/reply - Replying to feedback:', {
+      feedbackId: id,
+      replyLength: reply?.length
+    });
+
+    if (!reply || reply.trim() === '') {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Reply message is required' 
+      });
+    }
+
+    const feedback = await Feedback.findById(id)
+      .populate('parent', 'email firstName lastName')
+      .populate('student', 'firstName lastName studentId');
+    
+    if (!feedback) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Feedback not found' 
+      });
+    }
+
+    feedback.reply = reply.trim();
+    feedback.status = 'replied';
+    feedback.repliedAt = new Date();
+    feedback.repliedBy = req.user._id;
+    
+    await feedback.save();
+
+    console.log('✅ Reply sent to feedback:', {
+      feedbackId: feedback._id,
+      parent: feedback.parent?.email,
+      status: feedback.status
+    });
+
+    // TODO: Uncomment and implement email notification
+    // if (feedback.parent?.email) {
+    //   await sendFeedbackReplyEmail(feedback);
+    // }
+
+    res.json({ 
+      success: true,
+      message: 'Reply sent successfully', 
+      feedback 
+    });
+  } catch (error) {
+    console.error('❌ Reply to feedback error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
+  }
+});
+
+// Archive/Unarchive feedback (Admin only)
+router.put('/admin/parent-feedbacks/:id/archive', auth, adminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action } = req.body; // 'archive' or 'unarchive'
+    
+    console.log('📝 PUT /api/users/admin/parent-feedbacks/:id/archive - Archive action:', {
+      feedbackId: id,
+      action
+    });
+
+    const feedback = await Feedback.findById(id);
+    if (!feedback) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Feedback not found' 
+      });
+    }
+
+    if (action === 'archive') {
+      feedback.status = 'archived';
+    } else if (action === 'unarchive') {
+      feedback.status = feedback.previousStatus || 'pending';
+    } else {
+      // Toggle if no action specified
+      feedback.status = feedback.status === 'archived' ? 'pending' : 'archived';
+    }
+    
+    await feedback.save();
+
+    console.log('✅ Feedback status updated:', {
+      feedbackId: feedback._id,
+      newStatus: feedback.status
+    });
+
+    res.json({ 
+      success: true,
+      message: `Feedback ${feedback.status === 'archived' ? 'archived' : 'unarchived'} successfully`, 
+      feedback 
+    });
+  } catch (error) {
+    console.error('❌ Archive feedback error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
+  }
+});
+
+// ============================================================
+// RESULTS VISIBILITY MANAGEMENT ENDPOINTS - FIXED VERSION
+// ============================================================
+
+// Get results for visibility management (Admin only) - UPDATED WITH PROPER POPULATION
+router.get('/admin/results/visibility', auth, adminAuth, async (req, res) => {
+  try {
+    const { 
+      class: className, 
+      examType, 
+      term, 
+      year, 
+      visible,
+      page = 1,
+      limit = 20,
+      studentName,
+      search
+    } = req.query;
+    
+    const skip = (page - 1) * limit;
+    
+    console.log('📊 GET /api/users/admin/results/visibility - Fetching results:', {
+      className,
+      examType,
+      term,
+      year,
+      visible,
+      page,
+      limit
+    });
+
+    let query = {};
+    
+    // Handle class name
+    if (className) {
+      // Try to find class by name first
+      const classDoc = await Class.findOne({ 
+        $or: [
+          { name: className },
+          { shortName: className },
+          { level: className }
+        ]
+      }).select('_id').lean();
+      
+      if (classDoc) {
+        query.class = classDoc._id;
+      } else {
+        query.className = className;
+      }
+    }
+    
+    // Handle exam type (test title)
+    if (examType) {
+      // Find tests with this exam type
+      const tests = await Test.find({ 
+        title: { $regex: examType, $options: 'i' }
+      }).select('_id').lean();
+      
+      if (tests.length > 0) {
+        query.testId = { $in: tests.map(t => t._id) };
+      }
+    }
+    
+    if (term) query.term = term;
+    if (year) query.session = { $regex: year, $options: 'i' };
+    
+    // Handle visibility filter
+    if (visible !== undefined) {
+      if (visible === 'true') {
+        query.isVisibleToParent = true;
+      } else if (visible === 'false') {
+        query.isVisibleToParent = false;
+      }
+    }
+    
+    // Search by student name - FIXED THIS PART
+    if (studentName || search) {
+      const searchTerm = studentName || search;
+      const students = await User.find({
+        $or: [
+          { firstName: { $regex: searchTerm, $options: 'i' } },
+          { lastName: { $regex: searchTerm, $options: 'i' } },
+          { studentId: { $regex: searchTerm, $options: 'i' } },
+          { username: { $regex: searchTerm, $options: 'i' } }
+        ],
+        role: 'student',
+        active: true
+      }).select('_id').lean();
+      
+      if (students.length > 0) {
+        query.userId = { $in: students.map(s => s._id) };
+      } else {
+        // If no students found, return empty results
+        query.userId = { $in: [] };
+      }
+    }
+
+    console.log('🔍 Visibility query:', JSON.stringify(query, null, 2));
+
+    const [results, total] = await Promise.all([
+      Result.find(query)
+        .populate({
+          path: 'userId',
+          select: 'firstName lastName middleName username studentId email profileImage',
+          match: { role: 'student', active: true }
+        })
+        .populate('testId', 'title subject totalMarks passingMarks')
+        .populate('class', 'name shortName level')
+        .populate('updatedBy', 'firstName lastName username')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      Result.countDocuments(query)
+    ]);
+
+    // Format results with proper naming - FIXED THIS PART
+    const formattedResults = results.map(result => {
+      const student = result.userId || {};
+      const classData = result.class || {};
+      const testData = result.testId || {};
+      
+      return {
+        _id: result._id,
+        userId: student._id, // Keep the ID
+        student: { // Add this nested object for frontend compatibility
+          _id: student._id,
+          firstName: student.firstName,
+          lastName: student.lastName,
+          middleName: student.middleName,
+          username: student.username,
+          studentId: student.studentId,
+          email: student.email,
+          profileImage: student.profileImage,
+          // Combined name for easy display
+          fullName: `${student.firstName || ''} ${student.lastName || ''}`.trim(),
+          displayName: `${student.firstName || ''} ${student.lastName || ''}`.trim() || student.username
+        },
+        testId: testData._id,
+        testTitle: testData.title,
+        subject: result.subject,
+        className: classData.name || classData.level || result.className,
+        classShortName: classData.shortName,
+        classLevel: classData.level,
+        session: result.session,
+        term: result.term,
+        score: result.score,
+        totalMarks: result.totalMarks,
+        percentage: result.percentage,
+        grade: result.grade,
+        isVisibleToParent: result.isVisibleToParent || false,
+        scheduledVisibility: result.scheduledVisibility,
+        lastUpdated: result.updatedAt || result.createdAt,
+        updatedBy: result.updatedBy ? {
+          id: result.updatedBy._id,
+          name: `${result.updatedBy.firstName || ''} ${result.updatedBy.lastName || ''}`.trim(),
+          username: result.updatedBy.username
+        } : null,
+        submittedAt: result.submittedAt,
+        publishedDate: result.isVisibleToParent ? result.updatedAt || result.submittedAt : null
+      };
+    });
+
+    // Calculate statistics
+    const visibleCount = await Result.countDocuments({ ...query, isVisibleToParent: true });
+    const scheduledCount = await Result.countDocuments({ 
+      ...query, 
+      scheduledVisibility: { $ne: null },
+      isVisibleToParent: false 
+    });
+    const hiddenCount = total - visibleCount - scheduledCount;
+
+    console.log('✅ Results fetched for visibility management:', {
+      total,
+      visibleCount,
+      hiddenCount,
+      scheduledCount,
+      page,
+      totalPages: Math.ceil(total / limit)
+    });
+
+    res.json({ 
+      success: true,
+      results: formattedResults,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        totalResults: total,
+        limit: parseInt(limit)
+      },
+      stats: {
+        total,
+        visible: visibleCount,
+        hidden: hiddenCount,
+        scheduled: scheduledCount,
+        visiblePercentage: total > 0 ? ((visibleCount / total) * 100).toFixed(1) : 0
+      }
+    });
+  } catch (error) {
+    console.error('❌ Get results visibility error:', {
+      message: error.message,
+      stack: error.stack
+    });
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to fetch results for visibility management',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Toggle result visibility (Admin only) - FIXED
+router.put('/admin/results/:id/visibility', auth, adminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isVisible, notifyParents } = req.body;
+    
+    console.log('📊 PUT /api/users/admin/results/:id/visibility - Toggling visibility:', {
+      resultId: id,
+      isVisible,
+      notifyParents
+    });
+
+    // Find result and populate necessary data
+    const result = await Result.findById(id)
+      .populate('userId', 'firstName lastName studentId parents email username')
+      .populate('testId', 'title subject totalMarks');
+
+    if (!result) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Result not found' 
+      });
+    }
+
+    // Update visibility fields
+    result.isVisibleToParent = isVisible;
+    
+    // Clear schedule if manually toggled
+    if (isVisible) {
+      result.scheduledVisibility = null;
+    }
+    
+    result.updatedAt = new Date();
+    result.updatedBy = req.user._id;
+    
+    await result.save();
+
+    console.log('✅ Result visibility updated:', {
+      resultId: result._id,
+      student: result.userId?.studentId,
+      isVisible,
+      previousVisibility: !isVisible
+    });
+
+    // Get student's parents if notification is requested
+    if (notifyParents && isVisible && result.userId?.parents?.length > 0) {
+      try {
+        const parents = await User.find({ 
+          _id: { $in: result.userId.parents },
+          role: 'parent'
+        }).select('email firstName lastName');
+        
+        if (parents.length > 0) {
+          // TODO: Implement notification logic
+          console.log('📧 Parent notification would be sent for:', {
+            student: result.userId.studentId,
+            parents: parents.map(p => ({
+              name: `${p.firstName} ${p.lastName}`,
+              email: p.email
+            })),
+            result: {
+              subject: result.subject,
+              score: result.score,
+              totalMarks: result.totalMarks,
+              percentage: result.percentage,
+              grade: result.grade
+            }
+          });
+        }
+      } catch (notificationError) {
+        console.error('❌ Error preparing parent notification:', notificationError.message);
+      }
+    }
+
+    res.json({ 
+      success: true,
+      message: `Result ${isVisible ? 'made visible' : 'hidden'} successfully`,
+      result: {
+        id: result._id,
+        student: result.userId ? {
+          id: result.userId._id,
+          name: `${result.userId.firstName} ${result.userId.lastName}`,
+          studentId: result.userId.studentId
+        } : null,
+        test: result.testId ? {
+          title: result.testId.title,
+          subject: result.testId.subject
+        } : null,
+        score: result.score,
+        totalMarks: result.totalMarks,
+        percentage: result.percentage,
+        grade: result.grade,
+        isVisibleToParent: result.isVisibleToParent,
+        scheduledVisibility: result.scheduledVisibility,
+        updatedAt: result.updatedAt
+      }
+    });
+  } catch (error) {
+    console.error('❌ Toggle result visibility error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to update result visibility',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Bulk visibility update (Admin only) - FIXED
+router.put('/admin/results/bulk-visibility', auth, adminAuth, async (req, res) => {
+  try {
+    const { resultIds, isVisible, notifyParents } = req.body;
+    
+    console.log('📊 PUT /api/users/admin/results/bulk-visibility - Bulk updating visibility:', {
+      resultCount: resultIds?.length,
+      isVisible,
+      notifyParents
+    });
+
+    if (!Array.isArray(resultIds) || resultIds.length === 0) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Result IDs array is required' 
+      });
+    }
+
+    // Validate result IDs
+    const validResultIds = resultIds.filter(id => mongoose.Types.ObjectId.isValid(id));
+    if (validResultIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid result IDs provided'
+      });
+    }
+
+    // Update results with visibility data
+    const updateData = {
+      isVisibleToParent: isVisible,
+      updatedAt: new Date(),
+      updatedBy: req.user._id
+    };
+
+    // Clear scheduled visibility if making results visible
+    if (isVisible) {
+      updateData.scheduledVisibility = null;
+    }
+
+    const updateResult = await Result.updateMany(
+      { _id: { $in: validResultIds } },
+      { $set: updateData }
+    );
+
+    console.log('✅ Bulk visibility update completed:', {
+      requested: resultIds.length,
+      valid: validResultIds.length,
+      matched: updateResult.matchedCount,
+      modified: updateResult.modifiedCount
+    });
+
+    // If parents should be notified, get affected students
+    if (notifyParents && isVisible) {
+      try {
+        const affectedResults = await Result.find({
+          _id: { $in: validResultIds },
+          isVisibleToParent: true
+        })
+        .populate('userId', 'parents email firstName lastName studentId')
+        .select('userId score totalMarks percentage grade subject');
+        
+        const studentParentMap = new Map();
+        
+        affectedResults.forEach(result => {
+          if (result.userId?.parents?.length > 0) {
+            const studentId = result.userId._id.toString();
+            if (!studentParentMap.has(studentId)) {
+              studentParentMap.set(studentId, {
+                student: result.userId,
+                results: []
+              });
+            }
+            studentParentMap.get(studentId).results.push({
+              subject: result.subject,
+              score: result.score,
+              totalMarks: result.totalMarks,
+              percentage: result.percentage,
+              grade: result.grade
+            });
+          }
+        });
+
+        if (studentParentMap.size > 0) {
+          // TODO: Implement bulk notification logic
+          console.log('📧 Bulk parent notification would be sent for:', {
+            affectedStudents: studentParentMap.size,
+            totalResults: affectedResults.length
+          });
+        }
+      } catch (notificationError) {
+        console.error('❌ Error preparing bulk notification:', notificationError.message);
+      }
+    }
+
+    res.json({ 
+      success: true,
+      message: `${updateResult.modifiedCount} results updated successfully`,
+      stats: {
+        requested: resultIds.length,
+        valid: validResultIds.length,
+        matched: updateResult.matchedCount,
+        modified: updateResult.modifiedCount
+      }
+    });
+  } catch (error) {
+    console.error('❌ Bulk visibility update error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to perform bulk visibility update',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Schedule visibility (Admin only) - FIXED
+router.post('/admin/results/schedule-visibility', auth, adminAuth, async (req, res) => {
+  try {
+    const { resultIds, scheduledDate, notifyParents } = req.body;
+    
+    console.log('📊 POST /api/users/admin/results/schedule-visibility - Scheduling visibility:', {
+      resultCount: resultIds?.length,
+      scheduledDate,
+      notifyParents
+    });
+
+    if (!Array.isArray(resultIds) || resultIds.length === 0) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Result IDs array is required' 
+      });
+    }
+
+    if (!scheduledDate || new Date(scheduledDate) <= new Date()) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Valid future date is required for scheduling' 
+      });
+    }
+
+    // Validate result IDs
+    const validResultIds = resultIds.filter(id => mongoose.Types.ObjectId.isValid(id));
+    if (validResultIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid result IDs provided'
+      });
+    }
+
+    const updateResult = await Result.updateMany(
+      { _id: { $in: validResultIds } },
+      { 
+        $set: { 
+          scheduledVisibility: new Date(scheduledDate),
+          isVisibleToParent: false, // Ensure results are hidden until scheduled time
+          updatedAt: new Date(),
+          updatedBy: req.user._id
+        }
+      }
+    );
+
+    console.log('✅ Visibility scheduled:', {
+      scheduledFor: scheduledDate,
+      matched: updateResult.matchedCount,
+      modified: updateResult.modifiedCount
+    });
+
+    // Schedule a job/cron to make results visible at scheduledDate
+    // TODO: Implement scheduling logic
+    // scheduleVisibilityJob(validResultIds, scheduledDate, notifyParents);
+
+    res.json({ 
+      success: true,
+      message: `Visibility scheduled for ${updateResult.modifiedCount} results`,
+      scheduledDate,
+      stats: {
+        requested: resultIds.length,
+        valid: validResultIds.length,
+        matched: updateResult.matchedCount,
+        modified: updateResult.modifiedCount
+      }
+    });
+  } catch (error) {
+    console.error('❌ Schedule visibility error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to schedule visibility',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Get visibility statistics (Admin only) - FIXED
+router.get('/admin/results/visibility-stats', auth, adminAuth, async (req, res) => {
+  try {
+    console.log('📊 GET /api/users/admin/results/visibility-stats - Fetching visibility statistics');
+
+    // Get total results count
+    const totalResults = await Result.countDocuments({ isActive: true });
+    
+    // Get visibility statistics
+    const visibilityStats = await Result.aggregate([
+      { $match: { isActive: true } },
+      {
+        $group: {
+          _id: '$isVisibleToParent',
+          count: { $sum: 1 },
+          averageScore: { $avg: '$score' },
+          averagePercentage: { $avg: '$percentage' }
+        }
+      }
+    ]);
+
+    // Get scheduled results count
+    const scheduledCount = await Result.countDocuments({
+      isActive: true,
+      scheduledVisibility: { $ne: null },
+      isVisibleToParent: false
+    });
+
+    // Calculate visible, hidden, and scheduled counts
+    const visibleStats = visibilityStats.find(stat => stat._id === true);
+    const hiddenStats = visibilityStats.find(stat => stat._id === false);
+    
+    const visibleCount = visibleStats ? visibleStats.count : 0;
+    const hiddenCount = (hiddenStats ? hiddenStats.count : totalResults) - scheduledCount;
+
+    // Get results by subject with visibility
+    const resultsBySubject = await Result.aggregate([
+      { $match: { isActive: true } },
+      {
+        $group: {
+          _id: '$subject',
+          total: { $sum: 1 },
+          visible: { 
+            $sum: { 
+              $cond: [{ $eq: ['$isVisibleToParent', true] }, 1, 0] 
+            } 
+          },
+          scheduled: { 
+            $sum: { 
+              $cond: [{ $and: [
+                { $ne: ['$scheduledVisibility', null] },
+                { $eq: ['$isVisibleToParent', false] }
+              ]}, 1, 0] 
+            } 
+          },
+          averageScore: { $avg: '$score' },
+          averagePercentage: { $avg: '$percentage' }
+        }
+      },
+      {
+        $project: {
+          subject: '$_id',
+          total: 1,
+          visible: 1,
+          scheduled: 1,
+          hidden: { $subtract: ['$total', { $add: ['$visible', '$scheduled'] }] },
+          visiblePercentage: { 
+            $cond: [
+              { $eq: ['$total', 0] },
+              0,
+              { $multiply: [{ $divide: ['$visible', '$total'] }, 100] }
+            ]
+          },
+          averageScore: { $round: ['$averageScore', 2] },
+          averagePercentage: { $round: ['$averagePercentage', 2] },
+          _id: 0
+        }
+      },
+      { $sort: { total: -1 } },
+      { $limit: 10 } // Top 10 subjects
+    ]);
+
+    // Get results by class with visibility
+    const resultsByClass = await Result.aggregate([
+      { $match: { isActive: true } },
+      {
+        $lookup: {
+          from: 'classes',
+          localField: 'class',
+          foreignField: '_id',
+          as: 'classData'
+        }
+      },
+      {
+        $unwind: {
+          path: '$classData',
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      {
+        $group: {
+          _id: '$classData.name',
+          className: { $first: '$classData.name' },
+          total: { $sum: 1 },
+          visible: { 
+            $sum: { 
+              $cond: [{ $eq: ['$isVisibleToParent', true] }, 1, 0] 
+            } 
+          },
+          scheduled: { 
+            $sum: { 
+              $cond: [{ $and: [
+                { $ne: ['$scheduledVisibility', null] },
+                { $eq: ['$isVisibleToParent', false] }
+              ]}, 1, 0] 
+            } 
+          },
+          averageScore: { $avg: '$score' },
+          averagePercentage: { $avg: '$percentage' }
+        }
+      },
+      {
+        $project: {
+          className: 1,
+          total: 1,
+          visible: 1,
+          scheduled: 1,
+          hidden: { $subtract: ['$total', { $add: ['$visible', '$scheduled'] }] },
+          visiblePercentage: { 
+            $cond: [
+              { $eq: ['$total', 0] },
+              0,
+              { $multiply: [{ $divide: ['$visible', '$total'] }, 100] }
+            ]
+          },
+          averageScore: { $round: ['$averageScore', 2] },
+          averagePercentage: { $round: ['$averagePercentage', 2] },
+          _id: 0
+        }
+      },
+      { $sort: { total: -1 } }
+    ]);
+
+    console.log('✅ Visibility statistics fetched');
+
+    res.json({
+      success: true,
+      stats: {
+        total: totalResults,
+        visible: visibleCount,
+        hidden: hiddenCount,
+        scheduled: scheduledCount,
+        visiblePercentage: totalResults > 0 ? ((visibleCount / totalResults) * 100).toFixed(1) : 0,
+        scheduledPercentage: totalResults > 0 ? ((scheduledCount / totalResults) * 100).toFixed(1) : 0,
+        bySubject: resultsBySubject,
+        byClass: resultsByClass
+      }
+    });
+  } catch (error) {
+    console.error('❌ Get visibility statistics error:', {
+      message: error.message,
+      stack: error.stack
+    });
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch visibility statistics',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+
+// ============================================================
+// REPORT CARD VISIBILITY MANAGEMENT ENDPOINTS
+// ============================================================
+
+// Get report cards for visibility management (Admin only)
+router.get('/admin/report-cards/visibility', auth, adminAuth, async (req, res) => {
+  try {
+    const { 
+      class: className, 
+      term, 
+      year, 
+      session,
+      visible,
+      page = 1,
+      limit = 20,
+      studentName,
+      search,
+      hasReportCard = true
+    } = req.query;
+    
+    const skip = (page - 1) * limit;
+    
+    console.log('📊 GET /api/users/admin/report-cards/visibility - Fetching report cards:', {
+      className,
+      term,
+      year,
+      session,
+      visible,
+      page,
+      limit
+    });
+
+    // First, get all students
+    let studentQuery = { 
+      role: 'student',
+      active: true 
+    };
+    
+    // Filter by class
+    if (className) {
+      // Try to find class by name
+      const classDoc = await Class.findOne({ 
+        $or: [
+          { name: className },
+          { shortName: className },
+          { level: className }
+        ]
+      }).select('_id').lean();
+      
+      if (classDoc) {
+        studentQuery.class = classDoc._id;
+      } else {
+        // Try to match class name field
+        studentQuery.className = { $regex: className, $options: 'i' };
+      }
+    }
+    
+    // Search by student name
+    if (studentName || search) {
+      const searchTerm = studentName || search;
+      studentQuery.$or = [
+        { firstName: { $regex: searchTerm, $options: 'i' } },
+        { lastName: { $regex: searchTerm, $options: 'i' } },
+        { studentId: { $regex: searchTerm, $options: 'i' } },
+        { username: { $regex: searchTerm, $options: 'i' } }
+      ];
+    }
+    
+    // Get students
+    const students = await User.find(studentQuery)
+      .populate('class', 'name shortName level')
+      .select('_id firstName lastName middleName username studentId email profileImage class')
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+    
+    const totalStudents = await User.countDocuments(studentQuery);
+    
+    // Now get report card visibility settings for these students
+    const studentIds = students.map(s => s._id);
+    
+    // You'll need to create a ReportCardSettings model or use User model
+    // For now, let's assume we're storing report card visibility in User model
+    
+    // Process each student
+    const reportCardsWithVisibility = await Promise.all(students.map(async (student) => {
+      // Check if student has results for the specified term/session
+      let hasResults = false;
+      let canGenerateReportCard = false;
+      
+      if (term || session || year) {
+        const resultQuery = {
+          userId: student._id,
+          isActive: true
+        };
+        
+        if (term) resultQuery.term = term;
+        if (session) resultQuery.session = { $regex: session, $options: 'i' };
+        if (year) resultQuery.session = { $regex: year, $options: 'i' };
+        
+        const resultCount = await Result.countDocuments(resultQuery);
+        hasResults = resultCount > 0;
+        canGenerateReportCard = resultCount >= 3; // At least 3 results to generate report card
+      } else {
+        // Check if student has any results at all
+        const resultCount = await Result.countDocuments({ userId: student._id, isActive: true });
+        hasResults = resultCount > 0;
+        canGenerateReportCard = resultCount >= 3;
+      }
+      
+      // Get visibility settings (you'll need to create a ReportCardVisibility model)
+      // For now, we'll use a field in User model or create a default object
+      const visibilitySettings = {
+        isVisibleToParent: student.reportCardVisibleToParent || false,
+        scheduledVisibility: student.reportCardScheduledVisibility || null,
+        lastUpdated: student.reportCardVisibilityUpdatedAt || null,
+        updatedBy: student.reportCardVisibilityUpdatedBy || null
+      };
+      
+      return {
+        ...student,
+        displayName: `${student.firstName || ''} ${student.lastName || ''}`.trim() || student.username,
+        className: student.class?.name || student.className || 'N/A',
+        classLevel: student.class?.level,
+        hasResults,
+        canGenerateReportCard,
+        visibility: visibilitySettings,
+        stats: {
+          totalResults: await Result.countDocuments({ userId: student._id, isActive: true }),
+          visibleResults: await Result.countDocuments({ 
+            userId: student._id, 
+            isActive: true,
+            isVisibleToParent: true 
+          }),
+          lastResultDate: await Result.findOne({ 
+            userId: student._id, 
+            isActive: true 
+          })
+            .sort({ submittedAt: -1 })
+            .select('submittedAt')
+            .lean()
+            .then(r => r?.submittedAt)
+        }
+      };
+    }));
+    
+    // Filter by visibility if requested
+    let filteredReportCards = reportCardsWithVisibility;
+    if (visible !== undefined) {
+      filteredReportCards = reportCardsWithVisibility.filter(rc => 
+        visible === 'true' ? rc.visibility.isVisibleToParent : !rc.visibility.isVisibleToParent
+      );
+    }
+    
+    // Filter by hasReportCard if requested
+    if (hasReportCard !== undefined) {
+      filteredReportCards = filteredReportCards.filter(rc => 
+        hasReportCard === 'true' ? rc.canGenerateReportCard : !rc.canGenerateReportCard
+      );
+    }
+    
+    // Calculate statistics
+    const stats = {
+      totalStudents: totalStudents,
+      withReportCards: filteredReportCards.filter(rc => rc.canGenerateReportCard).length,
+      visibleToParents: filteredReportCards.filter(rc => rc.visibility.isVisibleToParent).length,
+      scheduled: filteredReportCards.filter(rc => rc.visibility.scheduledVisibility).length,
+      visiblePercentage: filteredReportCards.length > 0 ? 
+        ((filteredReportCards.filter(rc => rc.visibility.isVisibleToParent).length / filteredReportCards.length) * 100).toFixed(1) : 0
+    };
+    
+    console.log('✅ Report cards fetched for visibility management:', {
+      total: filteredReportCards.length,
+      stats,
+      page,
+      totalPages: Math.ceil(filteredReportCards.length / limit)
+    });
+    
+    res.json({
+      success: true,
+      reportCards: filteredReportCards,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(totalStudents / limit),
+        totalStudents: totalStudents,
+        filteredCount: filteredReportCards.length,
+        limit: parseInt(limit)
+      },
+      stats: stats
+    });
+    
+  } catch (error) {
+    console.error('❌ Get report cards visibility error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch report cards for visibility management',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Toggle report card visibility for a student (Admin only)
+router.put('/admin/report-cards/:studentId/visibility', auth, adminAuth, async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const { 
+      isVisible, 
+      scheduledDate,
+      notifyParents,
+      term,
+      session
+    } = req.body;
+    
+    console.log('📊 PUT /api/users/admin/report-cards/:studentId/visibility - Toggling report card visibility:', {
+      studentId,
+      isVisible,
+      scheduledDate,
+      notifyParents,
+      term,
+      session
+    });
+    
+    // Verify student exists
+    const student = await User.findById(studentId);
+    if (!student || student.role !== 'student') {
+      return res.status(404).json({
+        success: false,
+        message: 'Student not found'
+      });
+    }
+    
+    // Update report card visibility settings
+    // You can either store this in User model or create a separate ReportCardVisibility model
+    // For now, we'll add fields to User model
+    
+    student.reportCardVisibleToParent = isVisible;
+    
+    if (scheduledDate) {
+      student.reportCardScheduledVisibility = new Date(scheduledDate);
+    } else {
+      student.reportCardScheduledVisibility = null;
+    }
+    
+    student.reportCardVisibilityUpdatedAt = new Date();
+    student.reportCardVisibilityUpdatedBy = req.user._id;
+    
+    // Add term and session specific visibility if provided
+    if (term || session) {
+      if (!student.reportCardVisibilitySettings) {
+        student.reportCardVisibilitySettings = [];
+      }
+      
+      const settingIndex = student.reportCardVisibilitySettings.findIndex(s => 
+        s.term === term && s.session === session
+      );
+      
+      const visibilitySetting = {
+        term: term || 'All Terms',
+        session: session || 'All Sessions',
+        isVisibleToParent: isVisible,
+        scheduledVisibility: scheduledDate ? new Date(scheduledDate) : null,
+        updatedAt: new Date(),
+        updatedBy: req.user._id
+      };
+      
+      if (settingIndex > -1) {
+        student.reportCardVisibilitySettings[settingIndex] = visibilitySetting;
+      } else {
+        student.reportCardVisibilitySettings.push(visibilitySetting);
+      }
+    }
+    
+    await student.save();
+    
+    console.log('✅ Report card visibility updated:', {
+      studentId: student._id,
+      studentName: `${student.firstName} ${student.lastName}`,
+      isVisible,
+      scheduledDate,
+      term,
+      session
+    });
+    
+    // Notify parents if requested
+    if (notifyParents && isVisible && student.parents && student.parents.length > 0) {
+      try {
+        const parents = await User.find({
+          _id: { $in: student.parents },
+          role: 'parent',
+          active: true
+        }).select('email firstName lastName phoneNumber notificationPreferences');
+        
+        // TODO: Implement notification logic
+        console.log('📧 Parent notification would be sent for report card visibility:', {
+          student: `${student.firstName} ${student.lastName}`,
+          parents: parents.map(p => ({
+            name: `${p.firstName} ${p.lastName}`,
+            email: p.email,
+            phone: p.phoneNumber
+          }))
+        });
+      } catch (notificationError) {
+        console.error('❌ Error preparing parent notification:', notificationError.message);
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: `Report card ${isVisible ? 'made visible' : 'hidden'} for parents`,
+      student: {
+        id: student._id,
+        name: `${student.firstName} ${student.lastName}`,
+        studentId: student.studentId,
+        className: student.className,
+        visibility: {
+          isVisibleToParent: student.reportCardVisibleToParent,
+          scheduledVisibility: student.reportCardScheduledVisibility,
+          updatedAt: student.reportCardVisibilityUpdatedAt,
+          updatedBy: student.reportCardVisibilityUpdatedBy ? {
+            id: req.user._id,
+            name: `${req.user.firstName} ${req.user.lastName}`
+          } : null
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Toggle report card visibility error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update report card visibility',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Bulk update report card visibility (Admin only)
+router.put('/admin/report-cards/bulk-visibility', auth, adminAuth, async (req, res) => {
+  try {
+    const { 
+      studentIds, 
+      isVisible, 
+      scheduledDate,
+      notifyParents,
+      term,
+      session 
+    } = req.body;
+    
+    console.log('📊 PUT /api/users/admin/report-cards/bulk-visibility - Bulk updating report card visibility:', {
+      studentCount: studentIds?.length,
+      isVisible,
+      scheduledDate,
+      notifyParents
+    });
+    
+    if (!Array.isArray(studentIds) || studentIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Student IDs array is required'
+      });
+    }
+    
+    // Validate student IDs
+    const validStudentIds = studentIds.filter(id => mongoose.Types.ObjectId.isValid(id));
+    if (validStudentIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid student IDs provided'
+      });
+    }
+    
+    // Update all students
+    const updateResult = await User.updateMany(
+      { 
+        _id: { $in: validStudentIds },
+        role: 'student' 
+      },
+      {
+        $set: {
+          reportCardVisibleToParent: isVisible,
+          reportCardScheduledVisibility: scheduledDate ? new Date(scheduledDate) : null,
+          reportCardVisibilityUpdatedAt: new Date(),
+          reportCardVisibilityUpdatedBy: req.user._id
+        }
+      }
+    );
+    
+    console.log('✅ Bulk report card visibility update completed:', {
+      requested: studentIds.length,
+      valid: validStudentIds.length,
+      matched: updateResult.matchedCount,
+      modified: updateResult.modifiedCount
+    });
+    
+    // Get updated students for response
+    const updatedStudents = await User.find({
+      _id: { $in: validStudentIds }
+    })
+    .select('_id firstName lastName studentId className email parents')
+    .populate('parents', 'email firstName lastName')
+    .lean();
+    
+    // Send notifications if requested
+    if (notifyParents && isVisible) {
+      const studentsWithParents = updatedStudents.filter(s => s.parents && s.parents.length > 0);
+      
+      // TODO: Implement bulk notification logic
+      console.log('📧 Bulk parent notification would be sent for report cards:', {
+        affectedStudents: studentsWithParents.length,
+        totalParents: studentsWithParents.reduce((sum, s) => sum + s.parents.length, 0)
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: `Report card visibility updated for ${updateResult.modifiedCount} students`,
+      stats: {
+        requested: studentIds.length,
+        valid: validStudentIds.length,
+        matched: updateResult.matchedCount,
+        modified: updateResult.modifiedCount
+      },
+      students: updatedStudents.map(s => ({
+        id: s._id,
+        name: `${s.firstName} ${s.lastName}`,
+        studentId: s.studentId,
+        className: s.className,
+        hasParents: s.parents?.length > 0
+      }))
+    });
+    
+  } catch (error) {
+    console.error('❌ Bulk report card visibility update error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to perform bulk report card visibility update',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Get report card visibility statistics (Admin only)
+router.get('/admin/report-cards/visibility-stats', auth, adminAuth, async (req, res) => {
+  try {
+    console.log('📊 GET /api/users/admin/report-cards/visibility-stats - Fetching visibility statistics');
+    
+    // Get total students
+    const totalStudents = await User.countDocuments({ 
+      role: 'student', 
+      active: true 
+    });
+    
+    // Get students with report cards (based on results count)
+    const studentsWithResults = await User.aggregate([
+      { $match: { role: 'student', active: true } },
+      {
+        $lookup: {
+          from: 'results',
+          localField: '_id',
+          foreignField: 'userId',
+          as: 'results'
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          firstName: 1,
+          lastName: 1,
+          studentId: 1,
+          className: 1,
+          resultsCount: { $size: '$results' },
+          reportCardVisibleToParent: 1,
+          reportCardScheduledVisibility: 1
+        }
+      },
+      { $match: { resultsCount: { $gte: 3 } } } // At least 3 results for report card
+    ]);
+    
+    // Calculate statistics
+    const studentsWithReportCards = studentsWithResults.length;
+    const visibleReportCards = studentsWithResults.filter(s => s.reportCardVisibleToParent).length;
+    const scheduledReportCards = studentsWithResults.filter(s => 
+      s.reportCardScheduledVisibility && !s.reportCardVisibleToParent
+    ).length;
+    
+    // Group by class
+    const classStats = await User.aggregate([
+      { $match: { role: 'student', active: true } },
+      {
+        $lookup: {
+          from: 'classes',
+          localField: 'class',
+          foreignField: '_id',
+          as: 'classInfo'
+        }
+      },
+      { $unwind: { path: '$classInfo', preserveNullAndEmptyArrays: true } },
+      {
+        $group: {
+          _id: '$classInfo.name',
+          className: { $first: '$classInfo.name' },
+          totalStudents: { $sum: 1 },
+          visibleReportCards: {
+            $sum: { $cond: ['$reportCardVisibleToParent', 1, 0] }
+          },
+          scheduledReportCards: {
+            $sum: { 
+              $cond: [
+                { 
+                  $and: [
+                    { $ne: ['$reportCardScheduledVisibility', null] },
+                    { $eq: ['$reportCardVisibleToParent', false] }
+                  ]
+                }, 
+                1, 
+                0 
+              ] 
+            }
+          }
+        }
+      },
+      {
+        $project: {
+          className: 1,
+          totalStudents: 1,
+          visibleReportCards: 1,
+          scheduledReportCards: 1,
+          visiblePercentage: {
+            $cond: [
+              { $eq: ['$totalStudents', 0] },
+              0,
+              { $multiply: [{ $divide: ['$visibleReportCards', '$totalStudents'] }, 100] }
+            ]
+          },
+          _id: 0
+        }
+      },
+      { $sort: { totalStudents: -1 } }
+    ]);
+    
+    // Recent visibility updates
+    const recentUpdates = await User.find({
+      role: 'student',
+      reportCardVisibilityUpdatedAt: { $ne: null }
+    })
+    .populate('reportCardVisibilityUpdatedBy', 'firstName lastName username')
+    .populate('class', 'name')
+    .select('firstName lastName studentId className reportCardVisibleToParent reportCardVisibilityUpdatedAt')
+    .sort({ reportCardVisibilityUpdatedAt: -1 })
+    .limit(10)
+    .lean();
+    
+    console.log('✅ Report card visibility statistics fetched');
+    
+    res.json({
+      success: true,
+      stats: {
+        totalStudents,
+        studentsWithReportCards,
+        visibleReportCards,
+        scheduledReportCards,
+        withoutReportCards: totalStudents - studentsWithReportCards,
+        visiblePercentage: studentsWithReportCards > 0 ? 
+          ((visibleReportCards / studentsWithReportCards) * 100).toFixed(1) : 0,
+        scheduledPercentage: studentsWithReportCards > 0 ? 
+          ((scheduledReportCards / studentsWithReportCards) * 100).toFixed(1) : 0
+      },
+      byClass: classStats,
+      recentUpdates: recentUpdates.map(update => ({
+        student: `${update.firstName} ${update.lastName}`,
+        studentId: update.studentId,
+        className: update.class?.name || update.className,
+        isVisibleToParent: update.reportCardVisibleToParent,
+        updatedAt: update.reportCardVisibilityUpdatedAt,
+        updatedBy: update.reportCardVisibilityUpdatedBy ? {
+          name: `${update.reportCardVisibilityUpdatedBy.firstName} ${update.reportCardVisibilityUpdatedBy.lastName}`,
+          username: update.reportCardVisibilityUpdatedBy.username
+        } : null
+      }))
+    });
+    
+  } catch (error) {
+    console.error('❌ Get report card visibility statistics error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch report card visibility statistics',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Get student's specific report card visibility settings
+router.get('/admin/report-cards/:studentId/visibility-details', auth, adminAuth, async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    
+    console.log('📊 GET /api/users/admin/report-cards/:studentId/visibility-details - Fetching visibility details:', studentId);
+    
+    const student = await User.findById(studentId)
+      .populate('class', 'name shortName level')
+      .populate('parents', 'firstName lastName email phoneNumber')
+      .populate('reportCardVisibilityUpdatedBy', 'firstName lastName username')
+      .select('-password -loginAttempts -lockUntil');
+    
+    if (!student || student.role !== 'student') {
+      return res.status(404).json({
+        success: false,
+        message: 'Student not found'
+      });
+    }
+    
+    // Get student's results for each term/session
+    const results = await Result.find({ 
+      userId: studentId,
+      isActive: true 
+    })
+    .select('session term subject score totalMarks percentage grade isVisibleToParent')
+    .sort({ session: -1, term: 1 })
+    .lean();
+    
+    // Group results by session and term
+    const resultsBySession = {};
+    results.forEach(result => {
+      const sessionKey = result.session || 'Unknown Session';
+      const termKey = result.term || 'Unknown Term';
+      
+      if (!resultsBySession[sessionKey]) {
+        resultsBySession[sessionKey] = {};
+      }
+      
+      if (!resultsBySession[sessionKey][termKey]) {
+        resultsBySession[sessionKey][termKey] = {
+          results: [],
+          totalScore: 0,
+          totalPossible: 0,
+          subjects: new Set()
+        };
+      }
+      
+      resultsBySession[sessionKey][termKey].results.push(result);
+      resultsBySession[sessionKey][termKey].totalScore += result.score || 0;
+      resultsBySession[sessionKey][termKey].totalPossible += result.totalMarks || 100;
+      resultsBySession[sessionKey][termKey].subjects.add(result.subject);
+      
+      // Calculate average
+      const termData = resultsBySession[sessionKey][termKey];
+      termData.averageScore = termData.totalScore / termData.results.length;
+      termData.averagePercentage = termData.totalPossible > 0 ? 
+        (termData.totalScore / termData.totalPossible) * 100 : 0;
+      termData.subjectCount = termData.subjects.size;
+    });
+    
+    // Check if report card can be generated for each term
+    const reportCardAvailability = [];
+    Object.keys(resultsBySession).forEach(session => {
+      Object.keys(resultsBySession[session]).forEach(term => {
+        const termData = resultsBySession[session][term];
+        const canGenerate = termData.subjectCount >= 3; // At least 3 subjects
+        
+        // Check specific visibility setting for this term/session
+        let termSpecificVisibility = null;
+        if (student.reportCardVisibilitySettings) {
+          termSpecificVisibility = student.reportCardVisibilitySettings.find(s => 
+            s.term === term && s.session === session
+          );
+        }
+        
+        reportCardAvailability.push({
+          session,
+          term,
+          canGenerate,
+          subjectCount: termData.subjectCount,
+          averageScore: termData.averageScore,
+          averagePercentage: termData.averagePercentage,
+          lastResultDate: termData.results.length > 0 ? 
+            termData.results.reduce((latest, r) => 
+              r.submittedAt > latest ? r.submittedAt : latest, new Date(0)
+            ) : null,
+          visibility: termSpecificVisibility || {
+            isVisibleToParent: student.reportCardVisibleToParent || false,
+            scheduledVisibility: student.reportCardScheduledVisibility || null
+          }
+        });
+      });
+    });
+    
+    res.json({
+      success: true,
+      student: {
+        id: student._id,
+        name: `${student.firstName} ${student.lastName}`,
+        studentId: student.studentId,
+        className: student.class?.name || student.className,
+        classLevel: student.class?.level,
+        parents: student.parents?.map(p => ({
+          id: p._id,
+          name: `${p.firstName} ${p.lastName}`,
+          email: p.email,
+          phone: p.phoneNumber
+        })) || []
+      },
+      globalVisibility: {
+        isVisibleToParent: student.reportCardVisibleToParent || false,
+        scheduledVisibility: student.reportCardScheduledVisibility,
+        updatedAt: student.reportCardVisibilityUpdatedAt,
+        updatedBy: student.reportCardVisibilityUpdatedBy ? {
+          id: student.reportCardVisibilityUpdatedBy._id,
+          name: `${student.reportCardVisibilityUpdatedBy.firstName} ${student.reportCardVisibilityUpdatedBy.lastName}`,
+          username: student.reportCardVisibilityUpdatedBy.username
+        } : null
+      },
+      termSpecificVisibility: student.reportCardVisibilitySettings || [],
+      reportCardAvailability,
+      stats: {
+        totalResults: results.length,
+        uniqueSessions: Object.keys(resultsBySession).length,
+        totalTerms: reportCardAvailability.length,
+        generatableReportCards: reportCardAvailability.filter(rc => rc.canGenerate).length,
+        visibleReportCards: reportCardAvailability.filter(rc => 
+          rc.visibility.isVisibleToParent && rc.canGenerate
+        ).length
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Get report card visibility details error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch report card visibility details',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
 
 // Bulk create users
 router.post('/bulk', auth, checkPermission('create_users'), async (req, res) => {

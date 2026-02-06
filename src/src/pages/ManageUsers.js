@@ -1,4 +1,4 @@
-// pages/ManageUsers.js - UPDATED WITH PROFILE IMAGE UPLOAD AND TEACHER ASSIGNMENTS
+// pages/ManageUsers.js - UPDATED WITH PARENT PORTAL INTEGRATION
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -34,7 +34,12 @@ import {
   FiImage,
   FiCamera,
   FiAlertCircle,
-  FiCheck
+  FiCheck,
+  FiLink,
+  FiUserPlus,
+  FiBell,
+  FiEyeOff,
+  FiRefreshCw as FiRegenerate
 } from 'react-icons/fi';
 
 const ManageUsers = () => {
@@ -62,10 +67,18 @@ const ManageUsers = () => {
     sex: '',
     age: '',
     active: true,
-    adminPermissions: []
+    adminPermissions: [],
+    // NEW PARENT FIELDS
+    parentCode: '',
+    children: [],
+    notificationPreferences: {
+      email: true,
+      sms: false,
+      frequency: 'immediate'
+    }
   });
   
-  // Profile Image State (from createadmin.js)
+  // Profile Image State
   const [profileImage, setProfileImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -97,8 +110,15 @@ const ManageUsers = () => {
   });
   const [availableSubjectsForAssignment, setAvailableSubjectsForAssignment] = useState([]);
   const [loadingAssignmentSubjects, setLoadingAssignmentSubjects] = useState(false);
-  const [debugMode, setDebugMode] = useState(false);
-
+  
+  // NEW: Child Link Modal
+  const [childLinkModal, setChildLinkModal] = useState({
+    open: false,
+    searchTerm: '',
+    searchResults: [],
+    selectedChildren: []
+  });
+  
   const navigate = useNavigate();
 
   const adminPermissionOptions = [
@@ -310,23 +330,19 @@ const ManageUsers = () => {
     }
   };
 
-  // UPDATED: Profile image handling from createadmin.js
+  // Helper function to get profile image URL
   const getProfileImageUrl = (user) => {
     if (!user) return null;
     
-    // Check if user has profileImage field
     if (user.profileImage && user.profileImage !== 'null' && user.profileImage !== 'undefined') {
-      // If it's a full URL, return it
       if (user.profileImage.startsWith('http')) {
         return user.profileImage;
       }
-      // If it's just a filename, prepend the path
       if (!user.profileImage.includes('/')) {
         return `http://localhost:5000/uploads/profiles/${user.profileImage}`;
       }
     }
     
-    // Check other possible fields
     const imageFields = ['profilePicture', 'picture', 'photo'];
     for (const field of imageFields) {
       if (user[field] && user[field] !== 'null' && user[field] !== 'undefined') {
@@ -337,10 +353,10 @@ const ManageUsers = () => {
       }
     }
     
-    return null; // No image found
+    return null;
   };
 
-  // Helper function to convert image to base64 (from createadmin.js)
+  // Helper function to convert image to base64
   const convertImageToBase64 = (file) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -350,19 +366,12 @@ const ManageUsers = () => {
     });
   };
 
-  // Image upload handler (from createadmin.js)
+  // Image upload handler
   const handleImageUpload = async (file) => {
     if (!file) {
       console.log('⚠️ No file selected');
       return;
     }
-    
-    console.log('📁 File selected:', {
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      isFile: file instanceof File
-    });
     
     const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
     const maxSize = 2 * 1024 * 1024; // 2MB
@@ -402,6 +411,115 @@ const ManageUsers = () => {
     setFormData(prev => ({ ...prev, picture: null }));
   };
 
+  // NEW: Search for children to link
+  const searchChildrenToLink = async () => {
+    if (!childLinkModal.searchTerm.trim()) {
+      setChildLinkModal(prev => ({ ...prev, searchResults: [] }));
+      return;
+    }
+    
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get('http://localhost:5000/api/users', {
+        headers: { Authorization: `Bearer ${token}` },
+        params: {
+          role: 'student',
+          search: childLinkModal.searchTerm,
+          limit: 20
+        }
+      });
+      
+      let students = [];
+      if (response.data?.users && Array.isArray(response.data.users)) {
+        students = response.data.users;
+      } else if (response.data?.success && Array.isArray(response.data.data)) {
+        students = response.data.data;
+      }
+      
+      const formattedStudents = students.map(student => ({
+        _id: student._id || student.id,
+        firstName: student.firstName || student.name || '',
+        lastName: student.lastName || student.surname || '',
+        studentId: student.studentId || '',
+        className: student.className || 
+                  (student.class && typeof student.class === 'object' ? 
+                    student.class.name : 'N/A'),
+        email: student.email || '',
+        isLinked: formData.children?.some(child => child._id === (student._id || student.id))
+      }));
+      
+      setChildLinkModal(prev => ({
+        ...prev,
+        searchResults: formattedStudents
+      }));
+      
+    } catch (err) {
+      console.error('Error searching children:', err);
+      setError('Failed to search for children.');
+    }
+  };
+
+  // NEW: Toggle child selection for linking
+  const toggleChildSelection = (child) => {
+    setChildLinkModal(prev => {
+      const isSelected = prev.selectedChildren.some(c => c._id === child._id);
+      if (isSelected) {
+        return {
+          ...prev,
+          selectedChildren: prev.selectedChildren.filter(c => c._id !== child._id)
+        };
+      } else {
+        return {
+          ...prev,
+          selectedChildren: [...prev.selectedChildren, child]
+        };
+      }
+    });
+  };
+
+  // NEW: Link selected children to parent
+  const linkSelectedChildren = () => {
+    if (childLinkModal.selectedChildren.length === 0) {
+      setError('Please select at least one child to link.');
+      return;
+    }
+    
+    const newChildren = childLinkModal.selectedChildren.map(child => ({
+      _id: child._id,
+      firstName: child.firstName,
+      lastName: child.lastName,
+      studentId: child.studentId,
+      className: child.className,
+      email: child.email
+    }));
+    
+    const existingChildIds = formData.children.map(child => child._id);
+    const childrenToAdd = newChildren.filter(child => !existingChildIds.includes(child._id));
+    
+    if (childrenToAdd.length === 0) {
+      setError('All selected children are already linked.');
+      return;
+    }
+    
+    setFormData(prev => ({
+      ...prev,
+      children: [...prev.children, ...childrenToAdd]
+    }));
+    
+    setSuccess(`Linked ${childrenToAdd.length} child(ren) to parent.`);
+    closeChildLinkModal();
+  };
+
+  // NEW: Close child link modal
+  const closeChildLinkModal = () => {
+    setChildLinkModal({
+      open: false,
+      searchTerm: '',
+      searchResults: [],
+      selectedChildren: []
+    });
+  };
+
   const fetchUsers = async () => {
     setLoading(true);
     setError(null);
@@ -416,16 +534,9 @@ const ManageUsers = () => {
       if (filterRole) params.role = filterRole;
       if (searchTerm) params.search = searchTerm;
       
-      console.log('📡 Fetching users from API...');
       const res = await axios.get('http://localhost:5000/api/users', {
         headers: { Authorization: `Bearer ${token}` },
         params: params
-      });
-
-      console.log('✅ API Response received:', {
-        success: res.data.success,
-        totalUsers: res.data.pagination?.totalUsers,
-        usersCount: res.data.users?.length
       });
 
       let usersData = [];
@@ -480,12 +591,17 @@ const ManageUsers = () => {
           profileImage: user.profileImage || user.profilePicture || user.picture,
           profileImageUrl: profileImageUrl,
           teacherAssignments: user.teacherAssignments || [],
-          enrolledSubjects: user.enrolledSubjects || []
+          enrolledSubjects: user.enrolledSubjects || [],
+          // NEW: Parent specific fields
+          parentCode: user.parentCode || '',
+          children: user.children || [],
+          notificationPreferences: user.notificationPreferences || {
+            email: true,
+            sms: false,
+            frequency: 'immediate'
+          }
         };
       }).filter(Boolean);
-      
-      const usersWithImages = validUsers.filter(u => u.profileImageUrl).length;
-      console.log(`📊 Users with profile images: ${usersWithImages}/${validUsers.length}`);
       
       setUsers(validUsers);
       setPagination(prev => ({
@@ -493,7 +609,7 @@ const ManageUsers = () => {
         totalPages: paginationData.totalPages || prev.totalPages,
         totalUsers: paginationData.totalUsers || prev.totalUsers
       }));
-      setApiDebug(`Fetched ${validUsers.length} users (${usersWithImages} with images)`);
+      setApiDebug(`Fetched ${validUsers.length} users`);
     } catch (err) {
       console.error('❌ Error fetching users:', err);
       const errorMsg = err.response?.data?.message || err.response?.data?.error || 'Failed to load users.';
@@ -571,7 +687,6 @@ const ManageUsers = () => {
     });
   };
 
-  // UPDATED: Add teacher assignment (from createteacherwithassignment.js)
   const addTeacherAssignment = () => {
     if (!teacherAssignmentModal.selectedClass || teacherAssignmentModal.selectedSubjects.length === 0) {
       setError('Please select a class and at least one subject');
@@ -581,15 +696,14 @@ const ManageUsers = () => {
     const selectedClass = classes.find(c => c._id === teacherAssignmentModal.selectedClass);
     if (!selectedClass) return;
 
-    // Format assignment according to backend expectations (from createteacherwithassignment.js)
     const newAssignment = {
       classId: teacherAssignmentModal.selectedClass,
       className: selectedClass.name,
       subjects: teacherAssignmentModal.selectedSubjects.map(subjectId => {
         const subject = availableSubjectsForAssignment.find(s => s.id === subjectId);
         return {
-          subject: subjectId,  // Backend expects 'subject' (ObjectId)
-          subjectName: subject?.name || 'Unknown Subject'  // Backend expects 'subjectName' (String)
+          subject: subjectId,
+          subjectName: subject?.name || 'Unknown Subject'
         };
       })
     };
@@ -602,7 +716,6 @@ const ManageUsers = () => {
       const updatedAssignments = [...formData.teacherAssignments];
       const existingAssignment = updatedAssignments[existingIndex];
       
-      // Combine subjects, avoiding duplicates
       const existingSubjectIds = existingAssignment.subjects.map(s => s.subject);
       const newSubjects = newAssignment.subjects.filter(
         subject => !existingSubjectIds.includes(subject.subject)
@@ -638,6 +751,15 @@ const ManageUsers = () => {
       ...prev,
       teacherAssignments: prev.teacherAssignments.filter(assignment => assignment.classId !== classId)
     }));
+  };
+
+  // NEW: Unlink child from parent
+  const unlinkChild = (childId) => {
+    setFormData(prev => ({
+      ...prev,
+      children: prev.children.filter(child => child._id !== childId)
+    }));
+    setSuccess('Child unlinked successfully.');
   };
 
   const calculateAge = (dateOfBirth) => {
@@ -709,7 +831,7 @@ const ManageUsers = () => {
     return null;
   };
 
-  // UPDATED: Main update user function with profile image and teacher assignments
+  // UPDATED: Main update user function with parent support
   const handleUpdateUser = async (e) => {
     e.preventDefault();
     const validationError = validateForm();
@@ -730,19 +852,16 @@ const ManageUsers = () => {
       
       const cleanedUsername = cleanUsername(formData.username);
       
-      // UPDATED: Convert image to base64 if exists (from createadmin.js)
       let profileImageBase64 = null;
       if (profileImage && profileImage instanceof File) {
         try {
           profileImageBase64 = await convertImageToBase64(profileImage);
-          console.log('✅ Image converted to base64, length:', profileImageBase64.length);
         } catch (imageErr) {
           console.warn('⚠️ Could not convert image to base64:', imageErr);
-          // Continue without image
         }
       }
       
-      // Build user data matching User model structure (from createadmin.js)
+      // Build user data matching User model structure
       const userDataToSend = {
         username: cleanedUsername,
         email: formData.email.trim().toLowerCase(),
@@ -759,7 +878,16 @@ const ManageUsers = () => {
         parentEmail: formData.parentEmail?.trim() || undefined,
         parentPhoneNumber: formData.parentPhoneNumber?.trim() || undefined,
         studentId: formData.studentId?.trim() || undefined,
-        // Add profile image as base64 if available
+        // NEW: Parent specific fields
+        ...(formData.role === 'parent' && {
+          parentCode: formData.parentCode || undefined,
+          children: formData.children?.map(child => child._id) || [],
+          notificationPreferences: formData.notificationPreferences || {
+            email: true,
+            sms: false,
+            frequency: 'immediate'
+          }
+        }),
         ...(profileImageBase64 && { profileImage: profileImageBase64 })
       };
       
@@ -789,18 +917,16 @@ const ManageUsers = () => {
       if (formData.role === 'teacher') {
         if (formData.class) userDataToSend.class = formData.class;
         
-        // UPDATED: Format teacher assignments (from createteacherwithassignment.js)
+        // Format teacher assignments
         if (formData.teacherAssignments.length > 0) {
-          // Format assignments as backend expects: class and subjects array with subject and subjectName
           const formattedAssignments = formData.teacherAssignments.map(assignment => ({
-            class: assignment.classId,  // Must be 'class' not 'classId'
+            class: assignment.classId,
             subjects: assignment.subjects.map(subject => ({
-              subject: subject.subject,  // Must be 'subject' not 'subjectId'
+              subject: subject.subject,
               subjectName: subject.subjectName
             }))
           }));
           
-          console.log('📤 Formatted teacher assignments for update:', JSON.stringify(formattedAssignments, null, 2));
           userDataToSend.teacherAssignments = formattedAssignments;
         }
       }
@@ -810,12 +936,6 @@ const ManageUsers = () => {
           userDataToSend.adminPermissions = formData.adminPermissions;
         }
       }
-      
-      console.log('🔄 Updating user with data:', {
-        ...userDataToSend,
-        password: userDataToSend.password ? '***' : 'NOT_CHANGED',
-        profileImage: profileImageBase64 ? 'BASE64_IMAGE_INCLUDED' : 'NO_IMAGE'
-      });
       
       // Update user data
       const response = await axios.put(
@@ -829,9 +949,7 @@ const ManageUsers = () => {
         }
       );
       
-      console.log('✅ User update response:', response.data);
-      
-      setSuccess('User updated successfully with profile image!');
+      setSuccess('User updated successfully!');
       
       // Reset form and fetch updated users
       setTimeout(() => {
@@ -845,7 +963,6 @@ const ManageUsers = () => {
       
       let errorMessage = 'Failed to update user.';
       if (err.response) {
-        console.error('Server response:', err.response.data);
         if (err.response.data && err.response.data.message) {
           errorMessage = err.response.data.message;
         } else if (err.response.data && err.response.data.error) {
@@ -886,7 +1003,15 @@ const ManageUsers = () => {
       sex: '',
       age: '',
       active: true,
-      adminPermissions: []
+      adminPermissions: [],
+      // NEW: Reset parent fields
+      parentCode: '',
+      children: [],
+      notificationPreferences: {
+        email: true,
+        sms: false,
+        frequency: 'immediate'
+      }
     });
     setProfileImage(null);
     setImagePreview(null);
@@ -921,7 +1046,7 @@ const ManageUsers = () => {
       }
     }
     
-    // UPDATED: Properly extract teacher assignments (from createteacherwithassignment.js)
+    // Extract teacher assignments
     const teacherAssignments = user.teacherAssignments?.map(assignment => {
       let assignmentClassId = '';
       if (assignment.class) {
@@ -937,7 +1062,6 @@ const ManageUsers = () => {
       const classObj = classes.find(c => c._id === assignmentClassId);
       const className = assignment.className || classObj?.name || 'Unknown Class';
       
-      // Extract subjects properly
       const subjects = assignment.subjects?.map(sub => {
         let subjectId = '';
         let subjectName = '';
@@ -968,6 +1092,33 @@ const ManageUsers = () => {
       };
     }).filter(assignment => assignment.classId && assignment.subjects.length > 0) || [];
     
+    // NEW: Format children data for parent users
+    const children = user.children?.map(child => {
+      if (typeof child === 'object') {
+        return {
+          _id: child._id || child.id,
+          firstName: child.firstName || child.name || '',
+          lastName: child.lastName || child.surname || '',
+          studentId: child.studentId || '',
+          className: child.className || 
+                   (child.class && typeof child.class === 'object' ? 
+                     child.class.name : 'N/A'),
+          email: child.email || ''
+        };
+      } else if (typeof child === 'string') {
+        // If child is just an ID, create minimal object
+        return {
+          _id: child,
+          firstName: 'Unknown',
+          lastName: 'Child',
+          studentId: '',
+          className: 'N/A',
+          email: ''
+        };
+      }
+      return null;
+    }).filter(Boolean) || [];
+    
     setFormData({
       username: user.username || '',
       password: '',
@@ -990,29 +1141,27 @@ const ManageUsers = () => {
       sex: user.sex || '',
       age: user.age || calculateAge(user.dateOfBirth) || '',
       active: user.active !== false,
-      adminPermissions: user.adminPermissions || []
+      adminPermissions: user.adminPermissions || [],
+      // NEW: Parent specific fields
+      parentCode: user.parentCode || '',
+      children: children,
+      notificationPreferences: user.notificationPreferences || {
+        email: true,
+        sms: false,
+        frequency: 'immediate'
+      }
     });
     
-    console.log('📝 Editing user with assignments:', {
-      originalAssignments: user.teacherAssignments,
-      parsedAssignments: teacherAssignments
-    });
-    
-    // UPDATED: Set image preview from user's profile image
     if (user.profileImageUrl) {
-      console.log('✅ Setting image preview from profileImageUrl:', user.profileImageUrl);
       setImagePreview(user.profileImageUrl);
     } else if (user.profileImage) {
       const imageUrl = getProfileImageUrl(user);
       if (imageUrl) {
-        console.log('✅ Setting image preview from getProfileImageUrl:', imageUrl);
         setImagePreview(imageUrl);
       } else {
-        console.log('ℹ️ No profile image found for user');
         setImagePreview(null);
       }
     } else {
-      console.log('ℹ️ No profile image found for user');
       setImagePreview(null);
     }
     
@@ -1024,7 +1173,6 @@ const ManageUsers = () => {
       setClassSubjects([]);
     }
     
-    // Switch to edit mode
     setTab('edit');
   };
 
@@ -1079,6 +1227,33 @@ const ManageUsers = () => {
     setExporting(false);
   };
 
+  // NEW: Generate parent code
+  const generateParentCode = async (userId) => {
+    if (!window.confirm('Generate new parent code? Old code will be invalid.')) return;
+    
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(
+        `http://localhost:5000/api/users/${userId}/generate-parent-code`,
+        {},
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      
+      if (response.data.success) {
+        setSuccess('New parent code generated successfully.');
+        fetchUsers();
+      }
+    } catch (err) {
+      console.error('Error generating parent code:', err);
+      setError('Failed to generate parent code.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getTeacherAssignmentsDisplay = (teacher) => {
     if (!teacher || !Array.isArray(teacher.teacherAssignments)) return [];
     
@@ -1113,7 +1288,13 @@ const ManageUsers = () => {
       (user.lastName && user.lastName.toLowerCase().includes(searchLower)) ||
       (user.email && user.email.toLowerCase().includes(searchLower)) ||
       (user.studentId && user.studentId.toLowerCase().includes(searchLower)) ||
-      (user.fullName && user.fullName.toLowerCase().includes(searchLower));
+      (user.fullName && user.fullName.toLowerCase().includes(searchLower)) ||
+      (user.parentCode && user.parentCode.toLowerCase().includes(searchLower)) || // NEW
+      (user.role === 'parent' && user.children?.some(child => 
+        child.firstName?.toLowerCase().includes(searchLower) ||
+        child.lastName?.toLowerCase().includes(searchLower) ||
+        child.studentId?.toLowerCase().includes(searchLower)
+      ));
     
     const matchesRole = filterRole === '' || user.role === filterRole;
     
@@ -1241,6 +1422,13 @@ const ManageUsers = () => {
                 >
                   <FiUsers /> Create Student
                 </button>
+                <button
+                  style={styles.createParentButton}
+                  onClick={() => navigate('/admin/users/create-parent')}
+                  title="Create Parent"
+                >
+                  <FiUserPlus /> Create Parent
+                </button>
               </>
             )}
             
@@ -1293,7 +1481,7 @@ const ManageUsers = () => {
               <FiSearch style={styles.searchIcon} />
               <input
                 type="text"
-                placeholder="Search by username, name, email, or student ID..."
+                placeholder="Search by username, name, email, student ID, or parent code..."
                 value={searchTerm}
                 onChange={(e) => {
                   setSearchTerm(e.target.value);
@@ -1314,6 +1502,7 @@ const ManageUsers = () => {
               <option value="">All Roles</option>
               <option value="student">Student</option>
               <option value="teacher">Teacher</option>
+              <option value="parent">Parent</option>
               <option value="admin">Admin</option>
               {canCreateAdmin() && <option value="super_admin">Super Admin</option>}
             </select>
@@ -1353,6 +1542,8 @@ const ManageUsers = () => {
                       <th style={styles.tableHeader}>Name</th>
                       <th style={styles.tableHeader}>Role</th>
                       <th style={styles.tableHeader}>Class</th>
+                      <th style={styles.tableHeader}>Parent Code</th>
+                      <th style={styles.tableHeader}>Linked Children</th>
                       <th style={styles.tableHeader}>Assignments/Subjects</th>
                       <th style={styles.tableHeader}>Status</th>
                       <th style={styles.tableHeader}>Actions</th>
@@ -1373,7 +1564,6 @@ const ManageUsers = () => {
                                     alt="Profile" 
                                     style={styles.profileImage}
                                     onError={(e) => {
-                                      console.warn('❌ Failed to load profile image for', user.username, 'URL:', user.profileImageUrl);
                                       e.target.style.display = 'none';
                                       const initialsId = `initials-${user._id}`;
                                       const initialsEl = document.getElementById(initialsId);
@@ -1416,12 +1606,37 @@ const ManageUsers = () => {
                               backgroundColor: 
                                 user.role === 'super_admin' ? '#E53E3E' :
                                 user.role === 'admin' ? '#3182CE' :
-                                user.role === 'teacher' ? '#38A169' : '#D69E2E'
+                                user.role === 'teacher' ? '#38A169' : 
+                                user.role === 'parent' ? '#805AD5' : '#D69E2E'
                             }}>
                               {user.role || 'unknown'}
                             </span>
                           </td>
                           <td style={styles.tableCell}>{getClassDisplayName(user)}</td>
+                          <td style={styles.tableCell}>
+                            {user.role === 'parent' ? (
+                              <span style={styles.parentCodeBadge}>
+                                {user.parentCode || 'N/A'}
+                              </span>
+                            ) : 'N/A'}
+                          </td>
+                          <td style={styles.tableCell}>
+                            {user.role === 'parent' ? (
+                              <div>
+                                <span style={styles.childrenCountBadge}>
+                                  {user.children?.length || 0} child(s)
+                                </span>
+                                {user.children?.length > 0 && (
+                                  <button
+                                    onClick={() => setExpandedUser(expandedUser === user._id ? null : user._id)}
+                                    style={styles.toggleAssignmentsButton}
+                                  >
+                                    {expandedUser === user._id ? <FiChevronUp /> : <FiChevronDown />}
+                                  </button>
+                                )}
+                              </div>
+                            ) : 'N/A'}
+                          </td>
                           <td style={styles.tableCell}>
                             {user.role === 'teacher' ? (
                               <div>
@@ -1480,6 +1695,24 @@ const ManageUsers = () => {
                                   <FiEdit /> Edit
                                 </button>
                               )}
+                              {user.role === 'parent' && authUser.role === 'super_admin' && (
+                                <button
+                                  onClick={() => navigate(`/admin/parent-portal/${user._id}`)}
+                                  style={styles.parentPortalButton}
+                                  title="View Parent Portal"
+                                >
+                                  <FiEyeOff /> Portal
+                                </button>
+                              )}
+                              {user.role === 'parent' && (authUser.role === 'admin' || authUser.role === 'super_admin') && (
+                                <button
+                                  onClick={() => generateParentCode(user._id)}
+                                  style={styles.generateCodeButton}
+                                  title="Generate Parent Code"
+                                >
+                                  <FiRegenerate /> Code
+                                </button>
+                              )}
                               {canDeleteUser(user) && (
                                 <button
                                   onClick={() => handleDeleteUser(user._id)}
@@ -1492,10 +1725,10 @@ const ManageUsers = () => {
                           </td>
                         </tr>
                         
-                        {/* Expanded details row */}
+                        {/* Expanded details row - UPDATED WITH PARENT SECTION */}
                         {expandedUser === user._id && (
                           <tr>
-                            <td colSpan="9" style={styles.expandedDetails}>
+                            <td colSpan="11" style={styles.expandedDetails}>
                               {user.role === 'teacher' ? (
                                 <div>
                                   <h4 style={styles.detailsTitle}>Teacher Assignments</h4>
@@ -1550,6 +1783,49 @@ const ManageUsers = () => {
                                     <p>No specific permissions assigned.</p>
                                   )}
                                 </div>
+                              ) : user.role === 'parent' ? (
+                                <div>
+                                  <h4 style={styles.detailsTitle}>Parent Information</h4>
+                                  <div style={styles.parentDetails}>
+                                    <div style={styles.parentDetailItem}>
+                                      <strong>Parent Code:</strong> 
+                                      <span style={styles.parentCodeValue}>
+                                        {user.parentCode || 'Not Generated'}
+                                      </span>
+                                    </div>
+                                    <div style={styles.parentDetailItem}>
+                                      <strong>Linked Children ({user.children?.length || 0}):</strong>
+                                      {user.children && user.children.length > 0 ? (
+                                        <div style={styles.linkedChildrenList}>
+                                          {user.children.map((child, index) => (
+                                            <div key={index} style={styles.childItem}>
+                                              <span style={styles.childName}>
+                                                {child.firstName} {child.lastName}
+                                              </span>
+                                              <span style={styles.childDetails}>
+                                                {child.studentId} • {child.className}
+                                              </span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <p style={{ color: '#718096', fontStyle: 'italic' }}>
+                                          No children linked yet
+                                        </p>
+                                      )}
+                                    </div>
+                                    <div style={styles.parentDetailItem}>
+                                      <strong>Notification Preferences:</strong>
+                                      {user.notificationPreferences ? (
+                                        <div style={styles.notificationPreferences}>
+                                          <span>Email: {user.notificationPreferences.email ? '✓' : '✗'}</span>
+                                          <span>SMS: {user.notificationPreferences.sms ? '✓' : '✗'}</span>
+                                          <span>Frequency: {user.notificationPreferences.frequency}</span>
+                                        </div>
+                                      ) : 'Default settings'}
+                                    </div>
+                                  </div>
+                                </div>
                               ) : null}
                             </td>
                           </tr>
@@ -1588,7 +1864,7 @@ const ManageUsers = () => {
           )}
         </div>
 
-        {/* Edit User Modal */}
+        {/* Edit User Modal - UPDATED WITH PARENT SECTION */}
         {editUserId && (
           <div style={styles.modalOverlay}>
             <div style={{...styles.modalContent, maxWidth: '900px', maxHeight: '90vh', overflowY: 'auto'}}>
@@ -1606,12 +1882,9 @@ const ManageUsers = () => {
               
               <div style={styles.modalBody}>
                 <form onSubmit={handleUpdateUser}>
-                  {/* UPDATED: Profile Image Upload Section (from createadmin.js) */}
+                  {/* Profile Image Upload Section */}
                   <div style={styles.imageUploadSection}>
                     <h4 style={styles.sectionTitle}>Profile Image (Optional)</h4>
-                    <p style={styles.imageUploadHelp}>
-                      Image will be sent as base64 in the same request with user data.
-                    </p>
                     <div style={styles.imageUploadContainer}>
                       <div style={styles.imagePreviewArea}>
                         {imagePreview ? (
@@ -1660,10 +1933,6 @@ const ManageUsers = () => {
                         )}
                         <div style={styles.imageUploadInfo}>
                           <small>JPG, PNG, GIF, WebP up to 2MB</small>
-                          <br />
-                          <small style={{ color: '#D69E2E' }}>
-                            Current image: {formData.picture || 'None'}
-                          </small>
                         </div>
                       </div>
                     </div>
@@ -1782,7 +2051,9 @@ const ManageUsers = () => {
                                 adminPermissions: newRole === 'admin' ? formData.adminPermissions : [],
                                 class: newRole === 'student' || newRole === 'teacher' ? formData.class : '',
                                 selectedSubjects: newRole === 'student' ? formData.selectedSubjects : [],
-                                teacherAssignments: newRole === 'teacher' ? formData.teacherAssignments : []
+                                teacherAssignments: newRole === 'teacher' ? formData.teacherAssignments : [],
+                                children: newRole === 'parent' ? formData.children : [],
+                                parentCode: newRole === 'parent' ? formData.parentCode : ''
                               });
                               if (newRole !== 'student' && newRole !== 'teacher') {
                                 setClassSubjects([]);
@@ -1793,6 +2064,7 @@ const ManageUsers = () => {
                           >
                             <option value="student">Student</option>
                             <option value="teacher">Teacher</option>
+                            <option value="parent">Parent</option>
                             <option value="admin">Admin</option>
                             {canCreateAdmin() && <option value="super_admin">Super Admin</option>}
                           </select>
@@ -1846,11 +2118,12 @@ const ManageUsers = () => {
                       </div>
                     </div>
 
-                    {/* Role-specific Information */}
-                    {(formData.role === 'student' || formData.role === 'teacher') && (
+                    {/* Role-specific Information - UPDATED WITH PARENT SECTION */}
+                    {(formData.role === 'student' || formData.role === 'teacher' || formData.role === 'parent') && (
                       <div style={styles.formSection}>
                         <h4 style={styles.sectionTitle}>
-                          {formData.role === 'student' ? 'Student Information' : 'Teacher Information'}
+                          {formData.role === 'student' ? 'Student Information' : 
+                           formData.role === 'teacher' ? 'Teacher Information' : 'Parent Information'}
                         </h4>
                         
                         {formData.role === 'student' && (
@@ -1881,40 +2154,42 @@ const ManageUsers = () => {
                           </div>
                         )}
                         
-                        <div style={styles.formGroup}>
-                          <label style={styles.formLabel}>
-                            {formData.role === 'teacher' ? 'Primary Class (Optional)' : 'Class *'}
-                            {loadingClasses && (
-                              <span style={styles.loadingText}>
-                                Loading classes...
-                              </span>
-                            )}
-                          </label>
-                          <select
-                            value={formData.class}
-                            onChange={(e) => handleClassChange(e.target.value)}
-                            required={formData.role === 'student'}
-                            disabled={loadingClasses}
-                            style={{
-                              ...styles.formInput,
-                              backgroundColor: loadingClasses ? '#F5F7FA' : '#FFFFFF'
-                            }}
-                          >
-                            <option value="">
-                              {loadingClasses ? 'Loading classes...' : 'Select Class'}
-                            </option>
-                            {classes.map(cls => (
-                              <option key={cls._id} value={cls._id}>
-                                {cls.name}
+                        {(formData.role === 'student' || formData.role === 'teacher') && (
+                          <div style={styles.formGroup}>
+                            <label style={styles.formLabel}>
+                              {formData.role === 'teacher' ? 'Primary Class (Optional)' : 'Class *'}
+                              {loadingClasses && (
+                                <span style={styles.loadingText}>
+                                  Loading classes...
+                                </span>
+                              )}
+                            </label>
+                            <select
+                              value={formData.class}
+                              onChange={(e) => handleClassChange(e.target.value)}
+                              required={formData.role === 'student'}
+                              disabled={loadingClasses}
+                              style={{
+                                ...styles.formInput,
+                                backgroundColor: loadingClasses ? '#F5F7FA' : '#FFFFFF'
+                              }}
+                            >
+                              <option value="">
+                                {loadingClasses ? 'Loading classes...' : 'Select Class'}
                               </option>
-                            ))}
-                          </select>
-                          {formData.role === 'teacher' && (
-                            <small style={styles.helpText}>
-                              Primary class for timetable purposes
-                            </small>
-                          )}
-                        </div>
+                              {classes.map(cls => (
+                                <option key={cls._id} value={cls._id}>
+                                  {cls.name}
+                                </option>
+                              ))}
+                            </select>
+                            {formData.role === 'teacher' && (
+                              <small style={styles.helpText}>
+                                Primary class for timetable purposes
+                              </small>
+                            )}
+                          </div>
+                        )}
 
                         {formData.role === 'student' && (
                           <>
@@ -2011,6 +2286,122 @@ const ManageUsers = () => {
                               </button>
                             </div>
                           </div>
+                        )}
+
+                        {/* NEW: Parent Specific Fields */}
+                        {formData.role === 'parent' && (
+                          <>
+                            <div style={styles.formGroup}>
+                              <label style={styles.formLabel}>Parent Code</label>
+                              <input
+                                type="text"
+                                placeholder="Auto-generated"
+                                value={formData.parentCode || 'Will be auto-generated'}
+                                readOnly
+                                style={{...styles.formInput, backgroundColor: '#F5F7FA'}}
+                              />
+                              <small style={styles.helpText}>
+                                Unique code for linking children (auto-generated)
+                              </small>
+                            </div>
+                            
+                            <div style={styles.formGroup}>
+                              <label style={styles.formLabel}>Notification Preferences</label>
+                              <div style={styles.notificationPreferencesGrid}>
+                                <label style={styles.checkboxLabel}>
+                                  <input
+                                    type="checkbox"
+                                    checked={formData.notificationPreferences?.email !== false}
+                                    onChange={(e) => setFormData(prev => ({
+                                      ...prev,
+                                      notificationPreferences: {
+                                        ...prev.notificationPreferences,
+                                        email: e.target.checked
+                                      }
+                                    }))}
+                                  />
+                                  <span>Email Notifications</span>
+                                </label>
+                                
+                                <label style={styles.checkboxLabel}>
+                                  <input
+                                    type="checkbox"
+                                    checked={formData.notificationPreferences?.sms || false}
+                                    onChange={(e) => setFormData(prev => ({
+                                      ...prev,
+                                      notificationPreferences: {
+                                        ...prev.notificationPreferences,
+                                        sms: e.target.checked
+                                      }
+                                    }))}
+                                  />
+                                  <span>SMS Notifications</span>
+                                </label>
+                              </div>
+                              
+                              <div style={styles.formGroup}>
+                                <label style={styles.formLabel}>Notification Frequency</label>
+                                <select
+                                  value={formData.notificationPreferences?.frequency || 'immediate'}
+                                  onChange={(e) => setFormData(prev => ({
+                                    ...prev,
+                                    notificationPreferences: {
+                                      ...prev.notificationPreferences,
+                                      frequency: e.target.value
+                                    }
+                                  }))}
+                                  style={styles.formInput}
+                                >
+                                  <option value="immediate">Immediate</option>
+                                  <option value="daily">Daily Digest</option>
+                                  <option value="weekly">Weekly Digest</option>
+                                </select>
+                              </div>
+                            </div>
+                            
+                            {/* Linked Children Section */}
+                            <div style={styles.formGroup}>
+                              <label style={styles.formLabel}>Linked Children</label>
+                              <div style={styles.linkedChildrenSection}>
+                                {formData.children && formData.children.length > 0 ? (
+                                  <div style={styles.linkedChildrenList}>
+                                    {formData.children.map((child, index) => (
+                                      <div key={index} style={styles.childItem}>
+                                        <div style={styles.childInfo}>
+                                          <span style={styles.childName}>
+                                            {child.firstName} {child.lastName}
+                                          </span>
+                                          <span style={styles.childDetails}>
+                                            {child.studentId} • {child.className}
+                                          </span>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => unlinkChild(child._id)}
+                                          style={styles.unlinkButton}
+                                        >
+                                          <FiXCircle /> Unlink
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p style={{ color: '#718096', fontStyle: 'italic' }}>
+                                    No children linked yet. Parents can link children using their parent code.
+                                  </p>
+                                )}
+                                
+                                {/* Search and Link Child Button */}
+                                <button
+                                  type="button"
+                                  onClick={() => setChildLinkModal(prev => ({ ...prev, open: true }))}
+                                  style={styles.linkChildButton}
+                                >
+                                  <FiPlus /> Link Child
+                                </button>
+                              </div>
+                            </div>
+                          </>
                         )}
                       </div>
                     )}
@@ -2188,12 +2579,103 @@ const ManageUsers = () => {
             </div>
           </div>
         )}
+
+        {/* NEW: Child Link Modal */}
+        {childLinkModal.open && (
+          <div style={styles.modalOverlay}>
+            <div style={{...styles.modalContent, maxWidth: '700px', maxHeight: '80vh'}}>
+              <div style={styles.modalHeader}>
+                <h3 style={{color: '#2D3748', margin: 0}}>Link Children to Parent</h3>
+                <button onClick={closeChildLinkModal} style={styles.modalCloseButton}>
+                  <FiX />
+                </button>
+              </div>
+              
+              <div style={styles.modalBody}>
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Search for Children</label>
+                  <div style={styles.searchBox}>
+                    <FiSearch style={styles.searchIcon} />
+                    <input
+                      type="text"
+                      placeholder="Search by student name, ID, or email..."
+                      value={childLinkModal.searchTerm}
+                      onChange={(e) => setChildLinkModal(prev => ({ ...prev, searchTerm: e.target.value }))}
+                      onKeyUp={(e) => {
+                        if (e.key === 'Enter') searchChildrenToLink();
+                      }}
+                      style={styles.searchInput}
+                    />
+                    <button
+                      onClick={searchChildrenToLink}
+                      style={styles.searchButton}
+                    >
+                      Search
+                    </button>
+                  </div>
+                </div>
+
+                {childLinkModal.searchResults.length > 0 && (
+                  <div style={styles.formGroup}>
+                    <label style={styles.formLabel}>
+                      Select Children ({childLinkModal.selectedChildren.length} selected)
+                    </label>
+                    <div style={styles.searchResultsContainer}>
+                      {childLinkModal.searchResults.map((child) => (
+                        <label key={child._id} style={styles.searchResultItem}>
+                          <input
+                            type="checkbox"
+                            checked={childLinkModal.selectedChildren.some(c => c._id === child._id)}
+                            onChange={() => toggleChildSelection(child)}
+                            disabled={child.isLinked}
+                          />
+                          <div style={styles.searchResultContent}>
+                            <div style={styles.searchResultHeader}>
+                              <strong>{child.firstName} {child.lastName}</strong>
+                              {child.isLinked && (
+                                <span style={styles.alreadyLinkedBadge}>Already Linked</span>
+                              )}
+                            </div>
+                            <div style={styles.searchResultDetails}>
+                              <span>ID: {child.studentId || 'N/A'}</span>
+                              <span>Class: {child.className}</span>
+                              <span>Email: {child.email || 'N/A'}</span>
+                            </div>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {childLinkModal.searchTerm && childLinkModal.searchResults.length === 0 && (
+                  <div style={styles.noResultsMessage}>
+                    <p>No children found matching your search.</p>
+                  </div>
+                )}
+              </div>
+
+              <div style={styles.modalFooter}>
+                <button
+                  onClick={linkSelectedChildren}
+                  disabled={childLinkModal.selectedChildren.length === 0}
+                  style={styles.modalSubmitButton}
+                >
+                  <FiLink /> Link Selected Children ({childLinkModal.selectedChildren.length})
+                </button>
+                <button onClick={closeChildLinkModal} style={styles.modalCancelButton}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
 };
 
-// Styles (with added styles for image upload)
+// Styles - UPDATED WITH PARENT STYLES
 const styles = {
   container: {
     minHeight: '100vh',
@@ -2305,6 +2787,25 @@ const styles = {
       backgroundColor: '#B7791F',
       transform: 'translateY(-2px)',
       color: 'white'
+    }
+  },
+  createParentButton: {
+    padding: '10px 20px',
+    backgroundColor: '#805AD5',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '600',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    transition: 'all 0.2s',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+    '&:hover': {
+      backgroundColor: '#6B46C1',
+      transform: 'translateY(-2px)'
     }
   },
   exportButton: {
@@ -2429,6 +2930,22 @@ const styles = {
       outline: 'none',
       borderColor: '#3182CE',
       boxShadow: '0 0 0 3px rgba(49, 130, 206, 0.1)'
+    }
+  },
+  searchButton: {
+    position: 'absolute',
+    right: '8px',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    padding: '8px 16px',
+    backgroundColor: '#4B5320',
+    color: 'white',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    '&:hover': {
+      backgroundColor: '#3A4218'
     }
   },
   filterSelect: {
@@ -2590,6 +3107,24 @@ const styles = {
     minWidth: '70px',
     textAlign: 'center'
   },
+  parentCodeBadge: {
+    fontSize: '12px',
+    backgroundColor: '#E9D8FD',
+    color: '#553C9A',
+    padding: '4px 8px',
+    borderRadius: '4px',
+    fontWeight: '500',
+    display: 'inline-block'
+  },
+  childrenCountBadge: {
+    fontSize: '12px',
+    backgroundColor: '#BEE3F8',
+    color: '#2C5282',
+    padding: '4px 8px',
+    borderRadius: '4px',
+    fontWeight: '500',
+    display: 'inline-block'
+  },
   subjectsBadge: {
     fontSize: '12px',
     color: '#718096',
@@ -2676,6 +3211,51 @@ const styles = {
     borderRadius: '16px',
     fontWeight: '500'
   },
+  parentDetails: {
+    display: 'grid',
+    gap: '16px'
+  },
+  parentDetailItem: {
+    padding: '12px',
+    backgroundColor: '#F5F7FA',
+    borderRadius: '6px',
+    border: '1px solid #E2E8F0'
+  },
+  parentCodeValue: {
+    fontFamily: 'monospace',
+    backgroundColor: '#EDF2F7',
+    padding: '4px 8px',
+    borderRadius: '4px',
+    marginLeft: '8px'
+  },
+  linkedChildrenList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    marginTop: '8px'
+  },
+  childItem: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '8px',
+    backgroundColor: 'white',
+    border: '1px solid #E2E8F0',
+    borderRadius: '4px'
+  },
+  childName: {
+    fontWeight: '500',
+    color: '#2D3748'
+  },
+  childDetails: {
+    fontSize: '12px',
+    color: '#718096'
+  },
+  notificationPreferences: {
+    display: 'flex',
+    gap: '12px',
+    marginTop: '8px'
+  },
   statusBadge: {
     padding: '4px 8px',
     borderRadius: '4px',
@@ -2687,7 +3267,8 @@ const styles = {
   },
   actionButtons: {
     display: 'flex',
-    gap: '8px'
+    gap: '8px',
+    flexWrap: 'wrap'
   },
   viewButton: {
     padding: '6px 12px',
@@ -2722,6 +3303,40 @@ const styles = {
       backgroundColor: '#B7791F',
       transform: 'translateY(-2px)',
       color: 'white'
+    }
+  },
+  parentPortalButton: {
+    padding: '6px 12px',
+    backgroundColor: '#805AD5',
+    color: 'white',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    transition: 'all 0.2s',
+    '&:hover': {
+      backgroundColor: '#6B46C1',
+      transform: 'translateY(-2px)'
+    }
+  },
+  generateCodeButton: {
+    padding: '6px 12px',
+    backgroundColor: '#38A169',
+    color: 'white',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    transition: 'all 0.2s',
+    '&:hover': {
+      backgroundColor: '#2F855A',
+      transform: 'translateY(-2px)'
     }
   },
   deleteButton: {
@@ -2859,19 +3474,13 @@ const styles = {
       transform: 'translateY(-2px)'
     }
   },
-  // UPDATED: Image Upload Styles (from createadmin.js)
+  // Image Upload Styles
   imageUploadSection: {
     marginBottom: '24px',
     padding: '20px',
     backgroundColor: '#F5F7FA',
     borderRadius: '8px',
     border: '1px solid #E2E8F0'
-  },
-  imageUploadHelp: {
-    color: '#718096',
-    fontSize: '14px',
-    marginBottom: '16px',
-    fontStyle: 'italic'
   },
   imageUploadContainer: {
     display: 'flex',
@@ -3163,6 +3772,120 @@ const styles = {
       backgroundColor: '#3A4218',
       transform: 'translateY(-2px)'
     }
+  },
+  // NEW: Parent form styles
+  notificationPreferencesGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+    gap: '12px',
+    marginBottom: '16px'
+  },
+  checkboxLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontSize: '14px',
+    cursor: 'pointer'
+  },
+  linkedChildrenSection: {
+    border: '1px solid #E2E8F0',
+    borderRadius: '6px',
+    padding: '16px',
+    backgroundColor: '#FAFAFA'
+  },
+  linkedChildrenList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    marginBottom: '12px'
+  },
+  childInfo: {
+    flex: 1
+  },
+  unlinkButton: {
+    padding: '4px 8px',
+    fontSize: '12px',
+    backgroundColor: '#FED7D7',
+    color: '#9B2C2C',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    '&:hover': {
+      backgroundColor: '#FEB2B2'
+    }
+  },
+  linkChildButton: {
+    width: '100%',
+    padding: '10px',
+    backgroundColor: '#4B5320',
+    color: 'white',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    marginTop: '12px',
+    '&:hover': {
+      backgroundColor: '#3A4218'
+    }
+  },
+  searchResultsContainer: {
+    maxHeight: '300px',
+    overflowY: 'auto',
+    border: '1px solid #E2E8F0',
+    borderRadius: '4px',
+    backgroundColor: 'white'
+  },
+  searchResultItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '12px',
+    borderBottom: '1px solid #E2E8F0',
+    cursor: 'pointer',
+    '&:hover': {
+      backgroundColor: '#F5F7FA'
+    },
+    '&:last-child': {
+      borderBottom: 'none'
+    }
+  },
+  searchResultContent: {
+    flex: 1
+  },
+  searchResultHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '4px'
+  },
+  alreadyLinkedBadge: {
+    fontSize: '10px',
+    backgroundColor: '#C6F6D5',
+    color: '#22543D',
+    padding: '2px 6px',
+    borderRadius: '10px',
+    fontWeight: '500'
+  },
+  searchResultDetails: {
+    display: 'flex',
+    gap: '12px',
+    fontSize: '12px',
+    color: '#718096'
+  },
+  noResultsMessage: {
+    padding: '20px',
+    textAlign: 'center',
+    color: '#718096',
+    backgroundColor: '#F5F7FA',
+    borderRadius: '4px',
+    marginTop: '16px'
   },
   formActions: {
     display: 'flex',

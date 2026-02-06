@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom';
 import syntraLogo from "../uploads/syntra.jpeg";
 import backgroundImage from "../uploads/students.jpg";
 
-
 const Login = () => {
   const { login, user } = useContext(AuthContext);
   const navigate = useNavigate();
@@ -32,7 +31,11 @@ const Login = () => {
       case 'super_admin':
         navigate('/admin');
         break;
+      case 'parent': // NEW: Added parent case
+        navigate('/parent/dashboard');
+        break;
       default:
+        console.warn('Unknown role:', role);
         break;
     }
   };
